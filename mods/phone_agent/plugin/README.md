@@ -122,7 +122,7 @@ Dart 测试覆盖通道参数、默认值、错误映射、超时、`clearScreen
 
 - 真机截图、节点点击、文本输入、滑动和旋转/切窗行为需要在 API 30+ 设备上验证；本插件开发环境只完成编译和单元测试。`AccessibilityService` 手势回调、锁屏/息屏、服务中断和真实 `takeScreenshot` 没有 JVM 单元测试覆盖。
 - 读树依赖目标应用的 `AccessibilityNodeInfo` IPC。极端情况下单次读树可能被目标应用阻塞；通道超时会让模型收到错误，但原生 worker 只能等待该调用返回，随后按队列超时跳过积压请求。
-- 整屏 `AccessibilityService.takeScreenshot(Display.DEFAULT_DISPLAY)` 不保证对 `FLAG_SECURE` 报错：官方 `TakeScreenshotCallback.onFailure` 文档列出的错误码不含 `ERROR_TAKE_SCREENSHOT_SECURE_WINDOW`；该码是 API 34+ 窗口级 `takeScreenshotOfWindow` 的错误，AOSP 整屏路径没有 secure 检查。API35 模拟器实测同 UID/不同 UID 的 secure 夹具都返回成功黑图。插件不根据像素猜 secure，不承诺不发送黑图，正常黑色页面保留；平台明确报错时仍映射为 `screenshot_blocked`，不发送图片。
+- 整屏 `AccessibilityService.takeScreenshot(Display.DEFAULT_DISPLAY)` 不保证对 `FLAG_SECURE` 报错：官方 `TakeScreenshotCallback.onFailure` 文档列出的错误码不含 `ERROR_TAKE_SCREENSHOT_SECURE_WINDOW`；该码是 API 34+ 窗口级 `takeScreenshotOfWindow` 的错误，AOSP 整屏路径没有 secure 检查。API35 模拟器实测同 UID/不同 UID 的 secure 夹具曾返回成功黑图，也观察到成功内容图；插件不根据像素猜 secure，不承诺不发送黑图，正常黑色页面保留；平台明确报错时仍映射为 `screenshot_blocked`，不发送图片。
 - secure 窗口的树在 API35 夹具上可读，但不是绝对保证；密码字段、自定义 View 和窗口变化仍会影响树。
 - 密码遮挡依赖应用正确标记 `isPassword`；自定义 View 和 WebView 可能遗漏，只能称为尽力而为。
 - 白名单只限制输入，不限制读树和截图；白名单应用内部仍可能发生不可逆业务操作。

@@ -4,9 +4,9 @@
 
 - 当前阶段：第二阶段验收进行中（UI/选择契约改造已完成），Mod 版本 0.2.0。
 - 上一轮修正（节点重验）：`PhoneNode.fingerprint()` 不再包含 `isFocused` 和动作集合 `actions`；同一已刷新节点因点击/输入产生的焦点变化和动作增减不再让后续 `set_text` 返回 `stale_handle`；`isSelected`、内容、稳定能力字段、窗口/包名/尺寸/旋转和 120 秒 TTL 校验保持不变。指纹为结构化字段列表，`stale_handle` 只附带固定字段名，不从节点内容反解字段名。契约见 6.5.1。
-- 当前 M10（API35 FLAG_SECURE/异常路径）：最终源码 `modsetHash` `2c1513ecef3f229321cbd6e3b59280f46e3073715bd93c0c65fd486b11321b8a`，合成树 `V:/coding/kelivo-private/.tower/worktrees/wt-10/.build/worktrees/2c1513ecef3f2293`，`plan`/`verify` 通过；完整异常套件 `+5 ~1`、EXIT=0；权限窗口未验证；API35/API29 官方测试各 2 项通过。契约和结果见 9.3.1。
+- 当前 M10（API35 FLAG_SECURE/异常路径）：最终源码 `modsetHash` `5b1cde0304e687b9e3a26935cf85b5a27d102c9ecb409ff0e8b1358075aa902d`，合成树 `V:/coding/kelivo-private/.tower/worktrees/wt-10/.build/worktrees/5b1cde0304e687b9`，`plan`/`verify` 通过；完整异常套件 `+5 ~1`、EXIT=0；权限窗口未验证；API35/API29 官方测试各 2 项通过。契约和结果见 9.3.1。
 - 上一轮 magpie VLM 验收（历史，API35 模拟器）：使用当时的 debug APK 和用户指定的 magpie 网关模型 `llama-cpp/llama-cpp`（provider `http://10.0.2.2:3425/v1`，UI Image + Tools；局域网访问由用户开启，未读取或记录密钥）完成真实图片链路、Kelivo 应用内固定任务和跨新用户轮次历史图片回放。证据见 9.4。该轮的合成树 `5f0be65f...` 和 APK 181369230 字节是历史记录，不代表当前实现。
-- 当前产品 debug APK（M10，同一最终树显式构建）：`V:/coding/kelivo-private/.tower/worktrees/wt-10/.build/worktrees/2c1513ecef3f2293/build/app/outputs/flutter-apk/app-debug.apk`，**187,211,507 字节**，SHA-256 `1af6ef2e92e4b3f3922b465a9f24425d0eb84514e15066d9c9c2c5f68934a10a`；debug merged manifest 含 `SecureWindowFixtureActivity`，release merged manifest 不含该夹具（不宣称签名 release）。
+- 当前产品 debug APK（M10，同一最终树显式构建）：`V:/coding/kelivo-private/.tower/worktrees/wt-10/.build/worktrees/5b1cde0304e687b9/build/app/outputs/flutter-apk/app-debug.apk`，**181,373,590 字节**，SHA-256 `581d56fc03fe716c768f2554015115bffd8e2b0d610c71e74f5d3b21524703a3`；debug merged manifest 含 `SecureWindowFixtureActivity`，release merged manifest 不含该夹具（不宣称签名 release）。
 - 上一轮自动检查（历史）：Loader 165、Phone Agent 105、Mods 16、settings 入口 2、上游 `tool_result_content` 回归、插件 Dart 17、插件 Kotlin 66 和上游 PhoneControl 49；本轮 M10 只改测试/文档，未重复这些静态套件，新增聚焦工具测试 32 项通过。
 - 上一轮节点重验合成树（历史）：`V:/coding/kelivo-private/.tower/worktrees/wt-1/.build/worktrees/7593c21b5f9da01f`，`modsetHash` 为 `7593c21b5f9da01fb8b8c4dfe167d892a940efe4a1caf591b772fbe83b6b6f7d`；当时 Phone Agent 103、Mods 16、settings 入口 2、插件 Dart 17、插件 Kotlin 66、上游 PhoneControl 49 通过。
 - 本地化：23 个键已由本机免费 Magpie llama-cpp 翻译，`translate.py check` 四个目标语言（ko、ru、tr、zh_Hant）均 0 pending；本轮无 UI/ARB 改动，未重跑翻译生成。
@@ -660,11 +660,11 @@ adb -s emulator-5554 install -r <临时项目目录>/app/build/outputs/apk/debug
 
 测试场景与精确断言：
 
-- FLAG_SECURE：普通截图成功 → 不同 UID 夹具前台（树出现 `PHONE_AGENT_SECURE_FIXTURE`，包名为 `com.kelivo.phoneagent.securefixture`）→ 截图分两种断言：若平台明确报错，断言 `tool_error` / `screenshot_blocked`、`metadata == null`、content 不含 `![](`、`data:image` 或 `image` 键；若成功，断言 `ok:true`、`package_name` 为夹具、图片为黑图（平均 RGB < 10），记录 `PHONE_AGENT_SECURE_PLATFORM_BLACK_IMAGE`。secure 期间断言读树仍成功（API35 实测可读，但不是绝对保证）→ 切到同包夹具使基线截图失效，坐标 `tap` 返回 `stale_observation` → 不同 UID 夹具清除 flag 并等待 ≥1.2 秒后截图成功，解码 PNG 断言非全黑且夹具纯色占比 >5% → 返回应用后新树/新截图成功。
+- FLAG_SECURE：普通截图成功 → 不同 UID 夹具前台（树出现 `PHONE_AGENT_SECURE_FIXTURE`，包名为 `com.kelivo.phoneagent.securefixture`）→ 截图分两种断言：若平台明确报错，断言 `tool_error` / `screenshot_blocked`、`metadata == null`、content 不含 `![](`、`data:image` 或 `image` 键；若成功，断言 `ok:true`、`package_name` 为夹具、图片可解码，并记录平台行为：平均亮度 <10 时打印 `PHONE_AGENT_SECURE_PLATFORM_BLACK_IMAGE`，否则打印 `PHONE_AGENT_SECURE_PLATFORM_CONTENT_IMAGE`；不要求全黑，不把黑图当安全检测。secure 期间断言读树仍成功（API35 实测可读，但不是绝对保证）→ 切到同包夹具使基线截图失效，坐标 `tap` 返回 `stale_observation` → 不同 UID 夹具清除 flag 并等待 ≥1.2 秒后截图成功，解码 PNG 断言非全黑且夹具纯色占比 >5% → 返回应用后新树/新截图成功。
 
-历史严格预期与本轮修订：早期任务要求 secure 截图必须返回 `screenshot_blocked`；API35 实测同 UID/不同 UID 都返回成功黑图，严格测试失败。经用户同意，契约改为文档化行为：平台明确报错时无图片；成功黑图记录为平台行为，不当作安全检测。该历史失败保留，不删除。
+历史严格预期与本轮修订：早期任务要求 secure 截图必须返回 `screenshot_blocked`；API35 实测同 UID/不同 UID 都曾返回成功黑图（后续也观察到成功内容图），严格测试失败。经用户同意，契约改为文档化行为：平台明确报错时无图片；成功黑图或内容图记录为平台行为，不当作安全检测。该历史失败保留，不删除。
 
-本轮实际结果（最终源码 `modsetHash` `2c1513ecef3f229321cbd6e3b59280f46e3073715bd93c0c65fd486b11321b8a`，合成树 `.build/worktrees/2c1513ecef3f2293`）：
+本轮实际结果（最终源码 `modsetHash` `5b1cde0304e687b9e3a26935cf85b5a27d102c9ecb409ff0e8b1358075aa902d`，合成树 `.build/worktrees/5b1cde0304e687b9`）：
 
 - API35 完整异常套件（最终树）：**`+5 ~1`，`All tests passed!`，EXIT=0**。通过：FLAG_SECURE 截图行为与恢复、旋转、home/recents、锁屏、服务禁用/重启；跳过：权限窗口（明确未验证）。
 - API35 `FLAG_SECURE 截图行为与恢复`：实际截图 `ok:true`、`image 713x1600`、`package_name=com.kelivo.phoneagent.securefixture`；本轮记录 `PHONE_AGENT_SECURE_PLATFORM_BLACK_IMAGE`（平均 RGB 约 2,0,2）。上一轮同一夹具曾返回成功内容图（平均亮度约 191），因此契约只承诺“可能黑化”，不保证黑图；测试记录黑图/内容图两种平台行为。secure 期间树可读；同包切窗后旧坐标返回 `stale_observation`；清除 flag 后恢复非黑夹具截图（纯色占比 >5%）。
@@ -673,14 +673,14 @@ adb -s emulator-5554 install -r <临时项目目录>/app/build/outputs/apk/debug
 - 历史失败（保留）：`41e33b6f115e54bc` 完整套件为 `+2 ~1 -3`、EXIT=1；secure（切同包夹具只等文本未等包名，旧坐标得到 `package_not_allowed`）、锁屏（host driver 漏处理 lock 标记）、服务（未在窗口内完成系统 UI 禁用）失败。修正测试辅助与 host 协调后，最终树完整套件 `+5 ~1`、EXIT=0。
 - API35 官方 `phone_agent_test.dart`：**2 项通过，EXIT=0**。
 - API29 官方 `phone_agent_test.dart`：**2 项通过，EXIT=0**；截图返回 `unsupported_os`，树/节点输入回归通过。
-- 最终产品 debug APK（同一最终树显式 `flutter build apk --debug`）：**187,211,507 字节**，SHA-256 `1af6ef2e92e4b3f3922b465a9f24425d0eb84514e15066d9c9c2c5f68934a10a`；debug merged manifest 含 `SecureWindowFixtureActivity`，release merged manifest 不含该夹具（不宣称签名 release）。
+- 最终产品 debug APK（同一最终树显式 `flutter build apk --debug`）：**181,373,590 字节**，SHA-256 `581d56fc03fe716c768f2554015115bffd8e2b0d610c71e74f5d3b21524703a3`；debug merged manifest 含 `SecureWindowFixtureActivity`，release merged manifest 不含该夹具（不宣称签名 release）。
 - 权限窗口：最终树完整套件明确跳过（90 秒内未检测到 permissioncontroller 前台），**未验证**，不写成通过。
 - 未验证：物理 API30+ 真机、签名 release、原生超时、权限窗口、`stale_handle` 根因。
 - 旋转：旧树句柄 `tap` 返回 `stale_handle`；旧截图坐标 `tap` 返回 `stale_observation`；旋转后新树/新截图成功；转回后恢复。
 - home/recents：执行后读树取实际前台包名；`com.android.systemui` 断言 `system_window_denied`，其他非白名单包断言 `package_not_allowed`，空包名或未知包名直接失败。`back` 同样被拒，证明 home/recents 后需要宿主恢复。
 - 权限窗口：夹具请求权限后，前台包名必须属于 `com.android.permissioncontroller` / `com.google.android.permissioncontroller`，输入返回 `system_window_denied`；弹窗未出现时记录为未验证，不写成通过。
 - 锁屏：宿主息屏再亮屏停在锁屏后，读树/截图/输入返回 `device_locked`，`status().ready` 仍为 true；解锁后旧句柄 `stale_handle`，新树/新截图成功。
-- 服务禁用/中断：宿主在系统界面关闭服务后，循环调用必须在 35 秒内完成，至少一次返回 `interrupted` 或 `service_unavailable`，不得返回 `timeout`；`status().enabled == false` 且 `ready == false`；重新启用后旧句柄 `stale_handle`，新树/新截图成功。
+- 服务禁用/中断：测试先建立 Settings 观测并启动一批有界只读 `readTree(offset:1)` 请求，保留同一批 Future；宿主在 pending 时通过系统 UI 关闭服务；等待原 Future 在 35 秒内完成，至少一个返回 `interrupted` 或 `service_unavailable`，不得返回 `timeout`；`status().enabled == false` 且 `ready == false`；重新启用后旧句柄 `stale_handle`，新树/新截图成功。
 
 边界：
 
@@ -701,7 +701,9 @@ adb -s emulator-5554 install -r <临时项目目录>/app/build/outputs/apk/debug
 
 ### 9.4 VLM 图片链路与固定任务验收（API 35 模拟器，magpie `llama-cpp/llama-cpp`）
 
-本轮在 API 35 模拟器 `emulator-5554`（Android 15，内部屏幕 1080x2424）使用产品 debug APK（181369230 字节，SHA-256 `3ea30ee9b46342305cf11e0574b76def9a42f23abe62dd3536b664dc4ec5caeb`）和用户指定的 magpie 网关模型完成真实聊天、图片链路、Kelivo 应用内固定任务和跨新用户轮次历史图片回放。本轮未修改产品代码、`mod.json`、schema、节点指纹或插件行为，未重建 APK。
+以下为上一轮 VLM 验收历史记录，不代表当前 M10 实现；当前 M10 的 FLAG_SECURE/异常路径结果见 9.3.1。
+
+该轮在 API 35 模拟器 `emulator-5554`（Android 15，内部屏幕 1080x2424）使用产品 debug APK（181369230 字节，SHA-256 `3ea30ee9b46342305cf11e0574b76def9a42f23abe62dd3536b664dc4ec5caeb`）和用户指定的 magpie 网关模型完成真实聊天、图片链路、Kelivo 应用内固定任务和跨新用户轮次历史图片回放。该轮未修改产品代码、`mod.json`、schema、节点指纹或插件行为，未重建 APK。
 
 环境与适用范围：
 
@@ -742,10 +744,10 @@ adb -s emulator-5554 install -r <临时项目目录>/app/build/outputs/apk/debug
 证据边界：
 
 - 跨用户轮次历史图片回放已通过，不再列为未验证；同轮工具循环回放见证据 A（REQ28）。
-- 本轮未使用坐标动作完成任务；坐标手势的 UI 效果仍受 integration_test 绑定限制，未在物理 API 30+ 真机验证。
-- 本轮没有确认私有 Mod 硬缺陷；上述一次 `stale_handle` 证据有限，根因未查明。契约内的可恢复错误不写成产品假成功。
-- 仍明确未验证：物理 API 30+ 真机的 VLM 固定任务与坐标手势 UI 效果、真实 `FLAG_SECURE`、真机旋转/切窗/锁屏/禁用服务/超时等其他异常路径、签名 release。
-- 本轮只验证 magpie `llama-cpp/llama-cpp` 与 API 35 模拟器，不承诺任意模型或设备。
+- 该轮未使用坐标动作完成任务；坐标手势的 UI 效果仍受 integration_test 绑定限制，未在物理 API 30+ 真机验证。
+- 该轮没有确认私有 Mod 硬缺陷；上述一次 `stale_handle` 证据有限，根因未查明。契约内的可恢复错误不写成产品假成功。
+- 该轮仍明确未验证：物理 API 30+ 真机的 VLM 固定任务与坐标手势 UI 效果、签名 release；真实 `FLAG_SECURE`、旋转、home/recents、锁屏、服务禁用/重启已由后续 M10 在 API35 模拟器补充（见 9.3.1），但不代表物理 API30+ 或其他 Android 版本。
+- 该轮只验证 magpie `llama-cpp/llama-cpp` 与 API 35 模拟器，不承诺任意模型或设备。
 - 文档只记录脱敏后的请求形态和尺寸/长度，不记录 provider 密钥、完整会话文本或截图字节。
 
 #### 9.4.1 上一轮 LM Studio 补充环境（历史结果）
