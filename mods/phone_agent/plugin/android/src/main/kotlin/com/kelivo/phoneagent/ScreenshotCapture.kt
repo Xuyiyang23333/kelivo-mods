@@ -391,7 +391,14 @@ internal class ScreenshotCapture(
         private const val MAX_MASK_NODES = 2500
         private const val MAX_MASK_DEPTH = 40
 
-        /** 将 Android 截图错误码映射为模型可执行的结构化错误。 */
+        /**
+         * 将 Android 截图错误码映射为模型可执行的结构化错误。
+         *
+         * 当前整屏 takeScreenshot(Display.DEFAULT_DISPLAY) 路径不会发出
+         * ERROR_TAKE_SCREENSHOT_SECURE_WINDOW；该码是 API 34+ 窗口级
+         * takeScreenshotOfWindow 的错误。FLAG_SECURE 窗口可能在成功截图中
+         * 以黑色区域出现，这里不做像素猜测，也不承诺检测 secure window。
+         */
         internal fun mapError(errorCode: Int): PhoneAgentError = when (errorCode) {
             AccessibilityService.ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT ->
                 PhoneAgentError(
@@ -408,6 +415,7 @@ internal class ScreenshotCapture(
                     "screenshot_blocked",
                     "The display is not available for screenshots.",
                 )
+            // 保留窗口级 API 的错误映射；整屏 takeScreenshot 当前不会发出此码。
             AccessibilityService.ERROR_TAKE_SCREENSHOT_SECURE_WINDOW ->
                 PhoneAgentError(
                     "screenshot_blocked",

@@ -80,6 +80,14 @@
 - 模型坐标统一为 `[0, 1]` 归一化坐标，原点为截图左上角。
 - 截图复用 Kelivo 现有 `ClientToolResult` 与 `McpImageSnapshot` 链路，不修改 provider 序列化。
 - 首版只在显式测试包名中开放输入，不操作支付、社交等敏感应用。私有测试应用使用 `com.psyche.kelivo.phoneagent` 和启动名称 `Kelivo Agent`，不得覆盖设备已安装的上游 Kelivo。
+- 输入边界必须精确表述：`system_window_denied` 和 `package_not_allowed` 只约束输入；读树和截图不检查包名，仍可观察当前前台窗口。`FLAG_SECURE` 只阻止截图，不阻止读树和输入。`device_locked` 同时约束读树、截图和输入。
+- 整屏 `AccessibilityService.takeScreenshot(Display.DEFAULT_DISPLAY)` 不保证对 `FLAG_SECURE` 报错：secure 内容可能以黑色区域出现在成功截图中。不得根据像素猜 secure、不得承诺不发送黑图；正常黑色页面保留。平台明确报错时返回 `screenshot_blocked`，不得发送图片或图片 metadata；成功黑图只作为普通截图，工具描述要求优先读树、不凭黑图猜坐标。
+- secure 窗口的树在 API35 夹具上可读，但不是绝对保证；密码字段、自定义 View、窗口变化仍会影响树；非白名单输入仍被拒绝。
+- 输入错误码优先级固定为 `no_window` → `system_window_denied` → `package_not_allowed` → 白名单内句柄/截图校验；测试必须断言精确错误码，前台包名未知时失败，不能“只要报错就算通过”。
+- `home`/`recents` 后前台离开白名单，后续输入（包括 `back`）被拒绝，模型无法自行恢复；文档和测试必须记录需要用户或宿主切回测试应用。
+- 真实 `FLAG_SECURE`、权限弹窗和异常路径使用插件 `android/src/debug` 的 `SecureWindowFixtureActivity` 测试夹具：只新增 debug 源码和 manifest，不修改上游 `MainActivity`、`KelivoApplication`、`PhoneControlService`，不新增上游补丁或 `touches`，release 不编译、不合并。夹具只请求上游已声明的权限用于拉起系统窗口，不授予、不录音、不使用其他敏感能力。
+- 异常集成测试的夹具启动、secure 切换、权限弹窗、锁屏和服务开关由宿主/CU 在打印标记后操作；测试只轮询并断言结果。禁止用 `settings put secure enabled_accessibility_services` 写授权；服务开关只走系统界面。
+- 原生截图、手势、插件通道和 worker 排队超时无法在设备上确定性触发时，只能由 Dart 注入超时测试覆盖工具层映射，不得伪造设备场景或写成真机证据。
 - 密码遮挡、节点校验、窗口校验和手势回调都有边界，不得在文档中写成绝对安全保证。
 - “发送、购买、删除前确认”不得被描述为原生可可靠识别的硬护栏。
 - 先更新本文件、`docs/phone-agent-plan.md` 和 `mods/phone_agent/README.md`，再修改代码、测试和 `mod.json`。最终验收结果以计划文档和 README 为准，未验证项不得写成已完成。
@@ -123,6 +131,16 @@ dart analyze --fatal-infos
 ```
 
 Phone Agent 的额外测试以 `docs/phone-agent-plan.md` 为准。path 插件测试不会被根包测试自动覆盖，必须单独运行。
+
+真实 `FLAG_SECURE` 和异常路径使用 debug-only 夹具，必须单独构建并运行：
+
+```bash
+flutter build apk --debug
+flutter test integration_test/phone_agent_test.dart -d <android-device-id>
+flutter test integration_test/phone_agent_exception_test.dart -d <android-device-id>
+```
+
+debug merged manifest 必须包含 `com.kelivo.phoneagent.SecureWindowFixtureActivity`；release 不包含该 Activity 只作为 debug/release 变体隔离检查，不等于签名 release 验证。异常套件的夹具启动、secure 切换、权限弹窗、锁屏和服务开关由宿主/CU 在打印标记后操作，测试只轮询并断言。
 
 Phone Agent UI/选择契约改造还必须在合成树中同步和检查 ARB：
 

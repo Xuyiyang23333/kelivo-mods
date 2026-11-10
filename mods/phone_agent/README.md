@@ -194,6 +194,8 @@ dart tool/mod_loader.dart clean --modset <完整哈希或 16 位前缀>
 
 截取当前画面，返回图片、图片尺寸、物理屏幕尺寸和前台包名。图片通过 Kelivo 现有的 `McpImageSnapshot` 与 `ClientToolResult` 链路进入工具循环，不修改 provider 序列化。原生先缩放到长边不超过 1600，再经通道传给 Dart；Dart 落盘后校验实际尺寸与原生声明一致，不一致则返回错误，且不更新坐标观测。API 29 返回 `unsupported_os`；树和节点输入不受影响，页面显示截图限制。
 
+整屏 `takeScreenshot` 不保证对 `FLAG_SECURE` 报错：secure 内容可能以黑色区域出现在成功截图中。工具不检测 secure window，也不根据像素猜黑图；正常黑色页面保留。黑图时优先读树，不要凭黑图猜坐标。平台明确报错时返回 `screenshot_blocked`，不发送图片或图片 metadata。
+
 ### `phone_agent_tree`
 
 按需读取无障碍节点，支持：
@@ -202,7 +204,7 @@ dart tool/mod_loader.dart clean --modset <完整哈希或 16 位前缀>
 - `max_nodes`：默认 120，范围 1–200，用于有界遍历和文本预算。
 - `interactive_only`：默认 false，只返回可交互节点。
 
-模型只看到 `n0`、`n1` 等短句柄。`isPassword` 节点及其子树文本不会进入结果。句柄默认 TTL 为 120 秒；服务断开、窗口/包名/尺寸/旋转变化都会使其失效。
+模型只看到 `n0`、`n1` 等短句柄。`isPassword` 节点及其子树文本不会进入结果。句柄默认 TTL 为 120 秒；服务断开、窗口/包名/尺寸/旋转变化都会使其失效。secure 窗口的树在 API35 夹具上可读，但不是绝对保证；密码字段、自定义 View 和窗口变化仍会影响树。截图黑化时优先读树。
 
 ### `phone_agent_input`
 
@@ -218,7 +220,9 @@ dart tool/mod_loader.dart clean --modset <完整哈希或 16 位前缀>
 
 指纹只判断“句柄是否仍指向同一个逻辑节点”：`isFocused` 和动作集合 `actions` 不进入指纹，因此点击或聚焦输入框后，同一已刷新节点仍可直接 `set_text`，动作是否可用仍由执行层按当前节点校验；`isSelected`、内容（text/description/hint/state）、稳定能力（enabled/editable/clickable/long-clickable/scrollable/checkable/checked）、password、类名、viewId、窗口、包名、尺寸、旋转和 120 秒 TTL 变化仍会让句柄失效。`stale_handle` 会附带发生变化的字段名（只含字段名，不含文本内容）。焦点或动作集合变化不失效不等于动作成功，原生 `performAction` 返回值仍只表示系统接受动作。
 
-坐标一律为 `[0, 1]` 归一化值，原点为截图左上角。模型不需要计算截图像素、物理像素或缩放比。坐标动作必须存在最近一次截图，否则返回 `screenshot_required`；截图与输入之间发生包名、窗口、尺寸或旋转变化时返回 `stale_observation`，不静默重试。
+坐标一律为 `[0, 1]` 归一化值，原点为截图左上角。模型不需要计算截图像素、物理像素或缩放比。坐标动作必须存在最近一次截图，否则返回 `screenshot_required`；截图与输入之间发生包名、窗口、尺寸或旋转变化时返回 `stale_observation`，不静默重试。secure 窗口可能产生黑图；不要用黑图坐标，改用 `phone_agent_tree` 的节点句柄。
+
+输入错误码优先级固定为：空包名 `no_window` → 系统包 `system_window_denied` → 非白名单包 `package_not_allowed` → 白名单内句柄/截图校验（`stale_handle` / `stale_observation`）。因此系统窗口或非白名单应用在前台时，即使句柄已失效，也先返回包名策略错误。`home`/`recents` 执行后前台会离开白名单，后续输入（包括 `back`）会被拒绝，模型无法自行回到测试应用，需要用户或宿主把应用切回前台。
 
 插件把原生结构化错误映射为 `PhoneAgentException(code, message)`。`phone_control_disabled` 已不再使用，统一改为 `phone_agent_disabled`。首版文档明确使用的错误码包括 `phone_agent_disabled`、`screenshot_required`、`stale_observation`、`stale_handle`、`rate_limited`、`screenshot_blocked`、`image_input_unsupported`、`unsupported_platform`、`timeout`、`plugin_unavailable`、`package_not_allowed`、`system_window_denied`、`device_locked` 和 `budget_exceeded`。其余错误码以适配层和插件返回为准。错误信息应给出可执行的下一步，例如重新截图、重新读树、在 Mods 页重新选择工具或请用户检查无障碍服务。
 
@@ -227,7 +231,8 @@ dart tool/mod_loader.dart clean --modset <完整哈希或 16 位前缀>
 首版只在显式配置的测试包名中开放输入，默认白名单只有私有测试应用的 `com.psyche.kelivo.phoneagent`。该应用与上游正式包 `com.psyche.kelivo` 并存，启动名称为 `Kelivo Agent`，不会覆盖设备上已安装的 Kelivo。白名单位于私有 Mod 的插件 Kotlin 实现中，开发者只能在本仓库修改，不通过设置页或运行时参数开放。
 
 - 非白名单包名下的输入请求返回 `package_not_allowed`，不执行手势或文本输入。
-- 系统窗口、权限弹窗和锁屏窗口会被拒绝，例如返回 `system_window_denied` 或 `device_locked`。
+- 系统窗口和权限弹窗下的输入请求返回 `system_window_denied`；锁屏/息屏时读树、截图和输入都返回 `device_locked`。
+- 白名单和系统窗口拒绝只约束输入；读树和截图仍可观察当前前台窗口，这是 VLM 需要的行为，不能写成“系统窗口不可读、不可截图”。
 - 白名单只限制输入目标，不代表应用内部操作安全；它不能识别“发送、购买、删除”等业务语义。
 
 ## 非视觉模型降级
@@ -246,7 +251,10 @@ dart tool/mod_loader.dart clean --modset <完整哈希或 16 位前缀>
 - 服务中断时完成所有 pending 请求，不再执行排队动作。
 - 截图、读树、手势和通道调用都有超时；每个生成 handler 最多派发 60 次 `phone_agent_input`，超限返回 `budget_exceeded`，原生另有限速。
 - 截图落盘、解码或尺寸校验失败时，适配层会尽力调用 `clearScreenshot` 清理原生坐标观测；清理失败不会覆盖原始截图错误。
-- 系统截图限频映射为 `rate_limited`，secure window 等失败映射为 `screenshot_blocked`，不发送黑图。
+- 系统限频映射为 `rate_limited`；平台明确返回的截图错误映射为 `screenshot_blocked`。整屏 `takeScreenshot` 不保证对 `FLAG_SECURE` 报错，secure 内容可能以黑色区域出现在成功截图中；不做像素启发式，不承诺不发送黑图，正常黑色页面保留。
+- 平台明确报错时不得把图片或图片 metadata 交给模型；成功黑图只作为普通截图，模型应优先读树、不凭黑图猜坐标。
+- `FLAG_SECURE` 只阻止截图，不隐藏无障碍树，也不阻止读树和输入；输入边界由包名白名单决定。secure 窗口的树在 API35 夹具上可读，但不是绝对保证。
+- debug 构建包含仅供测试的 `SecureWindowFixtureActivity`，用于权限弹窗、同包切窗和纯色像素校验；它不修改上游宿主文件，release 不编译、不合并。宿主侧不同 UID 的独立夹具 APK（`com.kelivo.phoneagent.securefixture`，不属于 Mod 交付）用于排除 UID 因素并验证文档化行为；API35 实测同 UID/不同 UID 都返回成功黑图，UID 不是原因。
 - Mods 页选择是工具配置，不是无障碍授权；两个服务各自授权、各自启停，Mod 不自动修改系统设置。
 
 这些是降低风险的技术措施，不是绝对安全保证。`performAction` 或手势回调只表示系统调用完成，不表示业务成功；节点校验不能消除所有竞态；已经发出的系统调用无法撤回。
@@ -288,7 +296,13 @@ flutter gen-l10n
 - 首版不支持 `list_apps`、`open_app`、通知栏、快捷设置、多显示器、折叠屏专项适配、MediaProjection 后备截图、树差分或跨观测稳定节点 ID。
 - 不支持 Shell、root、Shizuku、录屏或任意文件访问。
 - 不承诺任意应用、任意模型或任意任务的成功率。
-- `FLAG_SECURE` 的真实窗口测试需要可重复的安全测试界面；若只有错误映射单元测试，必须标记为“真机未验证”。
+- 整屏 `takeScreenshot` 不保证对 `FLAG_SECURE` 报错；secure 内容可能以黑色区域出现在成功截图中。不根据像素猜 secure，不承诺不发送黑图，正常黑色页面保留。
+- 平台明确报错时不得把图片或 metadata 交给模型；成功黑图只作为普通截图，模型应优先读树、不凭黑图猜坐标。
+- `FLAG_SECURE` 不阻止读树和输入；API35 夹具树可读，但不是绝对保证；密码字段、自定义 View、窗口变化仍会影响树；非白名单输入仍被拒绝。
+- `system_window_denied` / `package_not_allowed` 只约束输入；读树和截图仍可观察系统窗口、权限弹窗和其他应用。
+- `home`/`recents` 后前台离开白名单，后续输入（包括 `back`）被拒绝，模型无法自行恢复，需要用户或宿主切回测试应用。
+- `SecureWindowFixtureActivity` 只是 debug 测试夹具，不是产品能力；release 不包含该 Activity。
+- API35 模拟器已验证旋转、home/recents、锁屏、服务禁用/重启；物理 API30+ 真机和其他异常路径未验证；原生超时仍无法在设备上确定性触发。
 - VLM 图片链路、Kelivo 应用内固定任务和跨新用户轮次历史图片回放已在 API 35 模拟器用用户指定的 magpie `llama-cpp/llama-cpp` 验证；物理 API 30+ 真机 VLM 未验证；只验证该模型与模拟器，不承诺任意模型。
 - ARB 翻译质量依赖上游 l10n 工具和目标语言审查；新增键必须保持英文和中文源键集合一致。
 
@@ -385,7 +399,10 @@ cd android
 ```bash
 flutter build apk --debug
 flutter test integration_test/phone_agent_test.dart -d <android-device-id>
+flutter test integration_test/phone_agent_exception_test.dart -d <android-device-id>
 ```
+
+异常套件需要宿主/CU 在测试打印标记后启动 debug 夹具、切换 `FLAG_SECURE`、拉起权限弹窗、锁屏和开关无障碍服务；测试只轮询并断言结果，不写系统授权。夹具命令和场景见 `docs/phone-agent-plan.md` 9.3.1。
 
 真机至少需要确认：Manifest 合并后出现独立服务及 `canTakeScreenshot`，上游手机控制服务仍存在；Mods 页三态选择与真实工具暴露一致；截图与树为真实工具结果；节点点击、文本输入、滚动和坐标滑动真实生效；旋转、切窗、锁屏、禁用服务和超时返回结构化错误且不挂起；密码树结果不含秘密且截图对应区域已遮挡；日志无密码、截图字节和完整屏幕文本；原始 `phone_control` 单元测试与功能不受影响。
 

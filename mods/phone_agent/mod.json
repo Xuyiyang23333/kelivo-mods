@@ -56,6 +56,10 @@
       "to": "integration_test/phone_agent_test.dart"
     },
     {
+      "from": "overlay/integration_test/phone_agent_exception_test.dart",
+      "to": "integration_test/phone_agent_exception_test.dart"
+    },
+    {
       "from": "plugin",
       "to": "dependencies/kelivo_phone_agent"
     }

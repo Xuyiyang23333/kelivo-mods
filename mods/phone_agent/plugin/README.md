@@ -72,7 +72,7 @@ final Map<String, dynamic> result = await agent.input({
 - 截图前遍历 `service.windows` 中所有可访问窗口的 root 收集密码 bounds；任一窗口 root 无法读取时截图失败，不在漏遮挡的情况下发出图片。
 - 输入白名单初期只有 `com.psyche.kelivo.phoneagent`。系统窗口（`com.android.systemui`、权限控制器、安装器等）一律拒绝。系统导航动作与节点、坐标动作使用同一白名单。
 - 动作预算：输入 120 次/分钟，读树 60 次/分钟，截图约 1 次/秒且最多 30 次/分钟。
-- 截图失败映射：系统限频为 `rate_limited`；secure window、无效窗口为 `screenshot_blocked`；窗口读取、位图处理或遮挡准备失败为 `screenshot_failed`，不发送黑图或未遮挡图片。
+- 截图失败映射：系统限频为 `rate_limited`；平台明确返回的无效窗口/截图错误为 `screenshot_blocked`；窗口读取、位图处理或遮挡准备失败为 `screenshot_failed`。整屏 `takeScreenshot` 不保证对 `FLAG_SECURE` 报错，secure 内容可能以黑色区域出现在成功截图中；不根据像素猜 secure，不承诺不发送黑图，正常黑色页面保留。
 - `clearScreenshot` 只清空原生截图坐标观测，供适配层在图片落盘或尺寸校验失败时调用。
 
 ## 集成
@@ -122,7 +122,8 @@ Dart 测试覆盖通道参数、默认值、错误映射、超时、`clearScreen
 
 - 真机截图、节点点击、文本输入、滑动和旋转/切窗行为需要在 API 30+ 设备上验证；本插件开发环境只完成编译和单元测试。`AccessibilityService` 手势回调、锁屏/息屏、服务中断和真实 `takeScreenshot` 没有 JVM 单元测试覆盖。
 - 读树依赖目标应用的 `AccessibilityNodeInfo` IPC。极端情况下单次读树可能被目标应用阻塞；通道超时会让模型收到错误，但原生 worker 只能等待该调用返回，随后按队列超时跳过积压请求。
-- `FLAG_SECURE` 真实窗口未验证。secure window 只由 Android 截图错误码判定，不再根据像素内容猜黑图。
+- 整屏 `AccessibilityService.takeScreenshot(Display.DEFAULT_DISPLAY)` 不保证对 `FLAG_SECURE` 报错：官方 `TakeScreenshotCallback.onFailure` 文档列出的错误码不含 `ERROR_TAKE_SCREENSHOT_SECURE_WINDOW`；该码是 API 34+ 窗口级 `takeScreenshotOfWindow` 的错误，AOSP 整屏路径没有 secure 检查。API35 模拟器实测同 UID/不同 UID 的 secure 夹具都返回成功黑图。插件不根据像素猜 secure，不承诺不发送黑图，正常黑色页面保留；平台明确报错时仍映射为 `screenshot_blocked`，不发送图片。
+- secure 窗口的树在 API35 夹具上可读，但不是绝对保证；密码字段、自定义 View 和窗口变化仍会影响树。
 - 密码遮挡依赖应用正确标记 `isPassword`；自定义 View 和 WebView 可能遗漏，只能称为尽力而为。
 - 白名单只限制输入，不限制读树和截图；白名单应用内部仍可能发生不可逆业务操作。
 - 手势 `onCompleted` 只代表系统接受并完成手势，不代表业务成功。
