@@ -6,9 +6,9 @@
 - 最终源码 `modsetHash`：`5b1cde0304e687b9e3a26935cf85b5a27d102c9ecb409ff0e8b1358075aa902d`；合成树：`V:/coding/kelivo-private/.tower/worktrees/wt-10/.build/worktrees/5b1cde0304e687b9`；`plan`/`verify` 通过。
 - 提交：`c4fa61b`（实现检查点）、`09b5c11`（首次结果文档）、`2ca0888`（首次整套件协调）；本轮 reviewer findings 返工与最新结果见最新 commit。
 - 已通过：Loader 165（历史）、聚焦工具测试 32、最终树 `dart analyze --fatal-infos`、插件 Dart 17、插件 Kotlin 66、上游 PhoneControl 49（历史；本轮 Kotlin 仅注释改动，由 APK 构建编译）。
-- API35 完整异常套件（最终树）：**`+5 ~1`，`All tests passed!`，EXIT=0**；通过 secure、旋转、home/recents、锁屏、服务禁用/重启；权限窗口明确跳过（未验证）。服务禁用前启动 1000 个只读 pending 请求，日志 `PHONE_AGENT_SERVICE_PENDING_BATCH: size=1000 elapsed=3252ms codes=interrupted,ok`；锁屏分别调用 tree/screenshot/input 并断言 `device_locked`。历史 `41e33b...` 的 `+2 ~1 -3`、EXIT=1 失败保留在 plan 9.3.1。
+- API35 完整异常套件（实际运行树 `2c1513ecef3f2293`；当前 `5b1cde0304e687b9` 仅文档哈希变化，关键代码/测试一致，新树未重跑设备）：**`+5 ~1`，`All tests passed!`，EXIT=0**；通过 secure、旋转、home/recents、锁屏、服务禁用/重启；权限窗口明确跳过（未验证）。服务禁用前启动 1000 个只读 pending 请求，日志 `PHONE_AGENT_SERVICE_PENDING_BATCH: size=1000 elapsed=3252ms codes=interrupted,ok`；锁屏分别调用 tree/screenshot/input 并断言 `device_locked`。历史 `41e33b...` 的 `+2 ~1 -3`、EXIT=1 失败保留在 plan 9.3.1。
 - API35 官方测试 2 项通过、EXIT=0；API29 官方测试 2 项通过、EXIT=0（截图 `unsupported_os`）。
-- 最终产品 debug APK：**181,373,590 字节**，SHA-256 `581d56fc03fe716c768f2554015115bffd8e2b0d610c71e74f5d3b21524703a3`；debug merged manifest 含 `SecureWindowFixtureActivity`，release merged manifest 不含该夹具（不宣称签名 release）。
+- 当前产品 debug APK（在最终源码/构建树 `5b1cde0304e687b9` 构建；设备套件实际运行于 `2c1513...`）：**181,373,590 字节**，SHA-256 `581d56fc03fe716c768f2554015115bffd8e2b0d610c71e74f5d3b21524703a3`；debug merged manifest 含 `SecureWindowFixtureActivity`，release merged manifest 不含该夹具（不宣称签名 release）。
 - secure 观察：本轮记录成功黑图；上一轮同一夹具曾返回成功内容图（平均亮度约 191），因此契约只承诺“可能黑化”，不保证黑图或检测。
 - 未验证：权限窗口、物理 API30+、签名 release、原生超时、`stale_handle` 根因。
 - 临时不同 UID 夹具 `.build/secure_fixture_app/` 和 host driver `.build/host_exception_driver.sh` 仅在 `.build`，不提交。
@@ -30,8 +30,9 @@
 本轮（M10）已完成：
 
 1. 按用户批准的契约记录整屏 `takeScreenshot` 的 `FLAG_SECURE` 行为：可能成功返回黑图或内容图，不保证检测、不承诺不发送黑图；平台明确报错时 `screenshot_blocked` 且无图片/metadata。
-2. 完整异常套件在最终树 `5b1cde0304e687b9` 上 `+5 ~1`、EXIT=0；服务用例验证禁用前同一批 pending Future 被中断，锁屏分别验证 tree/screenshot/input。
-3. 更新契约、工具描述、debug 夹具、异常套件与中文文档；未修改生产行为（仅 `ScreenshotCapture.kt` 注释）、未扩大白名单、Mod 版本保持 0.2.0。
+2. 完整异常套件实际运行于 `2c1513ecef3f2293` 树：`+5 ~1`、EXIT=0；服务用例验证禁用前同一批 pending Future 被中断，锁屏分别验证 tree/screenshot/input。
+3. 当前 `5b1cde0304e687b9` 是仅文档哈希变化后的最终源码/构建树；关键代码/测试与 `2c1513...` 逐字一致，新树未重跑设备。当前 APK 只在 `5b1cde...` 构建。
+4. 更新契约、工具描述、debug 夹具、异常套件与中文文档；未修改生产行为（仅 `ScreenshotCapture.kt` 注释）、未扩大白名单、Mod 版本保持 0.2.0。
 
 当前剩余：
 
@@ -119,9 +120,9 @@ API 29 真机结果、双 API 集成测试和任何后续改动后的数字以 `
 - 固定任务完成 tree → tap `Search settings` → tree → `set_text Phone` → `n1 scroll down` 返回 `action_unavailable` → 截图确认；补充滚动先返回 `stale_handle`，重读树后 `n4` ScrollView `forward` 成功并显示 `Sponsor`。
 - 4096 上下文下复杂任务出现截图/读树循环，8192 后完成；这是本地测试经验，不是产品运行时要求。
 
-## 5. 上一轮新增聚焦测试（本轮未改测试）
+## 5. 上一轮新增聚焦测试（历史，该轮未改测试）
 
-本轮只改中文文档，未新增或修改测试。以下为上一轮新增的测试，保留作回归说明。
+该轮只改中文文档，未新增或修改测试；该标签仅适用于该历史 VLM 文档轮，不代表当前 M10；M10 已新增并运行异常/聚焦测试。以下为上一轮新增的测试，保留作回归说明。
 
 文件：`mods/phone_agent/overlay/test/features/phone_agent/phone_agent_tool_result_test.dart`（合成树 `test/features/phone_agent/phone_agent_tool_result_test.dart`）。
 
