@@ -305,6 +305,7 @@ void main() {
         'PHONE_AGENT_PERMISSION_WINDOW_UNVERIFIED',
         '系统权限弹窗没有出现；本场景记录为未验证，不写成通过。',
       );
+      _hostStep('PHONE_AGENT_DISMISS_PERMISSION', 'adb shell input keyevent 4');
       await _returnToApp(service);
       markTestSkipped('系统权限弹窗没有出现，权限窗口场景未验证。');
       return;
@@ -340,7 +341,7 @@ void main() {
     final tapNode = _nodeForText(before, _tapTarget);
     expect(tapNode, isNotNull, reason: '锁屏测试前读树没有找到点击目标。');
 
-    _hostStep('PHONE_AGENT_LOCK_SCREEN', '快速按两次电源键：息屏后立即亮屏并停在锁屏');
+    _hostStep('PHONE_AGENT_LOCK_SCREEN', '按一次电源键保持息屏，等待 device_locked');
     final locked = await _waitForToolError(
       service,
       'device_locked',

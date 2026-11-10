@@ -3,12 +3,12 @@
 ## 0. M10 当前状态（2026-11-11）
 
 - 本轮目标：API35 真实 `FLAG_SECURE` 与受控异常路径。按 M11 公开 API 审查结论，契约已收缩为：整屏 `takeScreenshot` 不保证对 `FLAG_SECURE` 报错，secure 内容可能以黑色区域出现在成功截图中；不做像素启发式，不承诺不发送黑图，正常黑色页面保留；平台明确报错时 `screenshot_blocked` 且不发送图片/metadata。
-- 最终源码 `modsetHash`：`4de89269fcda219b2319701e227ad9c139351358e99270a4ce1c2337dc18677d`；合成树：`V:/coding/kelivo-private/.tower/worktrees/wt-10/.build/worktrees/4de89269fcda219b`；`plan`/`verify` 通过。
-- 实现检查点提交：`c4fa61b`（契约文档、工具描述、schema 文本测试、debug 夹具、异常套件、ScreenshotCapture 注释）；后续测试辅助修正与结果文档在第二个提交。
+- 最终源码 `modsetHash`：`13c14526c20658233653d78365bdde1dcc91224f2e62c2974c0edb05090e5c42`；合成树：`V:/coding/kelivo-private/.tower/worktrees/wt-10/.build/worktrees/13c14526c2065823`；`plan`/`verify` 通过。
+- 提交：`c4fa61b`（实现检查点）、`09b5c11`（首次结果文档）；本轮整套件协调修正与最新结果提交见最新 commit。
 - 已通过：Loader 165（历史）、聚焦工具测试 32、最终树 `dart analyze --fatal-infos`、插件 Dart 17、插件 Kotlin 66、上游 PhoneControl 49（历史；本轮 Kotlin 仅注释改动，由 APK 构建编译）。
-- API35 设备结果：`FLAG_SECURE 截图行为与恢复`、`锁屏 device_locked`、`服务禁用/中断/重启` 单跑均 `All tests passed!`、EXIT=0；完整异常套件在 `41e33b...` 为 `+2 ~1 -3`（旋转、home/recents 通过；权限窗口跳过；secure/锁屏/服务因测试辅助/宿主协调失败，修正后单跑通过）；API35 官方测试 2 项通过、EXIT=0。
-- API29 设备结果：官方 `phone_agent_test.dart` 2 项通过、EXIT=0；截图返回 `unsupported_os`，树/节点输入回归通过。
-- 最终产品 debug APK（同一最终树显式 `flutter build apk --debug`）：`build/app/outputs/flutter-apk/app-debug.apk`，**187,211,172 字节**，SHA-256 `427087502099c1c36ce5a3089cdb669ff13e4b6bb673cd6f32390de3f6cace8f`；debug merged manifest 含 `SecureWindowFixtureActivity`，release merged manifest 不含该夹具（不宣称签名 release）。
+- API35 完整异常套件（最终树）：**`+5 ~1`，`All tests passed!`，EXIT=0**；通过 secure、旋转、home/recents、锁屏、服务禁用/重启；权限窗口明确跳过（未验证）。历史 `41e33b...` 的 `+2 ~1 -3`、EXIT=1 失败保留在 plan 9.3.1。
+- API35 官方测试 2 项通过、EXIT=0；API29 官方测试 2 项通过、EXIT=0（截图 `unsupported_os`）。
+- 最终产品 debug APK：**187,211,742 字节**，SHA-256 `7b82d5d21f6c476a60693f3c6fb87b45b02dcfcce6bbd257078546cde18da557`；debug merged manifest 含 `SecureWindowFixtureActivity`，release merged manifest 不含该夹具（不宣称签名 release）。
 - 未验证：权限窗口、物理 API30+、签名 release、原生超时、`stale_handle` 根因。
 - 临时不同 UID 夹具 `.build/secure_fixture_app/` 和 host driver `.build/host_exception_driver.sh` 仅在 `.build`，不提交。
 
