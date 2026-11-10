@@ -47,7 +47,8 @@ void main() {
     status = await PhoneAgentService.instance.status();
     if (!status.ready) {
       debugPrint('PHONE_AGENT_WAITING_FOR_SERVICE');
-      for (var i = 0; i < 180 && !status.ready; i++) {
+      // 安装测试包会撤销无障碍授权，需要人工在系统界面重新启用服务。
+      for (var i = 0; i < 600 && !status.ready; i++) {
         await Future<void>.delayed(const Duration(milliseconds: 500));
         status = await PhoneAgentService.instance.status();
       }
@@ -208,6 +209,52 @@ void main() {
     await tester.pump(const Duration(milliseconds: 400));
     expect(taps, 1, reason: '节点点击未触发测试界面回调。');
 
+    if (status.supported) {
+      // 系统截图限频约 1 次/秒，第二次截图前等待足够间隔。
+      await tester.pump(const Duration(milliseconds: 1500));
+      _expectOk(
+        _payload(
+          await handler(PhoneAgentToolNames.screenshot, <String, dynamic>{}),
+          '滑动前截图',
+        ),
+        '滑动前截图',
+      );
+      _expectInputOk(
+        _payload(
+          await handler(PhoneAgentToolNames.input, <String, dynamic>{
+            'action': 'swipe',
+            'x': 0.5,
+            'y': 0.5,
+            'end_x': 0.5,
+            'end_y': 0.2,
+            'duration_ms': 300,
+          }),
+          '坐标滑动',
+        ),
+        '坐标滑动',
+      );
+    }
+    // integration_test 绑定默认不转发设备指针事件（shouldPropagateDevicePointerEvents=false），
+    // 坐标滑动的 UI 效果无法在测试内断言；用无障碍滚动动作验证列表真的滚动。
+    final scrollTree = _treePayload(
+      await handler(PhoneAgentToolNames.tree, <String, dynamic>{'offset': 0}),
+    );
+    final scrollNode = _firstScrollable(scrollTree);
+    expect(scrollNode, isNotNull, reason: '读树结果中没有找到滚动节点。');
+    _expectInputOk(
+      _payload(
+        await handler(PhoneAgentToolNames.input, <String, dynamic>{
+          'action': 'scroll',
+          'node_id': scrollNode!['node_id'],
+          'direction': 'forward',
+        }),
+        '节点滚动',
+      ),
+      '节点滚动',
+    );
+    await tester.pump(const Duration(milliseconds: 600));
+    expect(scrollController.offset, greaterThan(0), reason: '输入未滚动测试列表。');
+
     final fieldTree = _treePayload(
       await handler(PhoneAgentToolNames.tree, <String, dynamic>{'offset': 0}),
     );
@@ -225,16 +272,12 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 400));
 
-    final focusedTree = _treePayload(
-      await handler(PhoneAgentToolNames.tree, <String, dynamic>{'offset': 0}),
-    );
-    final editableNode = _firstEditable(focusedTree);
-    expect(editableNode, isNotNull, reason: '输入框聚焦后没有找到可编辑节点。');
+    // 聚焦会改变 isFocused 和动作集合，但同一观测内的句柄必须仍可用于 set_text。
     _expectInputOk(
       _payload(
         await handler(PhoneAgentToolNames.input, <String, dynamic>{
           'action': 'set_text',
-          'node_id': editableNode!['node_id'],
+          'node_id': fieldNode['node_id'],
           'text': 'phone agent',
         }),
         '文本输入',
@@ -243,52 +286,6 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 400));
     expect(textController.text, 'phone agent', reason: '节点输入未写入测试输入框。');
-
-    FocusManager.instance.primaryFocus?.unfocus();
-    await tester.pumpAndSettle();
-
-    if (status.supported) {
-      _expectOk(
-        _payload(
-          await handler(PhoneAgentToolNames.screenshot, <String, dynamic>{}),
-          '滑动前截图',
-        ),
-        '滑动前截图',
-      );
-      _expectInputOk(
-        _payload(
-          await handler(PhoneAgentToolNames.input, <String, dynamic>{
-            'action': 'swipe',
-            'x': 0.5,
-            'y': 0.8,
-            'end_x': 0.5,
-            'end_y': 0.2,
-            'duration_ms': 300,
-          }),
-          '坐标滑动',
-        ),
-        '坐标滑动',
-      );
-    } else {
-      final scrollTree = _treePayload(
-        await handler(PhoneAgentToolNames.tree, <String, dynamic>{'offset': 0}),
-      );
-      final scrollNode = _firstScrollable(scrollTree);
-      expect(scrollNode, isNotNull, reason: '读树结果中没有找到滚动节点。');
-      _expectInputOk(
-        _payload(
-          await handler(PhoneAgentToolNames.input, <String, dynamic>{
-            'action': 'scroll',
-            'node_id': scrollNode!['node_id'],
-            'direction': 'forward',
-          }),
-          '节点滚动',
-        ),
-        '节点滚动',
-      );
-    }
-    await tester.pump(const Duration(milliseconds: 600));
-    expect(scrollController.offset, greaterThan(0), reason: '输入未滚动测试列表。');
 
     final secondTree = _treePayload(
       await handler(PhoneAgentToolNames.tree, <String, dynamic>{'offset': 0}),

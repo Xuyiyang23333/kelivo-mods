@@ -18,20 +18,35 @@ class ObservationRegistryTest {
         registry = ObservationRegistry(now = { now })
     }
 
+    private fun readTree(root: FakeNode): TreeObservation = NodeTreeReader().read(
+        root = root,
+        windowId = 7,
+        packageName = "com.psyche.kelivo",
+        screenWidth = 100,
+        screenHeight = 100,
+        rotation = 0,
+        createdAt = now,
+        interactiveOnly = false,
+    )
+
     private fun observation(text: String = "hello"): Pair<FakeNode, TreeObservation> {
         val root = FakeNode(text = text)
         root.children += FakeNode(text = "child", isClickable = true)
-        val observation = NodeTreeReader().read(
-            root = root,
-            windowId = 7,
-            packageName = "com.psyche.kelivo",
-            screenWidth = 100,
-            screenHeight = 100,
-            rotation = 0,
-            createdAt = now,
-            interactiveOnly = false,
+        return root to readTree(root)
+    }
+
+    private fun editableObservation(): Pair<FakeNode, FakeNode> {
+        val root = FakeNode(text = "root")
+        val field = FakeNode(
+            className = "android.widget.EditText",
+            text = "",
+            isEditable = true,
+            isClickable = true,
+            actions = setOf(NodeAction.CLICK, NodeAction.SET_TEXT),
         )
-        return root to observation
+        root.children += field
+        registry.beginTree(readTree(root))
+        return root to field
     }
 
     @Test
@@ -102,6 +117,99 @@ class ObservationRegistryTest {
     }
 
     @Test
+    fun `gaining focus keeps a handle reusable for set_text`() {
+        val (_, field) = editableObservation()
+
+        val before = registry.handle("n1", window)
+        field.isFocused = true
+        val after = registry.handle("n1", window)
+
+        assertEquals("n1", before.id)
+        assertEquals("n1", after.id)
+        assertTrue(NodeAction.SET_TEXT in after.node.actions)
+        assertTrue(after.node.perform(NodeAction.SET_TEXT, "phone agent"))
+        assertEquals(listOf(NodeAction.SET_TEXT), field.performed)
+    }
+
+    @Test
+    fun `losing focus keeps a handle reusable`() {
+        val root = FakeNode(text = "root")
+        val field = FakeNode(text = "child", isFocused = true)
+        root.children += field
+        registry.beginTree(readTree(root))
+
+        field.isFocused = false
+        val handle = registry.handle("n1", window)
+
+        assertEquals("n1", handle.id)
+        assertEquals("child", handle.record.text)
+    }
+
+    @Test
+    fun `selection change invalidates a handle`() {
+        val (root, observation) = observation()
+        registry.beginTree(observation)
+        (root.children[0] as FakeNode).isSelected = true
+
+        val error = assertThrows(PhoneAgentError::class.java) {
+            registry.handle("n1", window)
+        }
+
+        assertEquals("stale_handle", error.code)
+    }
+
+    @Test
+    fun `action change keeps a handle reusable`() {
+        val (root, observation) = observation()
+        registry.beginTree(observation)
+        (root.children[0] as FakeNode).actions = setOf(NodeAction.CLICK)
+
+        val handle = registry.handle("n1", window)
+
+        assertEquals("n1", handle.id)
+    }
+
+    @Test
+    fun `capability change invalidates a handle`() {
+        val (root, observation) = observation()
+        registry.beginTree(observation)
+        (root.children[0] as FakeNode).isScrollable = true
+
+        val error = assertThrows(PhoneAgentError::class.java) {
+            registry.handle("n1", window)
+        }
+
+        assertEquals("stale_handle", error.code)
+        assertTrue(error.message.contains("isScrollable"))
+    }
+
+    @Test
+    fun `disabled handle is rejected`() {
+        val (root, observation) = observation()
+        registry.beginTree(observation)
+        (root.children[0] as FakeNode).isEnabled = false
+
+        val error = assertThrows(PhoneAgentError::class.java) {
+            registry.handle("n1", window)
+        }
+
+        assertEquals("stale_handle", error.code)
+    }
+
+    @Test
+    fun `handle expires after the ttl`() {
+        val (_, observation) = observation()
+        registry.beginTree(observation)
+        now = ObservationRegistry.DEFAULT_TTL_MILLIS + 1
+
+        val error = assertThrows(PhoneAgentError::class.java) {
+            registry.handle("n1", window)
+        }
+
+        assertEquals("stale_handle", error.code)
+    }
+
+    @Test
     fun `fingerprint change invalidates a handle`() {
         val (root, observation) = observation()
         registry.beginTree(observation)
@@ -113,6 +221,7 @@ class ObservationRegistryTest {
         }
 
         assertEquals("stale_handle", error.code)
+        assertTrue(error.message.contains("text"))
     }
 
     @Test

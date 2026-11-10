@@ -202,27 +202,49 @@ internal class AndroidPhoneNode(
     }
 }
 
-/** 目标节点指纹。不包含 bounds，允许布局漂移，但拒绝内容或能力变化。 */
-internal fun PhoneNode.fingerprint(): String = buildString {
-    append(windowId).append('\u0000')
-    append(packageName).append('\u0000')
-    append(className).append('\u0000')
-    append(viewId).append('\u0000')
-    if (!isPassword) {
-        append(text).append('\u0000')
-        append(contentDescription).append('\u0000')
-        append(hintText).append('\u0000')
-        append(stateDescription).append('\u0000')
+/**
+ * 目标节点指纹。不包含 bounds、焦点状态和动作集合，允许布局漂移、焦点变化
+ * 和聚焦引起的动作增减，但拒绝内容、稳定能力或选中状态变化。
+ * 动作可用性由执行层在动作前按当前节点重新校验。
+ */
+internal fun PhoneNode.fingerprint(): String =
+    fingerprintFields().joinToString("\u0000") { (name, value) -> "$name=$value" }
+
+/** 指纹字段；只用于比较和报告变化字段名，不输出内容。 */
+internal fun PhoneNode.fingerprintFields(): List<Pair<String, String>> {
+    val fields = mutableListOf<Pair<String, String>>()
+    fun add(name: String, value: Any?) {
+        fields += name to value.toString()
     }
-    append(isCheckable).append('\u0000')
-    append(isChecked).append('\u0000')
-    append(isSelected).append('\u0000')
-    append(isEnabled).append('\u0000')
-    append(isFocused).append('\u0000')
-    append(isPassword).append('\u0000')
-    append(isEditable).append('\u0000')
-    append(isClickable).append('\u0000')
-    append(isLongClickable).append('\u0000')
-    append(isScrollable).append('\u0000')
-    append(actions.map { it.name }.sorted().joinToString(","))
+    add("windowId", windowId)
+    add("packageName", packageName)
+    add("className", className)
+    add("viewId", viewId)
+    if (!isPassword) {
+        add("text", text)
+        add("contentDescription", contentDescription)
+        add("hintText", hintText)
+        add("stateDescription", stateDescription)
+    }
+    add("isCheckable", isCheckable)
+    add("isChecked", isChecked)
+    add("isSelected", isSelected)
+    add("isEnabled", isEnabled)
+    add("isPassword", isPassword)
+    add("isEditable", isEditable)
+    add("isClickable", isClickable)
+    add("isLongClickable", isLongClickable)
+    add("isScrollable", isScrollable)
+    return fields
+}
+
+/** 返回两个指纹中发生变化的字段名，便于诊断；不返回字段内容。 */
+internal fun fingerprintDiff(expected: String, actual: String): List<String> {
+    fun parse(value: String): Map<String, String> = value
+        .split('\u0000')
+        .filter { it.isNotEmpty() }
+        .associate { it.substringBefore('=') to it.substringAfter('=', "") }
+    val left = parse(expected)
+    val right = parse(actual)
+    return (left.keys + right.keys).filter { left[it] != right[it] }.sorted()
 }

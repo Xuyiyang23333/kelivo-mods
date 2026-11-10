@@ -43,7 +43,8 @@ internal class SavedHandle(
  * 原生观测状态：树句柄、截图坐标观测、120 秒 TTL 和失效管理。
  *
  * 句柄只在当前观测内有效。动作后不清空树句柄；每次使用前重新
- * `refresh()` 并比较指纹。窗口、包名、尺寸或旋转变化会让树和截图失效。
+ * `refresh()` 并比较指纹（焦点变化和动作集合变化不失效，动作可用性在动作前按当前节点校验）。
+ * 窗口、包名、尺寸或旋转变化会让树和截图失效。
  */
 internal class ObservationRegistry(
     private val ttlMillis: Long = DEFAULT_TTL_MILLIS,
@@ -101,12 +102,19 @@ internal class ObservationRegistry(
             )
         }
         val node = observation.handles[index]
-        if (!node.refresh() || !node.isVisibleToUser || !node.isEnabled ||
-            node.fingerprint() != observation.fingerprints[index]
-        ) {
+        if (!node.refresh() || !node.isVisibleToUser || !node.isEnabled) {
             throw PhoneAgentError(
                 "stale_handle",
                 "The target node changed. Call phone_agent_tree with offset 0.",
+            )
+        }
+        val current = node.fingerprint()
+        if (current != observation.fingerprints[index]) {
+            val changed = fingerprintDiff(observation.fingerprints[index], current)
+            throw PhoneAgentError(
+                "stale_handle",
+                "The target node changed (${changed.joinToString(", ")}). " +
+                    "Call phone_agent_tree with offset 0.",
             )
         }
         return SavedHandle(
