@@ -408,6 +408,17 @@ flutter test integration_test/phone_agent_exception_test.dart -d <android-device
 
 ## 验证状态
 
+### 本轮 API35 FLAG_SECURE/异常路径（最终树 `4de89269fcda219b`）
+
+- 最终源码 `modsetHash`：`4de89269fcda219b2319701e227ad9c139351358e99270a4ce1c2337dc18677d`；合成树 `.build/worktrees/4de89269fcda219b`；`plan`/`verify` 通过。
+- 契约：整屏 `takeScreenshot` 不保证对 `FLAG_SECURE` 报错；API35 实测 secure 夹具返回成功黑图（平均 RGB 约 2,0,2），记录为平台行为；不做像素启发式；平台明确报错时 `screenshot_blocked` 且无图片。
+- API35 `FLAG_SECURE 截图行为与恢复` 单跑：通过，EXIT=0；secure 树可读、旧坐标 `stale_observation`、清 flag 后恢复非黑夹具截图。
+- API35 锁屏单跑：通过，EXIT=0；服务禁用/重启单跑：通过，EXIT=0。
+- API35 完整异常套件（`41e33b6f115e54bc`，与最终树仅差 secure 辅助断言）：`+2 ~1 -3`，EXIT=1；旋转、home/recents 通过；权限窗口跳过；secure/锁屏/服务因测试辅助/宿主协调失败，修正后单跑通过。
+- API35 官方测试：2 项通过，EXIT=0；API29 官方测试：2 项通过，EXIT=0（截图 `unsupported_os`）。
+- 最终产品 debug APK：**187,211,172 字节**，SHA-256 `427087502099c1c36ce5a3089cdb669ff13e4b6bb673cd6f32390de3f6cace8f`；debug merged manifest 含 `SecureWindowFixtureActivity`，release merged manifest 不含该夹具。
+- 未验证：权限窗口、物理 API30+、签名 release、原生超时、`stale_handle` 根因。
+
 ### 上一轮节点重验修正（历史结果）
 
 以下为节点重验修正轮的结果；本轮 VLM 验收见下一节。

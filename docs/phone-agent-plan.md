@@ -663,6 +663,18 @@ adb -s emulator-5554 install -r <临时项目目录>/app/build/outputs/apk/debug
 - FLAG_SECURE：普通截图成功 → 不同 UID 夹具前台（树出现 `PHONE_AGENT_SECURE_FIXTURE`，包名为 `com.kelivo.phoneagent.securefixture`）→ 截图分两种断言：若平台明确报错，断言 `tool_error` / `screenshot_blocked`、`metadata == null`、content 不含 `![](`、`data:image` 或 `image` 键；若成功，断言 `ok:true`、`package_name` 为夹具、图片为黑图（平均 RGB < 10），记录 `PHONE_AGENT_SECURE_PLATFORM_BLACK_IMAGE`。secure 期间断言读树仍成功（API35 实测可读，但不是绝对保证）→ 切到同包夹具使基线截图失效，坐标 `tap` 返回 `stale_observation` → 不同 UID 夹具清除 flag 并等待 ≥1.2 秒后截图成功，解码 PNG 断言非全黑且夹具纯色占比 >5% → 返回应用后新树/新截图成功。
 
 历史严格预期与本轮修订：早期任务要求 secure 截图必须返回 `screenshot_blocked`；API35 实测同 UID/不同 UID 都返回成功黑图，严格测试失败。经用户同意，契约改为文档化行为：平台明确报错时无图片；成功黑图记录为平台行为，不当作安全检测。该历史失败保留，不删除。
+
+本轮实际结果（最终源码 `modsetHash` `4de89269fcda219b2319701e227ad9c139351358e99270a4ce1c2337dc18677d`，合成树 `.build/worktrees/4de89269fcda219b`）：
+
+- API35 `FLAG_SECURE 截图行为与恢复` 单跑：**通过，EXIT=0**。实际截图 `ok:true`、`image 713x1600`、`package_name=com.kelivo.phoneagent.securefixture`，保存 PNG 平均 RGB 约 2,0,2，记录 `PHONE_AGENT_SECURE_PLATFORM_BLACK_IMAGE`；secure 期间树可读；同包切窗后旧坐标返回 `stale_observation`；清除 flag 后恢复非黑夹具截图（纯色占比 >5%）。
+- API35 锁屏 `device_locked` 单跑：**通过，EXIT=0**；解锁后旧句柄 `stale_handle`，新树/新截图成功。
+- API35 服务禁用/中断/重启单跑：**通过，EXIT=0**；观察到 `service_unavailable`，重新启用后旧句柄 `stale_handle`，新树/新截图成功。
+- API35 完整异常套件（`41e33b6f115e54bc`，与最终树仅差 secure 测试辅助断言）：`+2 ~1 -3`，`Some tests failed.`，EXIT=1。通过：旋转、home/recents；跳过：权限窗口；失败：secure（切同包夹具只等文本未等包名，旧坐标得到 `package_not_allowed`）、锁屏（host driver 漏处理 lock 标记）、服务（未在窗口内完成系统 UI 禁用）。这些是测试辅助/宿主协调问题，修正后 secure/锁屏/服务单跑均通过；旋转/home/recents 测试代码在最终树未变。
+- API35 官方 `phone_agent_test.dart`：**2 项通过，EXIT=0**。
+- API29 官方 `phone_agent_test.dart`：**2 项通过，EXIT=0**；截图返回 `unsupported_os`，树/节点输入回归通过。
+- 最终产品 debug APK（同一最终树显式 `flutter build apk --debug`）：**187,211,172 字节**，SHA-256 `427087502099c1c36ce5a3089cdb669ff13e4b6bb673cd6f32390de3f6cace8f`；debug merged manifest 含 `SecureWindowFixtureActivity`，release merged manifest 不含该夹具（不宣称签名 release）。
+- 权限窗口：两轮完整套件均跳过（90 秒内未检测到 permissioncontroller 前台），**未验证**，不写成通过。
+- 未验证：物理 API30+ 真机、签名 release、原生超时、权限窗口、`stale_handle` 根因。
 - 旋转：旧树句柄 `tap` 返回 `stale_handle`；旧截图坐标 `tap` 返回 `stale_observation`；旋转后新树/新截图成功；转回后恢复。
 - home/recents：执行后读树取实际前台包名；`com.android.systemui` 断言 `system_window_denied`，其他非白名单包断言 `package_not_allowed`，空包名或未知包名直接失败。`back` 同样被拒，证明 home/recents 后需要宿主恢复。
 - 权限窗口：夹具请求权限后，前台包名必须属于 `com.android.permissioncontroller` / `com.google.android.permissioncontroller`，输入返回 `system_window_denied`；弹窗未出现时记录为未验证，不写成通过。

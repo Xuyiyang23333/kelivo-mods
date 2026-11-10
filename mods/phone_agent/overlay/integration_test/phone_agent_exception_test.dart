@@ -103,11 +103,20 @@ void main() {
       debugPrint('PHONE_AGENT_SECURE_PLATFORM_BLACK_IMAGE');
     }
 
-    await _waitForTreeText(
+    // 用同一包内的夹具切换窗口，让基线截图坐标失效；包名策略仍允许输入。
+    final staleWindowTree = await _waitForTreeWhere(
       service,
+      (tree) =>
+          tree['package_name'] == _appPackage &&
+          _nodeForText(tree, _fixtureText) != null,
       marker: 'PHONE_AGENT_STALE_WINDOW',
       instruction: 'adb shell am start -n $_fixtureActivity --ez secure false',
-      text: _fixtureText,
+      timeout: const Duration(seconds: 60),
+    );
+    expect(
+      staleWindowTree,
+      isNotNull,
+      reason: '没有切换到同包夹具，旧坐标无法验证 stale_observation。',
     );
     final staleCoordinates = await _input(service, <String, dynamic>{
       'action': 'tap',
@@ -125,6 +134,7 @@ void main() {
       marker: 'PHONE_AGENT_SECURE_OFF',
       instruction:
           'adb shell am start -n $_secureFixtureActivity --ez secure false',
+      requiredPackage: _secureFixturePackage,
     );
     final restoredPayload = _expectScreenshotOk(restored, '恢复截图');
     expect(restoredPayload['package_name'], _secureFixturePackage);
@@ -679,6 +689,7 @@ Future<ClientToolResult> _waitForScreenshotSuccess(
   PhoneAgentService service, {
   required String marker,
   required String instruction,
+  String? requiredPackage,
 }) async {
   _hostStep(marker, instruction);
   final deadline = DateTime.now().add(_hostTimeout);
@@ -687,7 +698,11 @@ Future<ClientToolResult> _waitForScreenshotSuccess(
     final current = await _screenshot(service);
     last = current;
     final payload = _payload(current);
-    if (payload['ok'] == true) return current;
+    if (payload['ok'] == true &&
+        (requiredPackage == null ||
+            payload['package_name'] == requiredPackage)) {
+      return current;
+    }
     await Future<void>.delayed(_screenshotInterval);
   }
   final payload = last == null ? null : _payload(last);
