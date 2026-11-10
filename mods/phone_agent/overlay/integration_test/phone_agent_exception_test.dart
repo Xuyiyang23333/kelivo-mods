@@ -95,12 +95,19 @@ void main() {
       debugPrint('PHONE_AGENT_SECURE_EXPLICIT_ERROR');
     } else {
       // 历史：早期严格预期只有 screenshot_blocked；API35 整屏 takeScreenshot
-      // 对 FLAG_SECURE 返回成功黑图。经用户同意改为文档化行为，严格失败历史
-      // 保留在 docs/phone-agent-plan.md 9.3.1，不用黑图启发式掩盖正常黑屏。
+      // 对 FLAG_SECURE 可能返回成功黑图，也可能返回成功内容图。契约只承诺
+      // “可能黑化”，不保证黑图；严格失败历史保留在 plan 9.3.1。
       _expectScreenshotOk(captured, 'secure 截图');
       expect(capturedPayload['package_name'], _secureFixturePackage);
-      await _expectBlackScreenshot(captured);
-      debugPrint('PHONE_AGENT_SECURE_PLATFORM_BLACK_IMAGE');
+      final brightness = await _screenshotAverageBrightness(captured);
+      if (brightness < 10) {
+        debugPrint('PHONE_AGENT_SECURE_PLATFORM_BLACK_IMAGE');
+      } else {
+        debugPrint(
+          'PHONE_AGENT_SECURE_PLATFORM_CONTENT_IMAGE: '
+          'avg=${brightness.toStringAsFixed(1)}',
+        );
+      }
     }
 
     // 用同一包内的夹具切换窗口，让基线截图坐标失效；包名策略仍允许输入。
@@ -348,6 +355,15 @@ void main() {
       timeout: const Duration(seconds: 60),
     );
     expect(locked, isTrue, reason: '锁屏后没有观察到 device_locked。');
+
+    // 同一锁屏窗口分别验证 tree、screenshot、input，避免只靠共同 guard 推断。
+    final lockedScreenshot = await _screenshot(service);
+    _expectToolError(lockedScreenshot, 'device_locked', step: '锁屏截图');
+    final lockedInput = await _input(service, <String, dynamic>{
+      'action': 'back',
+    });
+    _expectToolError(lockedInput, 'device_locked', step: '锁屏输入');
+
     final lockedStatus = await service.status();
     expect(lockedStatus.ready, isTrue, reason: '锁屏不应让服务状态变成未就绪。');
 
@@ -373,41 +389,77 @@ void main() {
     expect(tapNode, isNotNull, reason: '服务禁用测试前读树没有找到点击目标。');
 
     _hostStep(
-      'PHONE_AGENT_DISABLE_SERVICE_NOW',
-      '在系统无障碍设置中关闭 Kelivo Phone Agent（不要使用 settings put secure）',
+      'PHONE_AGENT_PREPARE_SERVICE_DISABLE',
+      '打开 Kelivo Phone Agent 无障碍详情页并停留在开关前，不要关闭服务',
     );
-    final observed = <String>[];
-    var sawInterruption = false;
-    final deadline = DateTime.now().add(const Duration(seconds: 120));
-    while (DateTime.now().isBefore(deadline)) {
-      final stopwatch = Stopwatch()..start();
-      final payload = _payload(
-        await _callResult(service, PhoneAgentToolNames.tree, <String, dynamic>{
-          'offset': 0,
-        }),
-      );
-      stopwatch.stop();
-      expect(
-        stopwatch.elapsed,
-        lessThan(const Duration(seconds: 35)),
-        reason: '服务禁用期间单次调用超过 35 秒，pending 没有在超时前完成。',
-      );
-      final error = payload['error'];
-      if (error is String) {
-        observed.add(error);
-        expect(error, isNot('timeout'), reason: '服务禁用期间出现了 timeout。');
-        if (error == 'interrupted' || error == 'service_unavailable') {
-          sawInterruption = true;
-          break;
+    final detailTree = await _waitForTreeWhere(
+      service,
+      (tree) => tree['package_name'] == 'com.android.settings',
+      timeout: const Duration(seconds: 30),
+    );
+    expect(detailTree, isNotNull, reason: '宿主没有打开无障碍设置页。');
+
+    _hostStep(
+      'PHONE_AGENT_OPEN_DISABLE_DIALOG',
+      '点击 Kelivo Phone Agent 开关，打开关闭确认窗口',
+    );
+    final settingsTree = await _waitForTreeWhere(
+      service,
+      (tree) =>
+          tree['package_name'] == 'com.android.settings' &&
+          _nodeForText(tree, 'Turn off') != null,
+      timeout: const Duration(seconds: 30),
+    );
+    expect(settingsTree, isNotNull, reason: '宿主没有打开无障碍关闭确认窗口。');
+
+    // 先建立 Settings 观测，再启动一批只读分页请求并保留这些 Future。
+    // 宿主在它们仍 pending 时关闭服务，验证原 Future 在超时前完成。
+    await _tree(service);
+    const batchSize = 1000;
+    final pending = <Future<Map<String, dynamic>>>[
+      for (var i = 0; i < batchSize; i++)
+        service.readTree(offset: 1, maxNodes: 120),
+    ];
+    final startedAt = DateTime.now();
+    _hostStep(
+      'PHONE_AGENT_DISABLE_DURING_PENDING',
+      '现在在已打开的无障碍详情页关闭 Kelivo Phone Agent',
+    );
+
+    final codes = await Future.wait(
+      pending.map((future) async {
+        try {
+          await future;
+          return 'ok';
+        } on PhoneAgentToolFailure catch (failure) {
+          return failure.code;
+        } catch (_) {
+          return 'error';
         }
-      }
-      await Future<void>.delayed(_pollInterval);
-    }
-    debugPrint('PHONE_AGENT_SERVICE_DISABLE_OBSERVED: ${observed.join(",")}');
+      }),
+    );
+    final elapsed = DateTime.now().difference(startedAt);
+    final observed = codes.toSet().toList()..sort();
+    debugPrint(
+      'PHONE_AGENT_SERVICE_PENDING_BATCH: size=$batchSize '
+      'elapsed=${elapsed.inMilliseconds}ms codes=${observed.join(",")}',
+    );
     expect(
-      sawInterruption,
+      elapsed,
+      lessThan(const Duration(seconds: 35)),
+      reason: '禁用前启动的 pending 请求没有在超时前完成。',
+    );
+    expect(
+      observed,
+      isNot(contains('timeout')),
+      reason: 'pending 出现了 timeout。',
+    );
+    expect(
+      codes.any(
+        (code) => code == 'interrupted' || code == 'service_unavailable',
+      ),
       isTrue,
-      reason: '服务禁用后没有观察到 interrupted 或 service_unavailable。',
+      reason: '禁用前启动的 pending 请求没有以 interrupted/service_unavailable 完成。',
     );
 
     final disabledStatus = await service.status();
@@ -783,7 +835,7 @@ Future<img.Image> _readScreenshotImage(ClientToolResult result) async {
   return decoded!;
 }
 
-Future<void> _expectBlackScreenshot(ClientToolResult result) async {
+Future<double> _screenshotAverageBrightness(ClientToolResult result) async {
   final image = await _readScreenshotImage(result);
   var total = 0;
   var sum = 0;
@@ -795,7 +847,7 @@ Future<void> _expectBlackScreenshot(ClientToolResult result) async {
     }
   }
   expect(total, greaterThan(0));
-  expect(sum / (total * 3), lessThan(10), reason: 'secure 截图不是预期的黑图。');
+  return sum / (total * 3);
 }
 
 Future<void> _expectFixturePixels(ClientToolResult result) async {

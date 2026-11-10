@@ -3,12 +3,13 @@
 ## 0. M10 当前状态（2026-11-11）
 
 - 本轮目标：API35 真实 `FLAG_SECURE` 与受控异常路径。按 M11 公开 API 审查结论，契约已收缩为：整屏 `takeScreenshot` 不保证对 `FLAG_SECURE` 报错，secure 内容可能以黑色区域出现在成功截图中；不做像素启发式，不承诺不发送黑图，正常黑色页面保留；平台明确报错时 `screenshot_blocked` 且不发送图片/metadata。
-- 最终源码 `modsetHash`：`13c14526c20658233653d78365bdde1dcc91224f2e62c2974c0edb05090e5c42`；合成树：`V:/coding/kelivo-private/.tower/worktrees/wt-10/.build/worktrees/13c14526c2065823`；`plan`/`verify` 通过。
-- 提交：`c4fa61b`（实现检查点）、`09b5c11`（首次结果文档）；本轮整套件协调修正与最新结果提交见最新 commit。
+- 最终源码 `modsetHash`：`2c1513ecef3f229321cbd6e3b59280f46e3073715bd93c0c65fd486b11321b8a`；合成树：`V:/coding/kelivo-private/.tower/worktrees/wt-10/.build/worktrees/2c1513ecef3f2293`；`plan`/`verify` 通过。
+- 提交：`c4fa61b`（实现检查点）、`09b5c11`（首次结果文档）、`2ca0888`（首次整套件协调）；本轮 reviewer findings 返工与最新结果见最新 commit。
 - 已通过：Loader 165（历史）、聚焦工具测试 32、最终树 `dart analyze --fatal-infos`、插件 Dart 17、插件 Kotlin 66、上游 PhoneControl 49（历史；本轮 Kotlin 仅注释改动，由 APK 构建编译）。
-- API35 完整异常套件（最终树）：**`+5 ~1`，`All tests passed!`，EXIT=0**；通过 secure、旋转、home/recents、锁屏、服务禁用/重启；权限窗口明确跳过（未验证）。历史 `41e33b...` 的 `+2 ~1 -3`、EXIT=1 失败保留在 plan 9.3.1。
+- API35 完整异常套件（最终树）：**`+5 ~1`，`All tests passed!`，EXIT=0**；通过 secure、旋转、home/recents、锁屏、服务禁用/重启；权限窗口明确跳过（未验证）。服务禁用前启动 1000 个只读 pending 请求，日志 `PHONE_AGENT_SERVICE_PENDING_BATCH: size=1000 elapsed=3252ms codes=interrupted,ok`；锁屏分别调用 tree/screenshot/input 并断言 `device_locked`。历史 `41e33b...` 的 `+2 ~1 -3`、EXIT=1 失败保留在 plan 9.3.1。
 - API35 官方测试 2 项通过、EXIT=0；API29 官方测试 2 项通过、EXIT=0（截图 `unsupported_os`）。
-- 最终产品 debug APK：**187,211,742 字节**，SHA-256 `7b82d5d21f6c476a60693f3c6fb87b45b02dcfcce6bbd257078546cde18da557`；debug merged manifest 含 `SecureWindowFixtureActivity`，release merged manifest 不含该夹具（不宣称签名 release）。
+- 最终产品 debug APK：**187,211,507 字节**，SHA-256 `1af6ef2e92e4b3f3922b465a9f24425d0eb84514e15066d9c9c2c5f68934a10a`；debug merged manifest 含 `SecureWindowFixtureActivity`，release merged manifest 不含该夹具（不宣称签名 release）。
+- secure 观察：本轮记录成功黑图；上一轮同一夹具曾返回成功内容图（平均亮度约 191），因此契约只承诺“可能黑化”，不保证黑图或检测。
 - 未验证：权限窗口、物理 API30+、签名 release、原生超时、`stale_handle` 根因。
 - 临时不同 UID 夹具 `.build/secure_fixture_app/` 和 host driver `.build/host_exception_driver.sh` 仅在 `.build`，不提交。
 
@@ -177,4 +178,4 @@ dart tool/mod_loader.dart verify
 6. 修改产品代码或插件后重新构建 APK 并计算大小与 SHA-256；不要沿用旧哈希。只改文档/测试时不要重建 APK。
 7. 更新中文验收记录和本交接文档，如实写明未验证项。
 
-仍未完成或不能宣称完成：物理 API 30+ 真机的 VLM 固定任务和坐标手势 UI 效果、真实 `FLAG_SECURE`、完整异常路径、签名 release；一次未复现的 `stale_handle` 根因未确认，重读树后恢复，未修复。跨新用户轮次历史图片回放已在 API 35 模拟器通过，不再列为未验证。只验证 magpie `llama-cpp/llama-cpp` 与 API 35 模拟器，不承诺任意模型。上游仓保持只读；不向上游提交或推送私有实现。
+仍未完成或不能宣称完成：物理 API 30+ 真机的 VLM 固定任务和坐标手势 UI 效果、权限窗口、签名 release、原生超时；一次未复现的 `stale_handle` 根因未确认，重读树后恢复，未修复。API35 模拟器已验证 secure 截图行为、旋转、home/recents、锁屏、服务禁用/重启；真实 `FLAG_SECURE` 已从“未验证”移出，但只代表 API35 模拟器，不代表所有 Android 版本/设备。跨新用户轮次历史图片回放已在 API 35 模拟器通过，不再列为未验证。只验证 magpie `llama-cpp/llama-cpp` 与 API 35 模拟器，不承诺任意模型。上游仓保持只读；不向上游提交或推送私有实现。

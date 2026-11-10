@@ -408,14 +408,16 @@ flutter test integration_test/phone_agent_exception_test.dart -d <android-device
 
 ## 验证状态
 
-### 本轮 API35 FLAG_SECURE/异常路径（最终树 `13c14526c2065823`）
+### 本轮 API35 FLAG_SECURE/异常路径（最终树 `2c1513ecef3f2293`）
 
-- 最终源码 `modsetHash`：`13c14526c20658233653d78365bdde1dcc91224f2e62c2974c0edb05090e5c42`；合成树 `.build/worktrees/13c14526c2065823`；`plan`/`verify` 通过。
-- 契约：整屏 `takeScreenshot` 不保证对 `FLAG_SECURE` 报错；API35 实测 secure 夹具返回成功黑图（平均 RGB 约 2,0,2），记录为平台行为；不做像素启发式；平台明确报错时 `screenshot_blocked` 且无图片。
+- 最终源码 `modsetHash`：`2c1513ecef3f229321cbd6e3b59280f46e3073715bd93c0c65fd486b11321b8a`；合成树 `.build/worktrees/2c1513ecef3f2293`；`plan`/`verify` 通过。
+- 契约：整屏 `takeScreenshot` 不保证对 `FLAG_SECURE` 报错；API35 实测 secure 夹具本轮返回成功黑图（平均 RGB 约 2,0,2），上一轮也曾返回成功内容图（平均亮度约 191）；契约只承诺“可能黑化”，不保证黑图或检测；不做像素启发式；平台明确报错时 `screenshot_blocked` 且无图片。
 - API35 完整异常套件（最终树）：**`+5 ~1`，`All tests passed!`，EXIT=0**；通过 secure、旋转、home/recents、锁屏、服务禁用/重启；权限窗口明确跳过（未验证）。
+- 服务禁用：禁用前启动 1000 个只读 pending 请求，日志 `PHONE_AGENT_SERVICE_PENDING_BATCH: size=1000 elapsed=3252ms codes=interrupted,ok`，原 Future 在超时前以 `interrupted` 完成。
+- 锁屏：同一锁屏窗口分别调用 tree/screenshot/input，均断言 `device_locked`；截图错误无图片 metadata；解锁后旧句柄 `stale_handle`，新树/新截图成功。
 - 历史失败（保留）：`41e33b6f115e54bc` 完整套件 `+2 ~1 -3`、EXIT=1（secure/锁屏/服务因测试辅助/宿主协调失败）；修正后最终树 `+5 ~1`、EXIT=0。
 - API35 官方测试：2 项通过，EXIT=0；API29 官方测试：2 项通过，EXIT=0（截图 `unsupported_os`）。
-- 最终产品 debug APK：**187,211,742 字节**，SHA-256 `7b82d5d21f6c476a60693f3c6fb87b45b02dcfcce6bbd257078546cde18da557`；debug merged manifest 含 `SecureWindowFixtureActivity`，release merged manifest 不含该夹具。
+- 最终产品 debug APK：**187,211,507 字节**，SHA-256 `1af6ef2e92e4b3f3922b465a9f24425d0eb84514e15066d9c9c2c5f68934a10a`；debug merged manifest 含 `SecureWindowFixtureActivity`，release merged manifest 不含该夹具。
 - 未验证：权限窗口、物理 API30+、签名 release、原生超时、`stale_handle` 根因。
 
 ### 上一轮节点重验修正（历史结果）
