@@ -137,7 +137,7 @@ flutter gen-l10n
 
 焦点修正前的验收记录（历史结果，不代表当前实现）：Loader verify 通过；Flutter 255 项（254 通过 + 1 Windows 条件跳过；Phone Agent 103、Mods 16、settings 入口 2）；插件 Dart 17、插件 Kotlin 55、上游 PhoneControl 49、Loader 165；根项目、markstream 和插件静态分析通过；API 29 真机官方测试退出码 0。当时的合成树为 `V:/coding/kelivo-private/.build/worktrees/4ed083cf5fe7dda8`。
 
-本轮节点重验修正后（当前实现）：合成树为 `V:/coding/kelivo-private/.tower/worktrees/wt-1/.build/worktrees/4e072ae5edcd23b6`，`modsetHash` 为 `4e072ae5edcd23b6ad9aa081263ecb9c02ed967e0e091fab03d32aee5255f92b`，Loader verify 通过；Loader 165、插件 Kotlin 62、插件 Dart 17、上游 PhoneControl 49、Phone Agent 103、Mods 16、settings 入口 2 通过；根项目和插件静态分析通过；API 35 模拟器官方集成测试退出码 0（截图、读树、节点点击、坐标手势原生成功、节点滚动、聚焦后 `set_text`、二次读树、Mods 场景）。API 29 设备结果和产品 APK 哈希以 `docs/phone-agent-plan.md` 与 `mods/phone_agent/README.md` 的最新记录为准，不得沿用旧数字冒充新结果。仍明确未验证物理 API 30+ 真机的坐标手势 UI 效果（integration_test 绑定不转发设备指针事件）、VLM、真实 `FLAG_SECURE`、其他真机异常和签名 release，不宣称第二阶段全部完成。
+本轮节点重验修正后（当前实现）：合成树为 `V:/coding/kelivo-private/.tower/worktrees/wt-1/.build/worktrees/4e072ae5edcd23b6`，`modsetHash` 为 `4e072ae5edcd23b6ad9aa081263ecb9c02ed967e0e091fab03d32aee5255f92b`，Loader verify 通过；Loader 165、插件 Kotlin 62、插件 Dart 17、上游 PhoneControl 49、Phone Agent 103、Mods 16、settings 入口 2 通过；根项目和插件静态分析通过；API 35 模拟器与 API 29 真机官方集成测试均退出码 0（截图、读树、节点点击、坐标手势原生成功、节点滚动、聚焦后 `set_text`、二次读树、Mods 场景）。产品 APK 哈希以 `docs/phone-agent-plan.md` 与 `mods/phone_agent/README.md` 的最新记录为准，不得沿用旧数字冒充新结果。仍明确未验证物理 API 30+ 真机的坐标手势 UI 效果（integration_test 绑定不转发设备指针事件）、VLM、真实 `FLAG_SECURE`、其他真机异常和签名 release，不宣称第二阶段全部完成。
 
 无法执行的真机、VLM、`FLAG_SECURE` 或签名 release 验证必须明确报告为未验证，不能宣称完成。测试或构建生成的临时文件不提交；不得删除来源不明的已有文件。
 

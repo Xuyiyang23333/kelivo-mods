@@ -11,7 +11,7 @@
 - 助手级工具 ID：`phone_agent`
 - Mod 版本：`0.2.0`
 
-> 本轮节点重验修正后：合成树 `V:/coding/kelivo-private/.tower/worktrees/wt-1/.build/worktrees/4e072ae5edcd23b6`，Loader verify 通过；Loader 165、插件 Kotlin 62、插件 Dart 17、上游 PhoneControl 49、Phone Agent 103、Mods 16、settings 入口 2 通过；API 35 模拟器官方集成测试退出码 0。仍明确未验证 API 29 本轮回归、物理 API 30+ 真机的坐标手势 UI 效果、VLM、真实 `FLAG_SECURE`、其他真机异常和签名 release，不宣称第二阶段全部完成。
+> 本轮节点重验修正后：合成树 `V:/coding/kelivo-private/.tower/worktrees/wt-1/.build/worktrees/4e072ae5edcd23b6`，Loader verify 通过；Loader 165、插件 Kotlin 62、插件 Dart 17、上游 PhoneControl 49、Phone Agent 103、Mods 16、settings 入口 2 通过；API 35 模拟器与 API 29 真机官方集成测试均退出码 0。仍明确未验证物理 API 30+ 真机的坐标手势 UI 效果、VLM、真实 `FLAG_SECURE`、其他真机异常和签名 release，不宣称第二阶段全部完成。
 
 ## 目录与合成目标
 
@@ -402,11 +402,12 @@ flutter test integration_test/phone_agent_test.dart -d <android-device-id>
 - 修正前用同一套插件测试复现问题：61 项中 2 项 focus 用例失败（`gaining focus keeps a handle reusable for set_text`、`losing focus keeps a handle reusable`）。
 - 新增插件测试覆盖：focus false→true 后复用句柄并 `set_text`、focus true→false 后复用、action-only 变化仍可复用、selected-only 变化仍返回 `stale_handle`、稳定能力字段（`isScrollable`）变化仍拒绝、禁用节点和句柄 TTL。
 - API 35 模拟器（`emulator-5554`）官方集成测试退出码 0，2 个用例通过：真实截图、读树、节点点击、坐标滑动（原生接受并完成手势）、节点滚动（列表真实滚动）、聚焦后同一句柄 `set_text`、二次读树，以及 Mods 页真实服务状态与三态选择。
+- API 29 真机（`357784090209204`）官方集成测试退出码 0，2 个用例通过：截图按预期返回 `unsupported_os`、读树、节点点击、节点滚动（列表真实滚动）、聚焦后同一句柄 `set_text`、二次读树，以及 Mods 页真实服务状态与三态选择。
 - 产品 debug APK：`V:/coding/kelivo-private/.tower/worktrees/wt-1/.build/worktrees/4e072ae5edcd23b6/build/app/outputs/flutter-apk/app-debug.apk`，213415604 字节，SHA-256 `436f6f56c50b4da8a1bf6bc6c8610aea9521858e4283f6d2489a3eef27095860`。
 
 集成测试的坐标手势验证边界：`flutter_test` 的 `LiveTestWidgetsFlutterBinding` 默认 `shouldPropagateDevicePointerEvents = false`，设备指针事件不转发给 widget 树，因此测试只能断言坐标手势被原生接受并完成，不能断言应用侧滚动效果；API 35 用例在坐标滑动后用无障碍节点滚动验证列表真的滚动。该限制只影响测试可观测性，不改变产品行为。
 
-安装测试包会清除系统无障碍授权，测试会打印 `PHONE_AGENT_WAITING_FOR_SERVICE` 并等待约 300 秒，需要在安装完成后通过系统界面重新启用 Kelivo Phone Agent；测试结束时的 force-stop 也会清除授权。
+安装测试包和部分收尾的 force-stop 可能清除系统无障碍授权，测试会打印 `PHONE_AGENT_WAITING_FOR_SERVICE` 并等待约 300 秒，需要在窗口内通过系统界面重新启用 Kelivo Phone Agent；每轮都要检查真实绑定状态，不要假设一定被清除或一定保留。
 
 ### 焦点修正前的历史验收记录（不代表当前实现）
 

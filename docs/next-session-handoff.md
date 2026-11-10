@@ -18,14 +18,14 @@
 
 1. 修正点击/聚焦后 `set_text` 返回 `stale_handle` 的问题。
 2. API 35 模拟器（`emulator-5554`）官方集成测试退出码 0。
-3. 更新节点重验契约、测试和中文验收记录。
+3. API 29 真机（`357784090209204`）官方集成测试退出码 0。
+4. 更新节点重验契约、测试和中文验收记录。
 
 当前剩余：
 
-1. API 29 真机 `357784090209204` 回归（安装测试包会清除无障碍授权，需要人工在手机上重新启用服务）。
-2. VLM 图片链路和固定任务验证。
-3. 真实 `FLAG_SECURE`、旋转/切窗/锁屏/禁用服务/超时等异常路径。
-4. 带合法签名配置的 release 构建。
+1. VLM 图片链路和固定任务验证。
+2. 真实 `FLAG_SECURE`、旋转/切窗/锁屏/禁用服务/超时等异常路径。
+3. 带合法签名配置的 release 构建。
 
 首版输入仍只开放给测试包名 `com.psyche.kelivo.phoneagent`。不要扩大白名单、引入自动无障碍授权，或把发送/购买/删除确认描述成原生硬护栏。
 
@@ -47,6 +47,7 @@
 - Phone Agent 103 项、Mods 16 项、settings 入口 2 项。
 - 插件 Dart 17 项、插件 Kotlin 62 项、上游 `PhoneControlServiceTest` 49 项。
 - API 35 模拟器官方集成测试退出码 0，2 个用例通过。
+- API 29 真机官方集成测试退出码 0，2 个用例通过。
 - 产品 debug APK：`V:/coding/kelivo-private/.tower/worktrees/wt-1/.build/worktrees/4e072ae5edcd23b6/build/app/outputs/flutter-apk/app-debug.apk`，213415604 字节，SHA-256 `436f6f56c50b4da8a1bf6bc6c8610aea9521858e4283f6d2489a3eef27095860`。
 
 API 29 真机结果和任何后续改动后的数字以 `docs/phone-agent-plan.md` 9.3 与 `mods/phone_agent/README.md` 的最新记录为准，不得沿用旧结果冒充新实现通过。
@@ -88,12 +89,19 @@ API 29 真机结果和任何后续改动后的数字以 `docs/phone-agent-plan.m
 
 ### 无障碍授权流程（重要）
 
-- 安装测试包会清除系统无障碍授权；测试结束时的 force-stop 也会清除授权。
-- 集成测试在 `setUpAll` 打印 `PHONE_AGENT_WAITING_FOR_SERVICE` 后等待约 300 秒（600 × 500ms），需要在安装完成后通过系统界面重新启用服务。
+- 安装测试包和部分收尾的 force-stop **可能**清除系统无障碍授权；每轮都要用 `settings get secure enabled_accessibility_services` 和 `dumpsys accessibility` 检查真实状态，不要假设一定被清除或一定保留（API 35 最终通过轮在测试期间保持绑定，测试结束的 force-stop 才清除）。
+- 集成测试在 `setUpAll` 打印 `PHONE_AGENT_WAITING_FOR_SERVICE` 后等待约 300 秒（600 × 500ms），需要在该窗口内通过系统界面重新启用服务。
 - 服务组件：`com.psyche.kelivo.phoneagent/com.kelivo.phoneagent.PhoneAgentService`；只启用 **Kelivo Phone Agent**，不要启用 **Kelivo phone control**。
 - 启用后把 `Kelivo Agent` 应用切回前台并保持，直到测试结束。
 - 不要用 `settings put secure` 写入授权绕过系统确认。
 - 若需要人工操作，通过 TowerSend 报告具体设备、包名、等待窗口和步骤。
+
+### ComputerUse 操作模拟器/真机的前置条件（本轮经验）
+
+- 模拟器宿主窗口必须完整位于桌面内；窗口缩放后要重新截图观察并重新计算点击映射，否则下半屏点击会错位。
+- 关键授权前先用无害操作（如滚动、亮度滑块）验证落点，再逐步执行“设置 → 无障碍 → 已下载的应用 → 服务 → 开关 → Allow”，每步验证后再继续。
+- 真机镜像（scrcpy）白屏重启、应用抽屉滚动竞态和剪贴板同步失败都会拖长导航时间；正式授权前先预热服务详情页并验证 Recents 切换。
+- 这些是测试环境的操作经验，不是产品依赖；产品不自动授权、不自动切换系统开关。
 
 ### Windows 环境
 
@@ -122,4 +130,4 @@ dart tool/mod_loader.dart verify
 6. 构建产品 APK 并重新计算大小与 SHA-256；不要沿用旧哈希。
 7. 更新中文验收记录和本交接文档，如实写明未验证项。
 
-仍未完成或不能宣称完成：API 29 本轮回归结果、物理 API 30+ 真机的坐标手势 UI 效果、VLM 固定任务与图片链路、真实 `FLAG_SECURE`、完整异常路径、签名 release。上游仓保持只读；不向上游提交或推送私有实现。
+仍未完成或不能宣称完成：物理 API 30+ 真机的坐标手势 UI 效果、VLM 固定任务与图片链路、真实 `FLAG_SECURE`、完整异常路径、签名 release。上游仓保持只读；不向上游提交或推送私有实现。
