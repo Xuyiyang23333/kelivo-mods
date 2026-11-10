@@ -1,4 +1,4 @@
-# 下一次会话交接：Phone Agent 节点重验修正
+# 下一次会话交接：Phone Agent VLM 验收证据
 
 ## 1. 新会话与仓库
 
@@ -12,20 +12,20 @@
 
 ## 2. 当前目标与阶段
 
-第一阶段 Mod Loader 已完成。第二阶段 Phone Agent 的主要功能已完成，仍处于设备联调阶段，不能宣称全部验收完成。
+第一阶段 Mod Loader 已完成。第二阶段 Phone Agent 的主要功能已完成，VLM 图片链路和固定任务已在 API 35 模拟器用本地模型验证；仍处于设备联调阶段，不能宣称全部验收完成。
 
 本轮已完成：
 
-1. 修正点击/聚焦后 `set_text` 返回 `stale_handle` 的问题。
-2. API 35 模拟器（`emulator-5554`）官方集成测试退出码 0。
-3. API 29 真机（`357784090209204`）官方集成测试退出码 0。
-4. 更新节点重验契约、测试和中文验收记录。
+1. 固化 API 35 模拟器本地 VLM 图片链路与固定任务验收记录。
+2. 新增 2 项聚焦回归：真实 `PhoneAgentScreenshotResult` 产出的 `ClientToolResult`/metadata 经现有 `ToolResultContent.read`，在支持图片时产生非空图片引用，不支持图片时省略。
+3. 通过 Loader 确定性合成新树，完成格式、静态分析和 Phone Agent 相关定向测试。
 
 当前剩余：
 
-1. VLM 图片链路和固定任务验证。
-2. 真实 `FLAG_SECURE`、旋转/切窗/锁屏/禁用服务/超时等异常路径。
-3. 带合法签名配置的 release 构建。
+1. 物理 API 30+ 真机上的 VLM 固定任务和坐标手势 UI 效果。
+2. 新用户轮次再次请求时的历史图片回放。
+3. 真实 `FLAG_SECURE`、旋转/切窗/锁屏/禁用服务/超时等异常路径。
+4. 带合法签名配置的 release 构建。
 
 首版输入仍只开放给测试包名 `com.psyche.kelivo.phoneagent`。不要扩大白名单、引入自动无障碍授权，或把发送/购买/删除确认描述成原生硬护栏。
 
@@ -33,8 +33,8 @@
 
 - 上游基线：`73afa4ec77cfc9af2efea2487fee8bba1362639d`。
 - 当前 Mod 版本：`0.2.0`。
-- 本轮合成树：`V:/coding/kelivo-private/.tower/worktrees/wt-1/.build/worktrees/7593c21b5f9da01f`。
-- 本轮 `modsetHash`：`7593c21b5f9da01fb8b8c4dfe167d892a940efe4a1caf591b772fbe83b6b6f7d`。
+- 本轮合成树：`V:/coding/kelivo-private/.tower/worktrees/wt-6/.build/worktrees/5f0be65f98bb04e5`。
+- 本轮 `modsetHash`：`5f0be65f98bb04e5613e372731215d7b577bbeb1b4ffa3bf9c14693e74757284`。
 - 三个工具：`phone_agent_screenshot`、`phone_agent_tree`、`phone_agent_input`。
 - 每助手独立 `localToolId='phone_agent'`；Mods 页提供关闭/原生手机控制/Phone Agent 三态单选，已有助手不自动迁移。
 - 观察按需发生，不强制每步重新读取完整树；工具 schema 不暴露 `snapshot_id`。
@@ -44,44 +44,63 @@
 
 - Loader `dart format`、`dart analyze tool test`、165 项测试、`dart tool/mod_loader.dart verify`。
 - 新合成树 `dart format`、`dart analyze --fatal-infos lib test integration_test tool`。
-- Phone Agent 103 项、Mods 16 项、settings 入口 2 项。
-- 插件 Dart 17 项、插件 Kotlin 66 项、上游 `PhoneControlServiceTest` 49 项。
-- API 35 模拟器官方集成测试退出码 0，2 个用例通过。
-- API 29 真机官方集成测试退出码 0，2 个用例通过。
-- 产品 debug APK：`V:/coding/kelivo-private/.tower/worktrees/wt-1/.build/worktrees/7593c21b5f9da01f/build/app/outputs/flutter-apk/app-debug.apk`，181369230 字节，SHA-256 `3ea30ee9b46342305cf11e0574b76def9a42f23abe62dd3536b664dc4ec5caeb`。
+- Phone Agent 105 项（新增 2 项截图 metadata → `ToolResultContent` 衔接测试）、Mods 16 项、settings 入口 2 项、上游 `tool_result_content` 回归。
+- 插件 Dart 17 项、插件 Kotlin 66 项、上游 `PhoneControlServiceTest` 49 项沿用上一轮结果；本轮未修改插件。
+- 本轮未重跑双 API 设备回归和全量 Flutter 套件。理由：只改中文文档和 phone_agent overlay 测试，未改产品代码、`mod.json`、schema、节点指纹或插件行为；新增测试在合成树中单独运行通过。
+- 产品 debug APK（VLM 验收使用，本轮未重建）：`V:/coding/kelivo-private/.tower/worktrees/wt-1/.build/worktrees/7593c21b5f9da01f/build/app/outputs/flutter-apk/app-debug.apk`，181369230 字节，SHA-256 `3ea30ee9b46342305cf11e0574b76def9a42f23abe62dd3536b664dc4ec5caeb`。
 
-API 29 真机结果和任何后续改动后的数字以 `docs/phone-agent-plan.md` 9.3 与 `mods/phone_agent/README.md` 的最新记录为准，不得沿用旧结果冒充新实现通过。
+API 29 真机结果、双 API 集成测试和任何后续改动后的数字以 `docs/phone-agent-plan.md` 9.3/9.4 与 `mods/phone_agent/README.md` 的最新记录为准，不得沿用旧结果冒充新实现通过。
 
-## 4. 本轮修正内容与契约
+## 4. 本轮 VLM 验收证据
 
-问题：`PhoneNode.fingerprint()` 曾包含 `isFocused` 和 `isSelected`，`ObservationRegistry.handle()` 在 `refresh()` 后比较完整指纹；点击输入框造成焦点变化，使后续 `set_text` 返回 `stale_handle`。
+环境与适用范围：
 
-设备取证结果（API 35）：
+- 设备：API 35 模拟器 `emulator-5554`（Android 15，内部屏幕 1080x2424）。
+- 模型：LM Studio 本地 `prism-ml/bonsai-27b`，identifier `bonsai-vlm`，模型 UI 勾选 Image 输入和 Tools 能力。
+- 应用内 provider：`Local VLM`，地址 `http://10.0.2.2:1234/v1`，dummy key，未读取任何秘密。
+- 上下文：4096 下复杂固定任务出现“截图 → 读树 → 再截图”循环，8192 后完成。这是本地测试经验，不是新增产品依赖。
 
-- 移除 `isFocused` 后 `set_text` 仍失败，诊断信息为 `stale_handle The target node changed (actions)`。
-- 说明聚焦还会增减节点动作集合；`actions` 是执行期能力，不是节点身份。
+证据 A：最小截图 → 图片 → 模型链路
 
-最终契约（详见 `docs/phone-agent-plan.md` 6.5.1）：
+- 工具结果：`image 713x1600`、`screen 1080x2424`、`package_name com.psyche.kelivo.phoneagent`。
+- 后续请求包含 `phone_agent_screenshot` 工具结果和一条合成 user 消息：`image_url` 为 `data:image/png;base64,<omitted 163212 chars>`，`detail` 为 `high`。
+- 产品 UI 的 Request Log ID18 显示 `Attachments: image/png · 47.7 KB · omitted`，Authorization 已脱敏。
+- 模型回答 `10:47 / New Chat / bonsai-vlm (Local VLM)`，与截图中的时间、聊天标题和模型名称一致。
 
-- 指纹不包含 `bounds`、`isFocused`、`actions`。
-- `isSelected`、内容（text/description/hint/state）、稳定能力字段（enabled/editable/clickable/long-clickable/scrollable/checkable/checked）、password、类名、viewId、窗口、包名、尺寸、旋转和 120 秒 TTL 变化仍失效。
-- 动作可用性由 `NodeActionExecutor` 在动作前按当前节点重新校验，不可用返回 `action_unavailable`。
-- 指纹为结构化字段列表 `NodeFingerprint(fields)`；比较使用数据类相等，`fingerprintDiff` 只按固定字段名比较，值不会被反解为字段名；`stale_handle` 只附带固定字段名，不含文本内容（含 NUL 文本也有回归测试）。
-- 节点动作前置校验提取为纯 JVM `performNodeAction(handle, action, text, beforeAction)`，Executor 在 `registry.handle()` 刷新后、`perform` 前调用；`action_unavailable` 负向路径由 `NodeActionExecutorTest` 覆盖。
-- 双 API 设备结果对应提交 `698cace` 的运行时语义；R1 审查后仅调整诊断编码、提取纯前置校验接缝、补测试和文档，未重复设备回归。
+证据 B：固定任务（点击 + 输入 + 滚动尝试 + 确认）
 
-测试：
+- 工具顺序：`phone_agent_tree` 找到 `n3`（description `Search settings`）→ `tap n3` 成功 → 重新读树找到 `EditText n2` → `set_text n2 "Phone"` 成功 → 对 `n1` 执行 `scroll down` 返回结构化 `action_unavailable` → `phone_agent_screenshot` 确认。
+- UI 最终状态：搜索框为 `Phone`，显示 `1 result`，唯一结果为 `Phone Control / Settings`；模型回答确认 `Phone Control` 存在。
+- `action_unavailable` 是契约内可恢复错误：节点声明 `scrollable` 但当前动作集合不含对应滚动方向；产品没有把失败写成成功。
 
-- 修正前用同一套插件测试复现：61 项中 2 项 focus 用例失败。
-- 新增：focus false→true 后复用句柄并 `set_text`、focus true→false 后复用、action-only 变化可复用、selected-only 变化拒绝、`isScrollable` 变化拒绝、禁用节点、句柄 TTL、含 NUL 文本只报告 `text` 字段名，以及 `performNodeAction` 在动作从当前节点移除时返回 `action_unavailable` 且不执行 `beforeAction`/`perform`。
-- 集成测试：聚焦后使用同一观测句柄 `set_text`；坐标滑动放在聚焦之前；随后用无障碍节点滚动验证列表真的滚动。
+证据 C：补充滚动任务（`stale_handle` 恢复 + 真实滚动）
 
-集成测试的坐标手势边界：
+- 工具顺序：首次读树时前台仍在聊天页，`n1` 为可滚动 View → 对 `n1` 执行 `scroll forward` 返回 `stale_handle`（前台已切到 Settings）→ 重新读树，`n4` 为 `android.widget.ScrollView` → 对 `n4` 执行 `scroll forward` 成功 → 再次读树，最后一个可见设置为 `n21 Sponsor`。
+- UI 可观察状态：Settings 页面真实滚到底部并显示 `Sponsor`；模型回答 `Sponsor`。
 
-- `flutter_test` 的 `LiveTestWidgetsFlutterBinding` 默认 `shouldPropagateDevicePointerEvents = false`，设备指针事件只进入诊断 dispatcher，不转发给 widget 树；绑定还会断言测试不得修改该开关。
-- 因此集成测试只能验证坐标手势被原生接受并完成（`onGestureCompleted`），不能断言应用侧滚动效果；不要把这个限制写成产品缺陷，也不要宣称坐标手势 UI 效果已验证。
+工具暴露：
 
-## 5. 设备、授权与环境
+- 请求工具列表为 `read_file` + `phone_agent_screenshot` / `phone_agent_tree` / `phone_agent_input`；`read_file` 是上游工具，不属于 Mod schema。
+- 无原生 `phone_control`，无重复 `phone_agent_*`；三个 schema 均无 `snapshot_id`，均设置 `additionalProperties: false`。
+
+证据边界：
+
+- 同一生成轮的工具循环图片回放已验证；新用户轮次再次请求时的历史图片回放未验证。
+- 本轮未使用坐标动作完成任务；坐标手势的 UI 效果仍受 integration_test 绑定限制，未在物理 API 30+ 真机验证。
+- 本轮没有确认私有 Mod 硬缺陷。`action_unavailable` 和 `stale_handle` 都是契约内可恢复结果，不是产品假成功；Add Provider 表单的低置信度自动化焦点现象未被人工复现，不作为产品缺陷记录。
+- 文档只记录脱敏后的请求形态和尺寸/长度，不记录 provider 密钥、完整会话文本或截图字节。
+
+## 5. 本轮新增聚焦测试
+
+文件：`mods/phone_agent/overlay/test/features/phone_agent/phone_agent_tool_result_test.dart`（合成树 `test/features/phone_agent/phone_agent_tool_result_test.dart`）。
+
+- 使用真实 `PhoneAgentScreenshotResult.build` 和真实 `McpImageSnapshot.saveBytes` 落盘，不 mock 被验证的 metadata 衔接。
+- 支持图片：`ToolResultContent.read` 返回 1 个 `data:image/png;base64,` 图片引用，正文移除 Markdown 图片行并保留工具 JSON。
+- 不支持图片：`imageUrls` 为空，正文包含省略说明且不含 base64。
+- 复用 `RecordingPhoneAgentClient` 和 `FakePathProviderPlatform`；未修改上游测试或 provider 序列化。
+- 现有 `phone_agent_screenshot_test.dart` 的落盘尺寸校验、尺寸不一致、空字节、非法尺寸、保存失败和清理错误路径保持不变。
+
+## 6. 设备、授权与环境
 
 ### 设备
 
@@ -91,19 +110,18 @@ API 29 真机结果和任何后续改动后的数字以 `docs/phone-agent-plan.m
 
 ### 无障碍授权流程（重要）
 
-- 安装测试包和部分收尾的 force-stop **可能**清除系统无障碍授权；每轮都要用 `settings get secure enabled_accessibility_services` 和 `dumpsys accessibility` 检查真实状态，不要假设一定被清除或一定保留（API 35 最终通过轮在测试期间保持绑定，测试结束的 force-stop 才清除）。
+- 安装测试包和部分收尾的 force-stop **可能**清除系统无障碍授权；每轮都要用 `settings get secure enabled_accessibility_services` 和 `dumpsys accessibility` 检查真实状态，不要假设一定被清除或一定保留。
 - 集成测试在 `setUpAll` 打印 `PHONE_AGENT_WAITING_FOR_SERVICE` 后等待约 300 秒（600 × 500ms），需要在该窗口内通过系统界面重新启用服务。
 - 服务组件：`com.psyche.kelivo.phoneagent/com.kelivo.phoneagent.PhoneAgentService`；只启用 **Kelivo Phone Agent**，不要启用 **Kelivo phone control**。
 - 启用后把 `Kelivo Agent` 应用切回前台并保持，直到测试结束。
 - 不要用 `settings put secure` 写入授权绕过系统确认。
-- 若需要人工操作，通过 TowerSend 报告具体设备、包名、等待窗口和步骤。
 
-### ComputerUse 操作模拟器/真机的前置条件（本轮经验）
+### 本地 VLM 环境（测试经验，不是产品依赖）
 
-- 模拟器宿主窗口必须完整位于桌面内；窗口缩放后要重新截图观察并重新计算点击映射，否则下半屏点击会错位。
-- 关键授权前先用无害操作（如滚动、亮度滑块）验证落点，再逐步执行“设置 → 无障碍 → 已下载的应用 → 服务 → 开关 → Allow”，每步验证后再继续。
-- 真机镜像（scrcpy）白屏重启、应用抽屉滚动竞态和剪贴板同步失败都会拖长导航时间；正式授权前先预热服务详情页并验证 Recents 切换。
-- 这些是测试环境的操作经验，不是产品依赖；产品不自动授权、不自动切换系统开关。
+- LM Studio server 默认 1234 端口；本轮使用 `prism-ml/bonsai-27b`，identifier `bonsai-vlm`，建议 `-c 8192`。
+- 模拟器访问宿主机使用 `http://10.0.2.2:1234/v1`；provider 使用 dummy key，不读取或提交秘密。
+- 应用内模型需同时勾选 Image 输入和 Tools 能力，否则 Mod 不激活或截图工具不暴露。
+- 测试结束后停止 LM Studio、卸载模型；设备上的 provider 和测试会话是测试状态，不是仓库交付物。
 
 ### Windows 环境
 
@@ -112,7 +130,7 @@ API 29 真机结果和任何后续改动后的数字以 `docs/phone-agent-plan.m
 - 本任务 worktree 路径较长，合成树会超过 Windows `MAX_PATH`。生成时使用环境变量注入 Git 长路径支持（不修改任何配置文件）：
 
 ```bash
-cd V:/coding/kelivo-private/.tower/worktrees/wt-1
+cd V:/coding/kelivo-private/.tower/worktrees/wt-6
 export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.longpaths GIT_CONFIG_VALUE_0=true
 dart tool/mod_loader.dart plan
 dart tool/mod_loader.dart apply
@@ -122,14 +140,14 @@ dart tool/mod_loader.dart verify
 - 合成树内 `android/gradlew` 由 Flutter 生成：先执行 `flutter build apk --debug --config-only`，再运行 `./gradlew :kelivo_phone_agent:testDebugUnitTest`。模块名已通过 `./gradlew projects` 确认为 `:kelivo_phone_agent`。
 - 提交时只精确暂存实际交付文件，避免把无内容差异的 CRLF stat 噪声加入提交。
 
-## 6. 验证顺序与后续交付
+## 7. 验证顺序与后续交付
 
 1. 改动契约时先更新 `AGENTS.md`、`docs/phone-agent-plan.md`、`mods/phone_agent/README.md`，再改实现和测试。
-2. 插件 Kotlin 测试：`cd android && ./gradlew :kelivo_phone_agent:testDebugUnitTest`。
-3. Loader：`dart format --output=none --set-exit-if-changed tool test`、`dart analyze tool test`、`dart test`、`dart tool/mod_loader.dart verify`。
-4. 合成树：`flutter pub get`、`flutter pub get --directory tool/l10n --enforce-lockfile`、`dart format`、`dart analyze --fatal-infos lib test integration_test tool`、Phone Agent/Mods/settings 测试、插件 Dart 测试、上游 `PhoneControlTest`。
-5. 设备：先 API 35（`-d emulator-5554`），再 API 29（`-d 357784090209204`）；安装后按第 5 节流程授权。
-6. 构建产品 APK 并重新计算大小与 SHA-256；不要沿用旧哈希。
+2. Loader：`dart format --output=none --set-exit-if-changed tool test`、`dart analyze tool test`、`dart test`、`dart tool/mod_loader.dart verify`。
+3. 合成树：`flutter pub get`、`flutter pub get --directory tool/l10n --enforce-lockfile`、`dart format`、`dart analyze --fatal-infos lib test integration_test tool`、Phone Agent/Mods/settings 测试、上游 `tool_result_content` 回归。
+4. 插件 Kotlin 测试（修改插件时）：`cd android && ./gradlew :kelivo_phone_agent:testDebugUnitTest`。
+5. 设备：先 API 35（`-d emulator-5554`），再 API 29（`-d 357784090209204`）；安装后按第 6 节流程授权。
+6. 修改产品代码或插件后重新构建 APK 并计算大小与 SHA-256；不要沿用旧哈希。只改文档/测试时不要重建 APK。
 7. 更新中文验收记录和本交接文档，如实写明未验证项。
 
-仍未完成或不能宣称完成：物理 API 30+ 真机的坐标手势 UI 效果、VLM 固定任务与图片链路、真实 `FLAG_SECURE`、完整异常路径、签名 release。上游仓保持只读；不向上游提交或推送私有实现。
+仍未完成或不能宣称完成：物理 API 30+ 真机的 VLM 固定任务和坐标手势 UI 效果、新用户轮次历史图片回放、真实 `FLAG_SECURE`、完整异常路径、签名 release。上游仓保持只读；不向上游提交或推送私有实现。
