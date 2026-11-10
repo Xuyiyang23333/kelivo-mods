@@ -64,6 +64,36 @@ void main() {
       }
     });
 
+    test('截图与读树描述披露 secure 黑图限制且不暴露 snapshot_id', () {
+      final definitions = PhoneAgentTools.buildDefinitions(
+        supportsImageInput: true,
+      );
+      final screenshot = functionOf(
+        definitions,
+        PhoneAgentToolNames.screenshot,
+      );
+      final screenshotDescription = (screenshot['description'] as String)
+          .toLowerCase();
+      expect(screenshotDescription, contains('secure'));
+      expect(screenshotDescription, contains('black'));
+      expect(screenshotDescription, contains('not a security check'));
+      expect(screenshotDescription, contains('phone_agent_tree'));
+      expect(screenshotDescription, contains('normal black'));
+
+      final tree = functionOf(definitions, PhoneAgentToolNames.tree);
+      final treeDescription = (tree['description'] as String).toLowerCase();
+      expect(treeDescription, contains('secure'));
+      expect(treeDescription, contains('not guaranteed'));
+      expect(treeDescription, contains('prefer the tree'));
+
+      final input = functionOf(definitions, PhoneAgentToolNames.input);
+      final inputDescription = (input['description'] as String).toLowerCase();
+      expect(inputDescription, contains('black'));
+      expect(inputDescription, contains('phone_agent_tree'));
+
+      expect(jsonEncode(definitions).contains('snapshot_id'), isFalse);
+    });
+
     test('非视觉模型没有截图工具和坐标输入', () {
       final definitions = PhoneAgentTools.buildDefinitions(
         supportsImageInput: false,
@@ -499,4 +529,63 @@ void main() {
     expect(decoded['instruction'], isNotEmpty);
     expect(decoded['tool'], PhoneAgentToolNames.input);
   });
+
+  group('超时映射', () {
+    test('截图超时返回 tool_error timeout 且无图片 metadata', () async {
+      final slow = _SlowScreenshotClient();
+      final shortService = PhoneAgentService(
+        client: slow,
+        timeout: const Duration(milliseconds: 50),
+      );
+
+      final result = await PhoneAgentTools.handleCall(
+        name: PhoneAgentToolNames.screenshot,
+        args: <String, dynamic>{},
+        service: shortService,
+        supportsImageInput: true,
+      );
+
+      expect(result, isA<ClientToolResult>());
+      final clientResult = result as ClientToolResult;
+      final decoded = decodeToolResult(clientResult);
+      expect(decoded['type'], 'tool_error');
+      expect(decoded['error'], 'timeout');
+      expect(decoded['tool'], PhoneAgentToolNames.screenshot);
+      expect(decoded.containsKey('image'), isFalse);
+      expect(clientResult.metadata, isNull);
+      expect(clientResult.content.contains('![]('), isFalse);
+      expect(clientResult.content.contains('data:image'), isFalse);
+      expect(slow.screenshotCalls, 1);
+    });
+
+    test('读树超时返回 tool_error timeout', () async {
+      client.treeDelay = const Duration(milliseconds: 200);
+      final shortService = PhoneAgentService(
+        client: client,
+        timeout: const Duration(milliseconds: 50),
+      );
+
+      final decoded = decodeToolResult(
+        await PhoneAgentTools.handleCall(
+          name: PhoneAgentToolNames.tree,
+          args: <String, dynamic>{},
+          service: shortService,
+          supportsImageInput: true,
+        ),
+      );
+
+      expect(decoded['type'], 'tool_error');
+      expect(decoded['error'], 'timeout');
+      expect(decoded['tool'], PhoneAgentToolNames.tree);
+    });
+  });
+}
+
+class _SlowScreenshotClient extends RecordingPhoneAgentClient {
+  @override
+  Future<PhoneAgentCapture> screenshot() async {
+    screenshotCalls++;
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    return capture;
+  }
 }

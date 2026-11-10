@@ -1,5 +1,18 @@
 # 下一次会话交接：Phone Agent VLM 验收证据
 
+## 0. M10 当前状态（2026-11-11）
+
+- 本轮目标：API35 真实 `FLAG_SECURE` 与受控异常路径。按 M11 公开 API 审查结论，契约已收缩为：整屏 `takeScreenshot` 不保证对 `FLAG_SECURE` 报错，secure 内容可能以黑色区域出现在成功截图中；不做像素启发式，不承诺不发送黑图，正常黑色页面保留；平台明确报错时 `screenshot_blocked` 且不发送图片/metadata。
+- 最终源码 `modsetHash`：`5b1cde0304e687b9e3a26935cf85b5a27d102c9ecb409ff0e8b1358075aa902d`；合成树：`V:/coding/kelivo-private/.tower/worktrees/wt-10/.build/worktrees/5b1cde0304e687b9`；`plan`/`verify` 通过。
+- 提交：`c4fa61b`（实现检查点）、`09b5c11`（首次结果文档）、`2ca0888`（首次整套件协调）；本轮 reviewer findings 返工与最新结果见最新 commit。
+- 已通过：Loader 165（历史）、聚焦工具测试 32、最终树 `dart analyze --fatal-infos`、插件 Dart 17、插件 Kotlin 66、上游 PhoneControl 49（历史；本轮 Kotlin 仅注释改动，由 APK 构建编译）。
+- API35 完整异常套件（实际运行树 `2c1513ecef3f2293`；当前 `5b1cde0304e687b9` 仅文档哈希变化，关键代码/测试一致，新树未重跑设备）：**`+5 ~1`，`All tests passed!`，EXIT=0**；通过 secure、旋转、home/recents、锁屏、服务禁用/重启；权限窗口明确跳过（未验证）。服务禁用前启动 1000 个只读 pending 请求，日志 `PHONE_AGENT_SERVICE_PENDING_BATCH: size=1000 elapsed=3252ms codes=interrupted,ok`；锁屏分别调用 tree/screenshot/input 并断言 `device_locked`。历史 `41e33b...` 的 `+2 ~1 -3`、EXIT=1 失败保留在 plan 9.3.1。
+- API35 官方测试 2 项通过、EXIT=0；API29 官方测试 2 项通过、EXIT=0（截图 `unsupported_os`）。
+- 当前产品 debug APK（在最终源码/构建树 `5b1cde0304e687b9` 构建；设备套件实际运行于 `2c1513...`）：**181,373,590 字节**，SHA-256 `581d56fc03fe716c768f2554015115bffd8e2b0d610c71e74f5d3b21524703a3`；debug merged manifest 含 `SecureWindowFixtureActivity`，release merged manifest 不含该夹具（不宣称签名 release）。
+- secure 观察：本轮记录成功黑图；上一轮同一夹具曾返回成功内容图（平均亮度约 191），因此契约只承诺“可能黑化”，不保证黑图或检测。
+- 未验证：权限窗口、物理 API30+、签名 release、原生超时、`stale_handle` 根因。
+- 临时不同 UID 夹具 `.build/secure_fixture_app/` 和 host driver `.build/host_exception_driver.sh` 仅在 `.build`，不提交。
+
 ## 1. 新会话与仓库
 
 请在 `V:/coding/kelivo-private` 新建会话，不要以 `V:/coding` 或 `V:/coding/kelivo` 作为 Tower 工作区。
@@ -12,20 +25,22 @@
 
 ## 2. 当前目标与阶段
 
-第一阶段 Mod Loader 已完成。第二阶段 Phone Agent 的主要功能已完成，VLM 图片链路、Kelivo 应用内固定任务和跨新用户轮次历史图片回放已在 API 35 模拟器用用户指定的 magpie `llama-cpp/llama-cpp` 验证；仍处于设备联调阶段，不能宣称全部验收完成。
+第一阶段 Mod Loader 已完成。第二阶段 Phone Agent 的主要功能已完成，当前 M10 已在 API 35 模拟器验证真实 `FLAG_SECURE` 行为、旋转、home/recents、锁屏、服务禁用/重启；权限窗口、物理 API30+、原生超时和签名 release 仍未验证，不能宣称全部验收完成。
 
-本轮已完成：
+本轮（M10）已完成：
 
-1. 固化 API 35 模拟器 magpie `llama-cpp/llama-cpp` 的真实图片链路、Kelivo 应用内固定任务和跨新用户轮次历史图片回放验收记录。
-2. 只改四份中文文档；未修改产品代码、测试、`mod.json`、schema、插件或上游。
-3. 只读 `plan` 得到与现有合成树相同的 `modsetHash`，`verify` 通过；未重建合成树或 APK，未产生新的测试数字。
+1. 按用户批准的契约记录整屏 `takeScreenshot` 的 `FLAG_SECURE` 行为：可能成功返回黑图或内容图，不保证检测、不承诺不发送黑图；平台明确报错时 `screenshot_blocked` 且无图片/metadata。
+2. 完整异常套件实际运行于 `2c1513ecef3f2293` 树：`+5 ~1`、EXIT=0；服务用例验证禁用前同一批 pending Future 被中断，锁屏分别验证 tree/screenshot/input。
+3. 当前 `5b1cde0304e687b9` 是仅文档哈希变化后的最终源码/构建树；关键代码/测试与 `2c1513...` 逐字一致，新树未重跑设备。当前 APK 只在 `5b1cde...` 构建。
+4. 更新契约、工具描述、debug 夹具、异常套件与中文文档；未修改生产行为（仅 `ScreenshotCapture.kt` 注释）、未扩大白名单、Mod 版本保持 0.2.0。
 
 当前剩余：
 
-1. 物理 API 30+ 真机上的 VLM 固定任务和坐标手势 UI 效果。
-2. 真实 `FLAG_SECURE`、旋转/切窗/锁屏/禁用服务/超时等异常路径。
-3. 带合法签名配置的 release 构建。
-4. 一次未复现的 `stale_handle`（`No current tree observation`）根因未确认；重读树后恢复，未修复，只记录有限证据。
+1. 权限窗口 `system_window_denied` 未触发，未验证。
+2. 物理 API 30+ 真机上的 VLM 固定任务、截图和坐标手势 UI 效果。
+3. 原生截图/手势/通道/worker 排队超时未设备验证。
+4. 带合法签名配置的 release 构建。
+5. 一次未复现的 `stale_handle`（`No current tree observation`）根因未确认；重读树后恢复，未修复，只记录有限证据。
 
 首版输入仍只开放给测试包名 `com.psyche.kelivo.phoneagent`。不要扩大白名单、引入自动无障碍授权，或把发送/购买/删除确认描述成原生硬护栏。
 
@@ -33,23 +48,25 @@
 
 - 上游基线：`73afa4ec77cfc9af2efea2487fee8bba1362639d`。
 - 当前 Mod 版本：`0.2.0`。
-- 本轮沿用合成树：`V:/coding/kelivo-private/.tower/worktrees/wt-6/.build/worktrees/5f0be65f98bb04e5`。
-- 本轮 `modsetHash`：`5f0be65f98bb04e5613e372731215d7b577bbeb1b4ffa3bf9c14693e74757284`（只读 `plan` 重新计算一致）。
+- 当前 M10 合成树：`V:/coding/kelivo-private/.tower/worktrees/wt-10/.build/worktrees/5b1cde0304e687b9`。
+- 当前 M10 `modsetHash`：`5b1cde0304e687b9e3a26935cf85b5a27d102c9ecb409ff0e8b1358075aa902d`（`plan`/`verify` 通过）。
+- 当前 M10 产品 debug APK：`V:/coding/kelivo-private/.tower/worktrees/wt-10/.build/worktrees/5b1cde0304e687b9/build/app/outputs/flutter-apk/app-debug.apk`，181,373,590 字节，SHA-256 `581d56fc03fe716c768f2554015115bffd8e2b0d610c71e74f5d3b21524703a3`；debug merged manifest 含 `SecureWindowFixtureActivity`，release merged manifest 不含该夹具（不宣称签名 release）。
 - 三个工具：`phone_agent_screenshot`、`phone_agent_tree`、`phone_agent_input`。
 - 每助手独立 `localToolId='phone_agent'`；Mods 页提供关闭/原生手机控制/Phone Agent 三态单选，已有助手不自动迁移。
 - 观察按需发生，不强制每步重新读取完整树；工具 schema 不暴露 `snapshot_id`。
 - `supported` 只表示 API 30+ 截图能力；API 29 仍可 ready 并使用树/节点输入。
 
-本轮已通过的检查：
+本轮 M10 已通过的检查：
 
-- 只读 `dart tool/mod_loader.dart plan`：`modsetHash` 与现有合成树一致，未写文件。
-- `dart tool/mod_loader.dart verify`：现有合成树校验通过。
-- 本轮未修改产品代码、测试、`mod.json`、schema 或插件，未重跑测试、未重建合成树或 APK；上一轮 Loader 165、Phone Agent 105、Mods 16、settings 入口 2、上游 `tool_result_content` 回归、插件 Dart 17、插件 Kotlin 66、上游 `PhoneControlServiceTest` 49 的结果继续有效，不得当作本轮重跑结果。
-- 产品 debug APK（本轮 VLM 验收使用，未重建）：`V:/coding/kelivo-private/.tower/worktrees/wt-1/.build/worktrees/7593c21b5f9da01f/build/app/outputs/flutter-apk/app-debug.apk`，181369230 字节，SHA-256 `3ea30ee9b46342305cf11e0574b76def9a42f23abe62dd3536b664dc4ec5caeb`。
+- 只读 `dart tool/mod_loader.dart plan`：`modsetHash` 与最终树一致；`verify` 校验通过。
+- API35 完整异常套件：`+5 ~1`、`All tests passed!`、EXIT=0；权限窗口明确 skip。
+- API35/API29 官方 `phone_agent_test.dart` 各 2 项通过、EXIT=0（按指示未重复运行）。
+- 既有 Loader 165、聚焦工具测试 32、`dart analyze --fatal-infos`、插件 Dart 17、插件 Kotlin 66、上游 PhoneControl 49 结果保留，本轮未重复。
+- 历史 VLM 轮（magpie `llama-cpp/llama-cpp`）使用旧树 `V:/coding/kelivo-private/.tower/worktrees/wt-6/.build/worktrees/5f0be65f98bb04e5` 和旧 APK 181369230 字节 / SHA-256 `3ea30ee9b46342305cf11e0574b76def9a42f23abe62dd3536b664dc4ec5caeb`，只作历史记录，不代表当前实现。
 
 API 29 真机结果、双 API 集成测试和任何后续改动后的数字以 `docs/phone-agent-plan.md` 9.3/9.4 与 `mods/phone_agent/README.md` 的最新记录为准，不得沿用旧结果冒充新实现通过。
 
-## 4. 本轮 VLM 验收证据（magpie `llama-cpp/llama-cpp`）
+## 4. 上一轮 VLM 验收证据（历史，magpie `llama-cpp/llama-cpp`）
 
 环境与适用范围：
 
@@ -93,7 +110,7 @@ API 29 真机结果、双 API 集成测试和任何后续改动后的数字以 `
 - 跨用户轮次历史图片回放已通过，不再列为未验证；同轮工具循环回放见证据 A（REQ28）。
 - 本轮未使用坐标动作完成任务；坐标手势的 UI 效果仍受 integration_test 绑定限制，未在物理 API 30+ 真机验证。
 - 本轮没有确认私有 Mod 硬缺陷；上述一次 `stale_handle` 证据有限，根因未查明。契约内的可恢复错误不写成产品假成功。
-- 仍明确未验证：物理 API 30+ 真机的 VLM 固定任务与坐标手势 UI 效果、真实 `FLAG_SECURE`、真机旋转/切窗/锁屏/禁用服务/超时等其他异常路径、签名 release。
+- 该轮仍明确未验证：物理 API 30+ 真机的 VLM 固定任务与坐标手势 UI 效果、签名 release；真实 `FLAG_SECURE`、旋转、home/recents、锁屏、服务禁用/重启已由后续 M10 在 API35 模拟器补充（见第 0 节），但不代表物理 API30+ 或其他 Android 版本。
 - 本轮只验证 magpie `llama-cpp/llama-cpp` 与 API 35 模拟器，不承诺任意模型或设备。
 - 文档只记录脱敏后的请求形态和尺寸/长度，不记录 provider 密钥、完整会话文本或截图字节。
 
@@ -103,9 +120,9 @@ API 29 真机结果、双 API 集成测试和任何后续改动后的数字以 `
 - 固定任务完成 tree → tap `Search settings` → tree → `set_text Phone` → `n1 scroll down` 返回 `action_unavailable` → 截图确认；补充滚动先返回 `stale_handle`，重读树后 `n4` ScrollView `forward` 成功并显示 `Sponsor`。
 - 4096 上下文下复杂任务出现截图/读树循环，8192 后完成；这是本地测试经验，不是产品运行时要求。
 
-## 5. 上一轮新增聚焦测试（本轮未改测试）
+## 5. 上一轮新增聚焦测试（历史，该轮未改测试）
 
-本轮只改中文文档，未新增或修改测试。以下为上一轮新增的测试，保留作回归说明。
+该轮只改中文文档，未新增或修改测试；该标签仅适用于该历史 VLM 文档轮，不代表当前 M10；M10 已新增并运行异常/聚焦测试。以下为上一轮新增的测试，保留作回归说明。
 
 文件：`mods/phone_agent/overlay/test/features/phone_agent/phone_agent_tool_result_test.dart`（合成树 `test/features/phone_agent/phone_agent_tool_result_test.dart`）。
 
@@ -165,4 +182,4 @@ dart tool/mod_loader.dart verify
 6. 修改产品代码或插件后重新构建 APK 并计算大小与 SHA-256；不要沿用旧哈希。只改文档/测试时不要重建 APK。
 7. 更新中文验收记录和本交接文档，如实写明未验证项。
 
-仍未完成或不能宣称完成：物理 API 30+ 真机的 VLM 固定任务和坐标手势 UI 效果、真实 `FLAG_SECURE`、完整异常路径、签名 release；一次未复现的 `stale_handle` 根因未确认，重读树后恢复，未修复。跨新用户轮次历史图片回放已在 API 35 模拟器通过，不再列为未验证。只验证 magpie `llama-cpp/llama-cpp` 与 API 35 模拟器，不承诺任意模型。上游仓保持只读；不向上游提交或推送私有实现。
+仍未完成或不能宣称完成：物理 API 30+ 真机的 VLM 固定任务和坐标手势 UI 效果、权限窗口、签名 release、原生超时；一次未复现的 `stale_handle` 根因未确认，重读树后恢复，未修复。API35 模拟器已验证 secure 截图行为、旋转、home/recents、锁屏、服务禁用/重启；真实 `FLAG_SECURE` 已从“未验证”移出，但只代表 API35 模拟器，不代表所有 Android 版本/设备。跨新用户轮次历史图片回放已在 API 35 模拟器通过，不再列为未验证。只验证 magpie `llama-cpp/llama-cpp` 与 API 35 模拟器，不承诺任意模型。上游仓保持只读；不向上游提交或推送私有实现。
