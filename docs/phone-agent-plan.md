@@ -4,15 +4,15 @@
 
 - 当前阶段：第二阶段验收进行中（UI/选择契约改造已完成），Mod 版本 0.2.0。
 - 上一轮修正（节点重验）：`PhoneNode.fingerprint()` 不再包含 `isFocused` 和动作集合 `actions`；同一已刷新节点因点击/输入产生的焦点变化和动作增减不再让后续 `set_text` 返回 `stale_handle`；`isSelected`、内容、稳定能力字段、窗口/包名/尺寸/旋转和 120 秒 TTL 校验保持不变。指纹为结构化字段列表，`stale_handle` 只附带固定字段名，不从节点内容反解字段名。契约见 6.5.1。
-- 本轮 VLM 验收（API 35 模拟器 `emulator-5554`）：使用产品 debug APK 和本地 LM Studio 模型 `prism-ml/bonsai-27b`（identifier `bonsai-vlm`，模型 UI 勾选 Image + Tools，provider `http://10.0.2.2:1234/v1`，dummy key，不读取秘密）完成真实图片链路和固定任务。4096 上下文下复杂任务出现截图/读树循环，8192 后完成；这是本地测试经验，不是新增产品依赖。证据、适用范围和未验证项见 9.4。
-- 本轮 VLM 验收合成树：`V:/coding/kelivo-private/.tower/worktrees/wt-6/.build/worktrees/5f0be65f98bb04e5`，`modsetHash` 为 `5f0be65f98bb04e5613e372731215d7b577bbeb1b4ffa3bf9c14693e74757284`，`dart tool/mod_loader.dart verify` 通过。该树由本任务私有 worktree 生成；Windows 路径长度限制通过 `GIT_CONFIG_*` 环境变量注入 `core.longpaths=true` 解决，未修改任何 Git 配置文件。
-- 本轮自动检查：Loader format/analyze 通过、Loader 165 项通过；合成树 `dart format`、`dart analyze --fatal-infos lib test integration_test tool` 通过；Phone Agent 105（新增 2 项截图 metadata → `ToolResultContent` 衔接测试）、Mods 16、settings 入口 2 通过；上游 `tool_result_content` 回归通过。本轮未修改插件，插件 Dart 17、插件 Kotlin 66 和上游 PhoneControl 49 沿用上一轮结果。
+- 本轮 magpie VLM 验收（API 35 模拟器 `emulator-5554`）：使用产品 debug APK 和用户指定的 magpie 网关模型 `llama-cpp/llama-cpp`（provider `http://10.0.2.2:3425/v1`，UI Image + Tools；局域网访问由用户开启，未读取或记录密钥）完成真实图片链路、Kelivo 应用内固定任务和跨新用户轮次历史图片回放。证据、适用范围和未验证项见 9.4。
+- 本轮合成树沿用 `V:/coding/kelivo-private/.tower/worktrees/wt-6/.build/worktrees/5f0be65f98bb04e5`，`modsetHash` 为 `5f0be65f98bb04e5613e372731215d7b577bbeb1b4ffa3bf9c14693e74757284`；本轮只改中文文档，重新执行只读 `plan` 得到同一 `modsetHash`，`verify` 通过，未重建合成树或 APK。该树由 M6 私有 worktree 生成；Windows 路径长度限制通过 `GIT_CONFIG_*` 环境变量注入 `core.longpaths=true` 解决，未修改任何 Git 配置文件。
+- 本轮自动检查：未修改产品代码、测试、`mod.json`、schema 或插件，因此未产生新的测试数字；上一轮 Loader 165、Phone Agent 105、Mods 16、settings 入口 2、上游 `tool_result_content` 回归、插件 Dart 17、插件 Kotlin 66 和上游 PhoneControl 49 的结果继续有效，不得当作本轮重跑结果。
 - 上一轮节点重验合成树（历史）：`V:/coding/kelivo-private/.tower/worktrees/wt-1/.build/worktrees/7593c21b5f9da01f`，`modsetHash` 为 `7593c21b5f9da01fb8b8c4dfe167d892a940efe4a1caf591b772fbe83b6b6f7d`；当时 Phone Agent 103、Mods 16、settings 入口 2、插件 Dart 17、插件 Kotlin 66、上游 PhoneControl 49 通过。
 - 本地化：23 个键已由本机免费 Magpie llama-cpp 翻译，`translate.py check` 四个目标语言（ko、ru、tr、zh_Hant）均 0 pending；本轮无 UI/ARB 改动，未重跑翻译生成。
 - 当前产品 APK：`V:/coding/kelivo-private/.tower/worktrees/wt-1/.build/worktrees/7593c21b5f9da01f/build/app/outputs/flutter-apk/app-debug.apk`，181369230 字节，SHA-256 `3ea30ee9b46342305cf11e0574b76def9a42f23abe62dd3536b664dc4ec5caeb`。本轮 VLM 验收直接使用该 APK；本轮未修改产品代码，因此未重建、未产生新哈希。
 - 上一轮设备回归：API 35 模拟器与 API 29 真机官方集成测试均退出码 0，逐项结果见 9.3；该结果对应提交 `698cace` 的运行时语义。之后仅调整诊断编码、提取纯 JVM 前置校验接缝、补测试和文档，未重复双 API 设备回归（按 R1 审查意见）。
 - 历史验收记录（焦点修正前，不代表当前实现）：最终合成树 `V:/coding/kelivo-private/.build/worktrees/4ed083cf5fe7dda8`，`modsetHash` 为 `4ed083cf5fe7dda8eec575588594831d9515cbd88429cb6f5b893c9ca6544331`；Flutter 255 项（254 通过 + 1 Windows 条件跳过）；插件 Kotlin 55；旧产品 APK 181354638 字节，SHA-256 `af67f4285bef9e3d1093c6433f42669a8c84b8bee99b6397f68dfd91e1c60ceb`；当时的未验证项包含 API 30+ 截图与坐标手势。
-- 仍明确未验证：物理 API 30+ 真机的 VLM 固定任务与坐标手势 UI 效果（integration_test 绑定不转发设备指针事件）、新用户轮次的历史图片回放、真实 `FLAG_SECURE`、其他真机异常路径、签名 release。因此不宣称 Phone Agent 第二阶段全部完成。
+- 仍明确未验证：物理 API 30+ 真机的 VLM 固定任务与坐标手势 UI 效果（integration_test 绑定不转发设备指针事件）、真实 `FLAG_SECURE`、其他真机异常路径、签名 release。跨新用户轮次历史图片回放已在 API 35 模拟器通过，不再列为未验证。以上只验证 magpie `llama-cpp/llama-cpp` 与 API 35 模拟器，不承诺任意模型或设备。因此不宣称 Phone Agent 第二阶段全部完成。
 - Mod Loader 的目录、命令、补丁机制和通用接缝见 [Mod Loader 实施计划](mod-loader-plan.md)。
 - 本文只定义 `phone_agent` Mod，不重复 Loader 的通用实现。
 - 基线仓库：`V:/coding/kelivo`。
@@ -450,7 +450,7 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 4. 使用 Loader 的 `rebase-drill` 检查新基线，并处理 vendored 漂移提醒。
 5. 完善中文 README：选择、授权、白名单、限制、更新和故障排查。
 
-本轮进展：第 1-3 项已在 API 35 模拟器用本地 `bonsai-vlm` 完成（见 9.4）；第 4 项 `rebase-drill` 未在本轮执行；第 5 项中文 README 已维护。物理 API 30+ 真机 VLM 仍未验证。
+本轮进展：第 1-3 项已在 API 35 模拟器用用户指定的 magpie `llama-cpp/llama-cpp` 完成，并补充跨新用户轮次历史图片回放（见 9.4）；第 4 项 `rebase-drill` 未在本轮执行；第 5 项中文 README 已维护。物理 API 30+ 真机 VLM 仍未验证。
 
 完成条件：所有可用环境中的 Phone Agent 验收项通过；无法执行的硬件/模型项目明确记录为未验证。
 
@@ -607,57 +607,70 @@ flutter test integration_test/phone_agent_test.dart -d <android-device-id>
 仍待验证：
 
 - 物理 API 30+ 真机上的截图与坐标手势（API 35 模拟器已验证截图、坐标手势原生接受和节点滚动；坐标手势的 UI 效果受测试绑定限制）。
-- 物理 API 30+ 真机上的 VLM 固定任务（API 35 模拟器已用本地 `bonsai-vlm` 完成图片链路和固定任务，见 9.4）。
-- 新用户轮次再次请求时的历史图片回放（仅验证同轮工具循环回放）。
+- 物理 API 30+ 真机上的 VLM 固定任务（API 35 模拟器已用用户指定的 magpie `llama-cpp/llama-cpp` 完成图片链路、应用内固定任务和跨新用户轮次历史图片回放，见 9.4）。
 - 真实 `FLAG_SECURE` 窗口。
 - 真机旋转、切窗、锁屏、禁用服务、超时等其他异常路径。
 - 带合法签名配置的 release 构建。
 
 因此不宣称 Phone Agent 第二阶段全部完成；未验证项不能用编译或单元测试代替真机结论。
 
-### 9.4 VLM 图片链路与固定任务验收（API 35 模拟器）
+### 9.4 VLM 图片链路与固定任务验收（API 35 模拟器，magpie `llama-cpp/llama-cpp`）
 
-本轮在 API 35 模拟器 `emulator-5554`（Android 15，内部屏幕 1080x2424）使用产品 debug APK（181369230 字节，SHA-256 `3ea30ee9b46342305cf11e0574b76def9a42f23abe62dd3536b664dc4ec5caeb`）完成真实聊天、本地 VLM 图片链路和固定任务。本轮未修改产品代码、`mod.json`、schema、节点指纹或插件行为。
+本轮在 API 35 模拟器 `emulator-5554`（Android 15，内部屏幕 1080x2424）使用产品 debug APK（181369230 字节，SHA-256 `3ea30ee9b46342305cf11e0574b76def9a42f23abe62dd3536b664dc4ec5caeb`）和用户指定的 magpie 网关模型完成真实聊天、图片链路、Kelivo 应用内固定任务和跨新用户轮次历史图片回放。本轮未修改产品代码、`mod.json`、schema、节点指纹或插件行为，未重建 APK。
 
 环境与适用范围：
 
-- 本地模型：LM Studio 加载 `prism-ml/bonsai-27b`，identifier `bonsai-vlm`，模型 UI 勾选 Image 输入和 Tools 能力；应用内新增 `Local VLM` provider，地址 `http://10.0.2.2:1234/v1`，使用 dummy key，未读取任何秘密。
-- 上下文：4096 上下文下复杂固定任务出现“截图 → 读树 → 再截图”循环，提升到 8192 后完成。这是本地模型/上下文测试经验，不是新增产品依赖或运行时要求。
-- 设备：API 35 模拟器；物理 API 30+ 真机 VLM 仍未验证。
+- 模型：magpie 网关的 `llama-cpp/llama-cpp`（Text、Image → Text、Tools）；应用内 provider 地址 `http://10.0.2.2:3425/v1`，UI 勾选 Image 输入和 Tools。局域网访问由用户开启，密钥未修改、未读取、未记录。
+- 设备：API 35 模拟器；Mods 页 Default Assistant 选择 Phone Agent，独立服务 enabled && connected，API 35 ready；未启用原生手机控制，未写系统无障碍授权。
+- 适用范围：只验证该 magpie 模型与 API 35 模拟器，不承诺任意模型、任意网关或任意设备；物理 API 30+ 真机 VLM 仍未验证。
 
-证据 A：最小截图 → 图片 → 模型链路
+证据 A：工具暴露与最小截图 → 图片 → 模型链路
 
-- 提示词要求只调用 `phone_agent_screenshot`，然后读出屏幕顶部文字。
-- 工具结果：`image 713x1600`、`screen 1080x2424`、`package_name com.psyche.kelivo.phoneagent`。
-- 后续请求包含 `phone_agent_screenshot` 工具结果和一条合成 user 消息：`image_url` 为 `data:image/png;base64,<omitted 163212 chars>`，`detail` 为 `high`。
-- 产品 UI 的 Request Log ID18 显示 `Attachments: image/png · 47.7 KB · omitted`，Authorization 已脱敏。
-- 模型回答 `10:47 / New Chat / bonsai-vlm (Local VLM)`，与截图中的时间、聊天标题和模型名称一致，属于对视觉细节的真实读取。
+- REQ27（15:00:52）请求工具为 `read_file` + `phone_agent_screenshot` / `phone_agent_tree` / `phone_agent_input`；`read_file` 是上游工具，不属于 Mod schema。无原生 `phone_control`，无重复 `phone_agent_*`；三个 schema 均无 `snapshot_id`，均设置 `additionalProperties: false`。
+- REQ28（15:00:58，Request Log ID28）携带 `phone_agent_screenshot` 工具结果：`image 713x1600`、`screen 1080x2424`、`package_name com.psyche.kelivo.phoneagent`；并包含一条合成 user 消息，`image_url` 为 `data:image/png;base64,<omitted 185028 chars>`，`detail` 为 `high`。
+- 响应头 `x-magpie-model: llama-cpp/llama-cpp`、`x-magpie-provider: llama-cpp`；模型回答 `3:00 / New Chat / llama-cpp/llama-cpp (Magpie VLM)`，与截图中的时间、聊天标题和模型名称一致，属于对视觉细节的真实读取。
 
-证据 B：固定任务（点击 + 输入 + 滚动尝试 + 确认）
+证据 B：Kelivo 应用内固定任务（点击 + 输入 + 确认）
 
-- 提示词要求：先用 `phone_agent_tree` 找 description 为 `Search settings` 的节点并点击，再找搜索框 `set_text Phone`，然后对结果列表滚动一次，最后报告结果名称和是否存在 `Phone Control`。
-- 实际工具顺序：`phone_agent_tree` 找到 `n3` → `tap n3` 成功 → 重新读树找到 `EditText n2` → `set_text n2 "Phone"` 成功 → 对 `n1` 执行 `scroll down` 返回结构化 `action_unavailable` → `phone_agent_screenshot` 确认。
-- UI 最终状态：搜索框为 `Phone`，显示 `1 result`，唯一结果为 `Phone Control / Settings`；模型回答确认 `Phone Control` 存在。
-- `action_unavailable` 是契约内可恢复错误：模型选择的节点声明 `scrollable` 但当前动作集合不含对应滚动方向；产品没有把失败写成成功。
+- 任务在 Kelivo 自己的 Settings 页面（不是 Android 系统设置）中完成；每次 tree/input 的前台包名均为 `com.psyche.kelivo.phoneagent`，未使用 adb 代替模型输入。
+- 实际工具顺序（REQ30-37）：`phone_agent_tree` 返回 22 个节点并找到 `n3`（description `Search settings`）→ 首次 `tap n3` 返回一次 `stale_handle`（`No current tree observation`）→ 重新读树后 `tap n3` 成功 → 重新读树找到 `EditText n2` → `set_text n2 "Phone"` 成功 → 再次读树确认。
+- UI 最终状态：搜索框为 `Phone`，显示 `1 result`，唯一结果为 `Phone Control / Settings`；模型回答同时确认 `1 result` 和 `Phone Control`。
 
-证据 C：补充滚动任务（`stale_handle` 恢复 + 真实滚动）
+证据 C：应用内 Settings 滚动确认
 
-- 实际工具顺序：首次读树时前台仍在聊天页，`n1` 为可滚动 View → 对 `n1` 执行 `scroll forward` 返回 `stale_handle`（前台已切到 Settings）→ 重新读树，`n4` 为 `android.widget.ScrollView` → 对 `n4` 执行 `scroll forward` 成功 → 再次读树，最后一个可见设置为 `n21 Sponsor`。
+- 实际工具顺序（REQ38-41）：`phone_agent_tree` → 对 `n4`（`android.widget.ScrollView`）执行 `scroll forward` 成功 → 再次读树。
 - UI 可观察状态：Settings 页面真实滚到底部并显示 `Sponsor`；模型回答 `Sponsor`。
-- 该结果同时验证了 `stale_handle` 的真实返回、重新读树后的恢复、正确 ScrollView 节点上的滚动成功和滚动后的 UI 确认。
 
-工具暴露：
+证据 D：跨新用户轮次历史图片回放
 
-- 请求工具列表为 `read_file` + `phone_agent_screenshot` / `phone_agent_tree` / `phone_agent_input`；`read_file` 是上游工具，不属于 Mod schema。
-- 无原生 `phone_control`，无重复 `phone_agent_*`；三个 schema 均无 `snapshot_id`，均设置 `additionalProperties: false`。
+- 新用户消息 REQ42（15:36:58）要求不调用任何工具、不重新截图，只回答第一张截图独有的视觉信息。
+- 该请求确实从持久化的历史工具 metadata 带回同一 `image_url`（`<omitted 185028 chars>`，`detail` 为 `high`），该轮没有新的 `tool_call`。
+- 模型回答输入框占位为 `Type a message for AI`，发送按钮为蓝色圆形内白色方块（停止状态）；拉取保存的 713x1600 PNG 逐像素核对，蓝色圆形与白色方块位置/颜色一致。
+- 图片进入上下文后，上游额外暴露 `read_chat_image` 工具；这是上游行为，不是 Mod 重复暴露，也不是 `phone_control`。
+
+异常记录：一次未复现的 `stale_handle`
+
+- 在证据 B 中，`phone_agent_tree` 成功返回 22 个节点后紧接的 `tap n3` 返回一次 `stale_handle`，消息为 `No current tree observation`；代码路径显示 `tree == null`。
+- 重读树后同一目标点击成功，后续任务未再出现；未找到对应 native 日志，未复现，未确认缺陷，未修复。
+- 可能来源（例如服务中断或观测失效）只是假设，不写成事实；该事件不改变 6.5.1 的指纹契约，也不作为产品缺陷记录。
 
 证据边界：
 
-- 同一生成轮的工具循环图片回放已验证：截图后的后续请求再次携带该图片。
-- 新用户轮次再次请求时的历史图片回放未验证。
+- 跨用户轮次历史图片回放已通过，不再列为未验证；同轮工具循环回放见证据 A（REQ28）。
 - 本轮未使用坐标动作完成任务；坐标手势的 UI 效果仍受 integration_test 绑定限制，未在物理 API 30+ 真机验证。
-- 本轮没有确认私有 Mod 硬缺陷。固定任务中的 `action_unavailable` 和 `stale_handle` 都是契约内可恢复结果，不是产品假成功；Add Provider 表单的低置信度自动化焦点现象未被人工复现，不作为产品缺陷记录。
-- 本轮验收不要求提交秘密或实时日志；文档只记录脱敏后的请求形态和尺寸/长度，不记录 provider 密钥、完整会话文本或截图字节。
+- 本轮没有确认私有 Mod 硬缺陷；上述一次 `stale_handle` 证据有限，根因未查明。契约内的可恢复错误不写成产品假成功。
+- 仍明确未验证：物理 API 30+ 真机的 VLM 固定任务与坐标手势 UI 效果、真实 `FLAG_SECURE`、真机旋转/切窗/锁屏/禁用服务/超时等其他异常路径、签名 release。
+- 本轮只验证 magpie `llama-cpp/llama-cpp` 与 API 35 模拟器，不承诺任意模型或设备。
+- 文档只记录脱敏后的请求形态和尺寸/长度，不记录 provider 密钥、完整会话文本或截图字节。
+
+#### 9.4.1 上一轮 LM Studio 补充环境（历史结果）
+
+以下为上一轮使用 LM Studio `prism-ml/bonsai-27b`（identifier `bonsai-vlm`，Image + Tools，8192 上下文，provider `http://10.0.2.2:1234/v1`）的补充环境结果，不是本轮用户指定模型，不能取代 9.4 的结论：
+
+- Request Log ID18 显示 `image/png · 47.7 KB · omitted`，Authorization 已脱敏；后续请求 `image_url` 为 `data:image/png;base64,<omitted 163212 chars>`，`detail` 为 `high`；模型读出 `10:47 / New Chat / bonsai-vlm (Local VLM)`。
+- 固定任务完成 tree → tap `Search settings` → tree → `set_text Phone` → `n1 scroll down` 返回 `action_unavailable` → 截图确认；补充滚动先返回 `stale_handle`，重读树后 `n4` ScrollView `forward` 成功并显示 `Sponsor`。
+- 同一生成轮的工具循环图片回放已验证：截图后的后续请求再次携带该图片。
+- 4096 上下文下复杂任务出现截图/读树循环，8192 后完成；这是本地测试经验，不是产品运行时要求。
 
 ## 10. Phone Agent 完成定义与已知限制
 
@@ -675,8 +688,8 @@ flutter test integration_test/phone_agent_test.dart -d <android-device-id>
 - Kelivo 适配层、插件 Dart 和 Android 相关检查通过。
 - debug APK 构建成功，Manifest 合并正确。
 - 真机基础输入闭环通过；真机官方测试退出码 0。
-- VLM 图片链路和固定任务已在 API 35 模拟器用本地 `bonsai-vlm` 通过；物理 API 30+ 真机 VLM 未验证。
-- 本轮 Loader 165、Phone Agent 105、Mods 16、settings 入口 2、上游 `tool_result_content` 14 通过 + 1 Windows 条件跳过通过；插件 Dart 17、插件 Kotlin 66、上游 PhoneControl 49 沿用上一轮结果；根项目和插件静态分析通过。
+- VLM 图片链路、Kelivo 应用内固定任务和跨新用户轮次历史图片回放已在 API 35 模拟器用用户指定的 magpie `llama-cpp/llama-cpp` 通过；物理 API 30+ 真机 VLM 未验证；不承诺任意模型。
+- 本轮只改中文文档，未重跑测试；上一轮 Loader 165、Phone Agent 105、Mods 16、settings 入口 2、上游 `tool_result_content` 14 通过 + 1 Windows 条件跳过、插件 Dart 17、插件 Kotlin 66、上游 PhoneControl 49 和根项目/插件静态分析结果继续有效，不得当作本轮重跑结果。
 - Loader verify 通过；最终 APK 已生成。
 - 中文维护文档与真实行为一致。
 
@@ -698,7 +711,8 @@ flutter test integration_test/phone_agent_test.dart -d <android-device-id>
 - 非 Android 平台可以打开 Mods 页，但只显示平台不支持；不要用 `supported=false` 表示平台不可用。
 - ARB 翻译质量依赖上游 l10n 工具和目标语言审查；新增键必须保持英文和中文源键集合一致。
 - API 30+ 截图与坐标手势已在 API 35 模拟器验证；坐标手势的 UI 滚动效果受 integration_test 绑定限制（不转发设备指针事件），未在物理 API 30+ 真机验证。
-- VLM 图片链路和固定任务已在 API 35 模拟器用本地 LM Studio `bonsai-vlm` 验证；物理 API 30+ 真机 VLM 和新用户轮次历史图片回放未验证。
+- VLM 图片链路、Kelivo 应用内固定任务和跨新用户轮次历史图片回放已在 API 35 模拟器用用户指定的 magpie `llama-cpp/llama-cpp` 验证；物理 API 30+ 真机 VLM 未验证；只验证该模型与模拟器，不承诺任意模型。
+- 一次 `stale_handle`（`No current tree observation`）在 tree 成功后紧接 tap 时出现，未复现、未找到 native 日志、根因未确认、未修复；重读树后恢复。可能来源只是假设，不写成事实。
 - 真实 `FLAG_SECURE` 窗口未验证。
 - 真机旋转、切窗、锁屏、禁用服务、超时等其他异常路径未验证。
 - 未执行带合法签名配置的 release 构建。
