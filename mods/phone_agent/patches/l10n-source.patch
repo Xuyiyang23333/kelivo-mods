@@ -1,0 +1,141 @@
+diff --git a/lib/l10n/app_en.arb b/lib/l10n/app_en.arb
+--- a/lib/l10n/app_en.arb
++++ b/lib/l10n/app_en.arb
+@@ -8295,6 +8295,29 @@
+   "@themePaletteCustom": {
+     "description": "Display name of the Custom color palette in appearance settings; translate as a short palette name, not a command."
+   },
++  "modsPageTitle": "Mods",
++  "phoneAgentTitle": "Phone Agent",
++  "phoneAgentSubtitle": "Choose which phone control tool set this assistant can use, and check the separate accessibility service.",
++  "phoneAgentStatusChecking": "Checking service status…",
++  "phoneAgentStatusReady": "Enabled and connected",
++  "phoneAgentStatusDisabled": "Not enabled",
++  "phoneAgentStatusDisconnected": "Enabled, but not connected. Try turning the service off and on in system settings, then refresh.",
++  "phoneAgentStatusUnavailable": "Unable to read service status. Refresh to try again.",
++  "phoneAgentUnsupportedPlatform": "Phone Agent is only available on Android.",
++  "phoneAgentOpenAccessibilitySettings": "Open accessibility settings",
++  "phoneAgentRefreshStatus": "Refresh status",
++  "phoneAgentScreenshotUnavailable": "Screenshots and coordinate actions require Android 11 or later.",
++  "phoneAgentAssistantSectionTitle": "Assistant",
++  "phoneAgentAssistantLabel": "Current assistant",
++  "phoneAgentControlLabel": "Phone control",
++  "phoneAgentControlOff": "Off",
++  "phoneAgentControlNative": "Native phone control",
++  "phoneAgentControlMod": "Phone Agent",
++  "phoneAgentDisclosureTitle": "Capabilities and privacy",
++  "phoneAgentDisclosure": "Phone Agent uses a separate accessibility service, and each assistant can use either native phone control or Phone Agent, never both. While enabled, it can read the current screen, tap, enter text, scroll, take screenshots, and navigate. Screen content is sent to the model provider configured for the current conversation and is saved in its tool results. Password fields are hidden. This service does not continuously record screen content. This private build only allows input in the test package, and selecting Phone Agent does not authorize the service or change system accessibility settings.",
++  "phoneAgentSettingsUnavailable": "Unable to open accessibility settings. Open Android Settings → Accessibility manually.",
++  "phoneAgentNoAssistants": "No assistants yet. Create an assistant first.",
++  "phoneAgentConflict": "This assistant has both phone control implementations enabled. Choose one to resolve the conflict.",
+   "@avatarInputInvalid": {
+     "description": "Inline error text under the icon-name/URL field in the avatar input dialog, shown when the entered icon name or HTTP(S) image URL is invalid."
+   },
+@@ -21677,5 +21700,74 @@
+   },
+   "@compressionNativeAutoHint": {
+     "description": "Hint for automatic compression with native mode: compact at the threshold with the current model; failures keep the original context without falling back to text summarization."
++  },
++  "@modsPageTitle": {
++    "description": "Title of the Mods settings page and its entry in the mobile and desktop settings lists; keep the product name Mods untranslated where the app already uses it."
++  },
++  "@phoneAgentTitle": {
++    "description": "Title of the Phone Agent section on the Mods settings page; Phone Agent is the product name of the private phone-control tool set and stays untranslated."
++  },
++  "@phoneAgentSubtitle": {
++    "description": "Subtitle under the Phone Agent section title explaining that the assistant tool choice and the separate accessibility service status are configured here."
++  },
++  "@phoneAgentStatusChecking": {
++    "description": "Status line in the Phone Agent service panel while the accessibility service state is being read."
++  },
++  "@phoneAgentStatusReady": {
++    "description": "Status line in the Phone Agent service panel when the separate accessibility service is enabled and connected."
++  },
++  "@phoneAgentStatusDisabled": {
++    "description": "Status line in the Phone Agent service panel when the separate accessibility service is not enabled in system accessibility settings."
++  },
++  "@phoneAgentStatusDisconnected": {
++    "description": "Status line in the Phone Agent service panel when the accessibility service is enabled but not connected; advises toggling the service in system settings and refreshing."
++  },
++  "@phoneAgentStatusUnavailable": {
++    "description": "Status line in the Phone Agent service panel when the plugin cannot read the service state; advises refreshing."
++  },
++  "@phoneAgentUnsupportedPlatform": {
++    "description": "Message shown on the Mods page when Phone Agent is not supported, such as on non-Android platforms; no tools are added in this state."
++  },
++  "@phoneAgentOpenAccessibilitySettings": {
++    "description": "Button in the Phone Agent service panel that opens the system accessibility settings where the separate service is enabled."
++  },
++  "@phoneAgentRefreshStatus": {
++    "description": "Button in the Phone Agent service panel that re-reads the supported, enabled, connected, and SDK state."
++  },
++  "@phoneAgentScreenshotUnavailable": {
++    "description": "Hint in the Phone Agent service panel when the Android API level is below 30, noting that screenshots and coordinate actions need Android 11 or later."
++  },
++  "@phoneAgentAssistantSectionTitle": {
++    "description": "Section header on the Mods page above the assistant picker."
++  },
++  "@phoneAgentAssistantLabel": {
++    "description": "Label for the assistant picker on the Mods page; the selected assistant's tool choice is edited below it."
++  },
++  "@phoneAgentControlLabel": {
++    "description": "Label for the three mutually exclusive phone control choices on the Mods page: off, native phone control, or Phone Agent."
++  },
++  "@phoneAgentControlOff": {
++    "description": "Radio option on the Mods page that removes both native phone control and Phone Agent from the assistant without disabling any system service."
++  },
++  "@phoneAgentControlNative": {
++    "description": "Radio option on the Mods page that keeps native phone control for the assistant, removes Phone Agent, and continues to the upstream phone control authorization page."
++  },
++  "@phoneAgentControlMod": {
++    "description": "Radio option on the Mods page that enables Phone Agent for the assistant and removes native phone control; it does not authorize the accessibility service."
++  },
++  "@phoneAgentDisclosureTitle": {
++    "description": "Title of the capabilities and privacy disclosure block in the Phone Agent service panel."
++  },
++  "@phoneAgentDisclosure": {
++    "description": "Disclosure text in the Phone Agent service panel covering the separate accessibility service, mutual exclusion with native phone control per assistant, screen content in model tool results, hidden password fields, no continuous recording, the test-package input allowlist in this private build, and no automatic authorization."
++  },
++  "@phoneAgentSettingsUnavailable": {
++    "description": "Message shown when the Mods page cannot open the system accessibility settings, advising the user to open Android Settings → Accessibility manually."
++  },
++  "@phoneAgentNoAssistants": {
++    "description": "Empty state on the Mods page when no assistants exist, asking the user to create one before choosing a phone control option."
++  },
++  "@phoneAgentConflict": {
++    "description": "Message shown near the three-state phone control selection on the Mods page when the assistant has both native phone control and Phone Agent enabled, prompting the user to choose one option again."
+   }
+ }
+diff --git a/lib/l10n/app_zh.arb b/lib/l10n/app_zh.arb
+--- a/lib/l10n/app_zh.arb
++++ b/lib/l10n/app_zh.arb
+@@ -6090,6 +6090,29 @@
+   "themePaletteMonochrome": "纸墨灰",
+   "themePaletteDocument": "樱桃绿",
+   "themePaletteCustom": "自定义",
++  "modsPageTitle": "Mods",
++  "phoneAgentTitle": "Phone Agent",
++  "phoneAgentSubtitle": "选择此助手使用的手机控制工具，并查看独立无障碍服务的状态。",
++  "phoneAgentStatusChecking": "正在检查服务状态…",
++  "phoneAgentStatusReady": "已启用并连接",
++  "phoneAgentStatusDisabled": "未启用",
++  "phoneAgentStatusDisconnected": "已启用，但尚未连接。请在系统设置中关闭再开启服务，然后刷新状态。",
++  "phoneAgentStatusUnavailable": "无法读取服务状态，请刷新后重试。",
++  "phoneAgentUnsupportedPlatform": "Phone Agent 仅支持 Android。",
++  "phoneAgentOpenAccessibilitySettings": "前往无障碍设置",
++  "phoneAgentRefreshStatus": "刷新状态",
++  "phoneAgentScreenshotUnavailable": "截图和坐标操作需要 Android 11 或更高版本。",
++  "phoneAgentAssistantSectionTitle": "助手",
++  "phoneAgentAssistantLabel": "当前助手",
++  "phoneAgentControlLabel": "手机控制",
++  "phoneAgentControlOff": "关闭",
++  "phoneAgentControlNative": "原生手机控制",
++  "phoneAgentControlMod": "Phone Agent",
++  "phoneAgentDisclosureTitle": "能力与隐私",
++  "phoneAgentDisclosure": "Phone Agent 使用独立无障碍服务，每个助手只能在原生手机控制和 Phone Agent 之间二选一。启用后可读取当前屏幕、点击、输入、滚动、截图和导航。屏幕内容会发送给当前对话配置的模型服务商，并保存在工具结果中。密码字段会隐藏，服务不会持续记录屏幕内容。当前私有构建仅允许在测试包内输入，选择 Phone Agent 不会自动授权服务，也不会修改系统无障碍开关。",
++  "phoneAgentSettingsUnavailable": "无法打开无障碍设置，请手动进入 Android 系统设置 → 无障碍。",
++  "phoneAgentNoAssistants": "暂无助手，请先创建助手。",
++  "phoneAgentConflict": "这个助手同时启用了两套手机控制，请重新选择其中一项。",
+   "@sideDrawerDeleteConfirmContent": {
+     "placeholders": {
+       "title": {

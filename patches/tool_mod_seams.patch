@@ -1,0 +1,76 @@
+diff --git a/lib/features/home/controllers/generation_controller.dart b/lib/features/home/controllers/generation_controller.dart
+index af410da..3fb771a 100644
+--- a/lib/features/home/controllers/generation_controller.dart
++++ b/lib/features/home/controllers/generation_controller.dart
+@@ -13,6 +13,9 @@ import '../../../core/services/mcp/mcp_tool_service.dart';
+ import '../../../core/services/workspace/workspace_tools_service.dart';
+ import '../../../utils/assistant_regex.dart';
+ import '../../../core/models/assistant_regex.dart';
++import '../../../core/providers/assistant_provider.dart';
++import '../../../modding/mod_registry.g.dart';
++import '../../../modding/tool_mod.dart';
+ import '../services/message_builder_service.dart';
+ import '../services/ask_user_interaction_service.dart';
+ import '../services/tool_handler_service.dart';
+@@ -117,7 +120,7 @@ class GenerationController {
+     WorkspaceToolContext? workspaceContext,
+     String? conversationId,
+   }) {
+-    return toolHandlerService.buildToolDefinitions(
++    final definitions = toolHandlerService.buildToolDefinitions(
+       settings,
+       assistant,
+       providerKey,
+@@ -128,6 +131,21 @@ class GenerationController {
+       workspaceContext: workspaceContext,
+       conversationId: conversationId,
+     );
++    return composeToolDefinitions(
++      kToolMods,
++      definitions,
++      ModToolDefinitionContext(
++        settings: settings,
++        assistant: assistant,
++        providerKey: providerKey,
++        modelId: modelId,
++        conversationId: conversationId,
++        supportsTools: isToolModel(providerKey, modelId),
++        inputModalities: ModelSpecResolver.instance
++            .spec(settings.getProviderConfig(providerKey), modelId)
++            .input,
++      ),
++    );
+   }
+ 
+   /// Build tool call handler function.
+@@ -141,7 +159,7 @@ class GenerationController {
+     McpToolRouteSnapshot? mcpRouteSnapshot,
+     WorkspaceToolContext? workspaceContext,
+   }) {
+-    return toolHandlerService.buildToolCallHandler(
++    final handler = toolHandlerService.buildToolCallHandler(
+       settings,
+       assistant,
+       approvalService: approvalService,
+@@ -150,6 +168,21 @@ class GenerationController {
+       mcpRouteSnapshot: mcpRouteSnapshot,
+       workspaceContext: workspaceContext,
+     );
++    if (handler == null) return null;
++    final assistantProvider = contextProvider.read<AssistantProvider>();
++    return composeToolCallHandler(
++      kToolMods,
++      handler,
++      ModToolExecutionContext(
++        assistant: assistant,
++        conversationId: conversationId,
++        approvalService: approvalService,
++        askUserService: askUserService,
++        originalHandler: handler,
++        readCurrentAssistant: () =>
++            assistant == null ? null : assistantProvider.getById(assistant.id),
++      ),
++    );
+   }
+ 
+   // ============================================================================

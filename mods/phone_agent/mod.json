@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "id": "phone_agent",
+  "version": "0.2.0",
+  "upstreamCommit": "73afa4ec77cfc9af2efea2487fee8bba1362639d",
+  "toolNames": [
+    "phone_agent_screenshot",
+    "phone_agent_tree",
+    "phone_agent_input"
+  ],
+  "registration": {
+    "import": "package:Kelivo/features/phone_agent/phone_agent_mod.dart",
+    "className": "PhoneAgentMod"
+  },
+  "touches": [
+    "pubspec.yaml",
+    "android/app/build.gradle.kts",
+    "android/app/src/main/AndroidManifest.xml",
+    "lib/features/home/services/local_tool_toggle.dart",
+    "lib/features/settings/pages/settings_page.dart",
+    "lib/desktop/desktop_settings_page.dart",
+    "lib/l10n",
+    "tool/l10n/state"
+  ],
+  "patches": [
+    "patches/pubspec.patch",
+    "patches/application-id.patch",
+    "patches/local-tool-mutual-exclusion.patch",
+    "patches/settings-entry.patch",
+    "patches/l10n-source.patch",
+    "patches/l10n-generated.patch"
+  ],
+  "copy": [
+    {
+      "from": "overlay/lib/features/phone_agent",
+      "to": "lib/features/phone_agent"
+    },
+    {
+      "from": "overlay/lib/features/mods",
+      "to": "lib/features/mods"
+    },
+    {
+      "from": "overlay/test/features/phone_agent",
+      "to": "test/features/phone_agent"
+    },
+    {
+      "from": "overlay/test/features/mods",
+      "to": "test/features/mods"
+    },
+    {
+      "from": "overlay/test/features/settings/pages/mods_settings_entry_test.dart",
+      "to": "test/features/settings/pages/mods_settings_entry_test.dart"
+    },
+    {
+      "from": "overlay/integration_test/phone_agent_test.dart",
+      "to": "integration_test/phone_agent_test.dart"
+    },
+    {
+      "from": "plugin",
+      "to": "dependencies/kelivo_phone_agent"
+    }
+  ],
+  "vendored": [
+    {
+      "path": "android/app/src/main/kotlin/com/psyche/kelivo/PhoneControlService.kt",
+      "commit": "73afa4ec77cfc9af2efea2487fee8bba1362639d",
+      "hash": "3e3ddc9f8c0ca03e5941ee610de8a56e230fd7e5bf78b6659818b9a21b62a1c0"
+    }
+  ]
+}

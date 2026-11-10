@@ -1,0 +1,23 @@
+name: kelivo_phone_agent
+description: 独立 Android 无障碍插件，为 Kelivo Phone Agent Mod 提供截图、节点树和输入能力。
+version: 0.1.0
+publish_to: 'none'
+
+environment:
+  sdk: ^3.12.1
+  flutter: ">=3.44.9"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: com.kelivo.phoneagent
+        pluginClass: PhoneAgentPlugin

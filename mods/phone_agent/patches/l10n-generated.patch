@@ -1,0 +1,1042 @@
+diff --git a/lib/l10n/app_ko.arb b/lib/l10n/app_ko.arb
+index e78cd3a..5d7c390 100644
+--- a/lib/l10n/app_ko.arb
++++ b/lib/l10n/app_ko.arb
+@@ -4864,5 +4864,28 @@
+   "themePaletteTerracotta": "테라코타 클레이",
+   "themePaletteMonochrome": "프로스트 그레이",
+   "themePaletteDocument": "버던트 민트",
+-  "themePaletteCustom": "사용자 지정"
++  "themePaletteCustom": "사용자 지정",
++  "modsPageTitle": "Mods",
++  "phoneAgentTitle": "Phone Agent",
++  "phoneAgentSubtitle": "이 어시스턴트가 사용할 전화 제어 도구 세트를 선택하고, 별도의 접근성 서비스 상태를 확인하세요.",
++  "phoneAgentStatusChecking": "서비스 상태 확인 중…",
++  "phoneAgentStatusReady": "활성화되어 연결됨",
++  "phoneAgentStatusDisabled": "활성화되지 않음",
++  "phoneAgentStatusDisconnected": "활성화되어 있지만 연결되지 않았습니다. 시스템 설정에서 서비스를 껐다 켠 후 새로고침해 주세요.",
++  "phoneAgentStatusUnavailable": "서비스 상태를 읽을 수 없습니다. 새로고침 후 다시 시도해 주세요.",
++  "phoneAgentUnsupportedPlatform": "Phone Agent는 Android에서만 사용할 수 있습니다.",
++  "phoneAgentOpenAccessibilitySettings": "접근성 설정 열기",
++  "phoneAgentRefreshStatus": "상태 새로고침",
++  "phoneAgentScreenshotUnavailable": "스크린샷과 좌표 작업에는 Android 11 이상이 필요합니다.",
++  "phoneAgentAssistantSectionTitle": "어시스턴트",
++  "phoneAgentAssistantLabel": "현재 어시스턴트",
++  "phoneAgentControlLabel": "전화 제어",
++  "phoneAgentControlOff": "꺼짐",
++  "phoneAgentControlNative": "기본 전화 제어",
++  "phoneAgentControlMod": "Phone Agent",
++  "phoneAgentDisclosureTitle": "기능 및 개인정보",
++  "phoneAgentDisclosure": "Phone Agent는 별도의 접근성 서비스를 사용하며, 각 어시스턴트는 네이티브 전화 제어 또는 Phone Agent 중 하나만 사용할 수 있습니다. 활성화되면 현재 화면을 읽고, 탭하고, 텍스트를 입력하고, 스크롤하고, 스크린샷을 찍고, 이동할 수 있습니다. 화면 내용은 현재 대화에 구성된 모델 공급자에게 전송되며, 해당 도구 결과에 저장됩니다. 비밀번호 필드는 숨겨집니다. 이 서비스는 화면 내용을 지속적으로 녹화하지 않습니다. 이 프라이빗 빌드는 테스트 패키지에서만 입력을 허용하며, Phone Agent를 선택해도 서비스에 권한이 부여되지 않으며 시스템 접근성 설정이 변경되지 않습니다.",
++  "phoneAgentSettingsUnavailable": "접근성 설정을 열 수 없습니다. Android 설정 → 접근성을 수동으로 여세요.",
++  "phoneAgentNoAssistants": "아직 어시스턴트가 없습니다. 먼저 어시스턴트를 생성하세요.",
++  "phoneAgentConflict": "이 어시스턴트에는 두 가지 전화 제어 구현이 모두 활성화되어 있습니다. 충돌을 해결하려면 하나를 선택하세요."
+ }
+diff --git a/lib/l10n/app_localizations.dart b/lib/l10n/app_localizations.dart
+index fae5af2..01322fd 100644
+--- a/lib/l10n/app_localizations.dart
++++ b/lib/l10n/app_localizations.dart
+@@ -29321,6 +29321,144 @@ abstract class AppLocalizations {
+   /// In en, this message translates to:
+   /// **'Custom'**
+   String get themePaletteCustom;
++
++  /// Title of the Mods settings page and its entry in the mobile and desktop settings lists; keep the product name Mods untranslated where the app already uses it.
++  ///
++  /// In en, this message translates to:
++  /// **'Mods'**
++  String get modsPageTitle;
++
++  /// Title of the Phone Agent section on the Mods settings page; Phone Agent is the product name of the private phone-control tool set and stays untranslated.
++  ///
++  /// In en, this message translates to:
++  /// **'Phone Agent'**
++  String get phoneAgentTitle;
++
++  /// Subtitle under the Phone Agent section title explaining that the assistant tool choice and the separate accessibility service status are configured here.
++  ///
++  /// In en, this message translates to:
++  /// **'Choose which phone control tool set this assistant can use, and check the separate accessibility service.'**
++  String get phoneAgentSubtitle;
++
++  /// Status line in the Phone Agent service panel while the accessibility service state is being read.
++  ///
++  /// In en, this message translates to:
++  /// **'Checking service status…'**
++  String get phoneAgentStatusChecking;
++
++  /// Status line in the Phone Agent service panel when the separate accessibility service is enabled and connected.
++  ///
++  /// In en, this message translates to:
++  /// **'Enabled and connected'**
++  String get phoneAgentStatusReady;
++
++  /// Status line in the Phone Agent service panel when the separate accessibility service is not enabled in system accessibility settings.
++  ///
++  /// In en, this message translates to:
++  /// **'Not enabled'**
++  String get phoneAgentStatusDisabled;
++
++  /// Status line in the Phone Agent service panel when the accessibility service is enabled but not connected; advises toggling the service in system settings and refreshing.
++  ///
++  /// In en, this message translates to:
++  /// **'Enabled, but not connected. Try turning the service off and on in system settings, then refresh.'**
++  String get phoneAgentStatusDisconnected;
++
++  /// Status line in the Phone Agent service panel when the plugin cannot read the service state; advises refreshing.
++  ///
++  /// In en, this message translates to:
++  /// **'Unable to read service status. Refresh to try again.'**
++  String get phoneAgentStatusUnavailable;
++
++  /// Message shown on the Mods page when Phone Agent is not supported, such as on non-Android platforms; no tools are added in this state.
++  ///
++  /// In en, this message translates to:
++  /// **'Phone Agent is only available on Android.'**
++  String get phoneAgentUnsupportedPlatform;
++
++  /// Button in the Phone Agent service panel that opens the system accessibility settings where the separate service is enabled.
++  ///
++  /// In en, this message translates to:
++  /// **'Open accessibility settings'**
++  String get phoneAgentOpenAccessibilitySettings;
++
++  /// Button in the Phone Agent service panel that re-reads the supported, enabled, connected, and SDK state.
++  ///
++  /// In en, this message translates to:
++  /// **'Refresh status'**
++  String get phoneAgentRefreshStatus;
++
++  /// Hint in the Phone Agent service panel when the Android API level is below 30, noting that screenshots and coordinate actions need Android 11 or later.
++  ///
++  /// In en, this message translates to:
++  /// **'Screenshots and coordinate actions require Android 11 or later.'**
++  String get phoneAgentScreenshotUnavailable;
++
++  /// Section header on the Mods page above the assistant picker.
++  ///
++  /// In en, this message translates to:
++  /// **'Assistant'**
++  String get phoneAgentAssistantSectionTitle;
++
++  /// Label for the assistant picker on the Mods page; the selected assistant's tool choice is edited below it.
++  ///
++  /// In en, this message translates to:
++  /// **'Current assistant'**
++  String get phoneAgentAssistantLabel;
++
++  /// Label for the three mutually exclusive phone control choices on the Mods page: off, native phone control, or Phone Agent.
++  ///
++  /// In en, this message translates to:
++  /// **'Phone control'**
++  String get phoneAgentControlLabel;
++
++  /// Radio option on the Mods page that removes both native phone control and Phone Agent from the assistant without disabling any system service.
++  ///
++  /// In en, this message translates to:
++  /// **'Off'**
++  String get phoneAgentControlOff;
++
++  /// Radio option on the Mods page that keeps native phone control for the assistant, removes Phone Agent, and continues to the upstream phone control authorization page.
++  ///
++  /// In en, this message translates to:
++  /// **'Native phone control'**
++  String get phoneAgentControlNative;
++
++  /// Radio option on the Mods page that enables Phone Agent for the assistant and removes native phone control; it does not authorize the accessibility service.
++  ///
++  /// In en, this message translates to:
++  /// **'Phone Agent'**
++  String get phoneAgentControlMod;
++
++  /// Title of the capabilities and privacy disclosure block in the Phone Agent service panel.
++  ///
++  /// In en, this message translates to:
++  /// **'Capabilities and privacy'**
++  String get phoneAgentDisclosureTitle;
++
++  /// Disclosure text in the Phone Agent service panel covering the separate accessibility service, mutual exclusion with native phone control per assistant, screen content in model tool results, hidden password fields, no continuous recording, the test-package input allowlist in this private build, and no automatic authorization.
++  ///
++  /// In en, this message translates to:
++  /// **'Phone Agent uses a separate accessibility service, and each assistant can use either native phone control or Phone Agent, never both. While enabled, it can read the current screen, tap, enter text, scroll, take screenshots, and navigate. Screen content is sent to the model provider configured for the current conversation and is saved in its tool results. Password fields are hidden. This service does not continuously record screen content. This private build only allows input in the test package, and selecting Phone Agent does not authorize the service or change system accessibility settings.'**
++  String get phoneAgentDisclosure;
++
++  /// Message shown when the Mods page cannot open the system accessibility settings, advising the user to open Android Settings → Accessibility manually.
++  ///
++  /// In en, this message translates to:
++  /// **'Unable to open accessibility settings. Open Android Settings → Accessibility manually.'**
++  String get phoneAgentSettingsUnavailable;
++
++  /// Empty state on the Mods page when no assistants exist, asking the user to create one before choosing a phone control option.
++  ///
++  /// In en, this message translates to:
++  /// **'No assistants yet. Create an assistant first.'**
++  String get phoneAgentNoAssistants;
++
++  /// Message shown near the three-state phone control selection on the Mods page when the assistant has both native phone control and Phone Agent enabled, prompting the user to choose one option again.
++  ///
++  /// In en, this message translates to:
++  /// **'This assistant has both phone control implementations enabled. Choose one to resolve the conflict.'**
++  String get phoneAgentConflict;
+ }
+ 
+ class _AppLocalizationsDelegate
+diff --git a/lib/l10n/app_localizations_en.dart b/lib/l10n/app_localizations_en.dart
+index c59d564..6297ae6 100644
+--- a/lib/l10n/app_localizations_en.dart
++++ b/lib/l10n/app_localizations_en.dart
+@@ -16644,4 +16644,83 @@ class AppLocalizationsEn extends AppLocalizations {
+ 
+   @override
+   String get themePaletteCustom => 'Custom';
++
++  @override
++  String get modsPageTitle => 'Mods';
++
++  @override
++  String get phoneAgentTitle => 'Phone Agent';
++
++  @override
++  String get phoneAgentSubtitle =>
++      'Choose which phone control tool set this assistant can use, and check the separate accessibility service.';
++
++  @override
++  String get phoneAgentStatusChecking => 'Checking service status…';
++
++  @override
++  String get phoneAgentStatusReady => 'Enabled and connected';
++
++  @override
++  String get phoneAgentStatusDisabled => 'Not enabled';
++
++  @override
++  String get phoneAgentStatusDisconnected =>
++      'Enabled, but not connected. Try turning the service off and on in system settings, then refresh.';
++
++  @override
++  String get phoneAgentStatusUnavailable =>
++      'Unable to read service status. Refresh to try again.';
++
++  @override
++  String get phoneAgentUnsupportedPlatform =>
++      'Phone Agent is only available on Android.';
++
++  @override
++  String get phoneAgentOpenAccessibilitySettings =>
++      'Open accessibility settings';
++
++  @override
++  String get phoneAgentRefreshStatus => 'Refresh status';
++
++  @override
++  String get phoneAgentScreenshotUnavailable =>
++      'Screenshots and coordinate actions require Android 11 or later.';
++
++  @override
++  String get phoneAgentAssistantSectionTitle => 'Assistant';
++
++  @override
++  String get phoneAgentAssistantLabel => 'Current assistant';
++
++  @override
++  String get phoneAgentControlLabel => 'Phone control';
++
++  @override
++  String get phoneAgentControlOff => 'Off';
++
++  @override
++  String get phoneAgentControlNative => 'Native phone control';
++
++  @override
++  String get phoneAgentControlMod => 'Phone Agent';
++
++  @override
++  String get phoneAgentDisclosureTitle => 'Capabilities and privacy';
++
++  @override
++  String get phoneAgentDisclosure =>
++      'Phone Agent uses a separate accessibility service, and each assistant can use either native phone control or Phone Agent, never both. While enabled, it can read the current screen, tap, enter text, scroll, take screenshots, and navigate. Screen content is sent to the model provider configured for the current conversation and is saved in its tool results. Password fields are hidden. This service does not continuously record screen content. This private build only allows input in the test package, and selecting Phone Agent does not authorize the service or change system accessibility settings.';
++
++  @override
++  String get phoneAgentSettingsUnavailable =>
++      'Unable to open accessibility settings. Open Android Settings → Accessibility manually.';
++
++  @override
++  String get phoneAgentNoAssistants =>
++      'No assistants yet. Create an assistant first.';
++
++  @override
++  String get phoneAgentConflict =>
++      'This assistant has both phone control implementations enabled. Choose one to resolve the conflict.';
+ }
+diff --git a/lib/l10n/app_localizations_ko.dart b/lib/l10n/app_localizations_ko.dart
+index d92707e..14f880b 100644
+--- a/lib/l10n/app_localizations_ko.dart
++++ b/lib/l10n/app_localizations_ko.dart
+@@ -16131,4 +16131,81 @@ class AppLocalizationsKo extends AppLocalizations {
+ 
+   @override
+   String get themePaletteCustom => '사용자 지정';
++
++  @override
++  String get modsPageTitle => 'Mods';
++
++  @override
++  String get phoneAgentTitle => 'Phone Agent';
++
++  @override
++  String get phoneAgentSubtitle =>
++      '이 어시스턴트가 사용할 전화 제어 도구 세트를 선택하고, 별도의 접근성 서비스 상태를 확인하세요.';
++
++  @override
++  String get phoneAgentStatusChecking => '서비스 상태 확인 중…';
++
++  @override
++  String get phoneAgentStatusReady => '활성화되어 연결됨';
++
++  @override
++  String get phoneAgentStatusDisabled => '활성화되지 않음';
++
++  @override
++  String get phoneAgentStatusDisconnected =>
++      '활성화되어 있지만 연결되지 않았습니다. 시스템 설정에서 서비스를 껐다 켠 후 새로고침해 주세요.';
++
++  @override
++  String get phoneAgentStatusUnavailable =>
++      '서비스 상태를 읽을 수 없습니다. 새로고침 후 다시 시도해 주세요.';
++
++  @override
++  String get phoneAgentUnsupportedPlatform =>
++      'Phone Agent는 Android에서만 사용할 수 있습니다.';
++
++  @override
++  String get phoneAgentOpenAccessibilitySettings => '접근성 설정 열기';
++
++  @override
++  String get phoneAgentRefreshStatus => '상태 새로고침';
++
++  @override
++  String get phoneAgentScreenshotUnavailable =>
++      '스크린샷과 좌표 작업에는 Android 11 이상이 필요합니다.';
++
++  @override
++  String get phoneAgentAssistantSectionTitle => '어시스턴트';
++
++  @override
++  String get phoneAgentAssistantLabel => '현재 어시스턴트';
++
++  @override
++  String get phoneAgentControlLabel => '전화 제어';
++
++  @override
++  String get phoneAgentControlOff => '꺼짐';
++
++  @override
++  String get phoneAgentControlNative => '기본 전화 제어';
++
++  @override
++  String get phoneAgentControlMod => 'Phone Agent';
++
++  @override
++  String get phoneAgentDisclosureTitle => '기능 및 개인정보';
++
++  @override
++  String get phoneAgentDisclosure =>
++      'Phone Agent는 별도의 접근성 서비스를 사용하며, 각 어시스턴트는 네이티브 전화 제어 또는 Phone Agent 중 하나만 사용할 수 있습니다. 활성화되면 현재 화면을 읽고, 탭하고, 텍스트를 입력하고, 스크롤하고, 스크린샷을 찍고, 이동할 수 있습니다. 화면 내용은 현재 대화에 구성된 모델 공급자에게 전송되며, 해당 도구 결과에 저장됩니다. 비밀번호 필드는 숨겨집니다. 이 서비스는 화면 내용을 지속적으로 녹화하지 않습니다. 이 프라이빗 빌드는 테스트 패키지에서만 입력을 허용하며, Phone Agent를 선택해도 서비스에 권한이 부여되지 않으며 시스템 접근성 설정이 변경되지 않습니다.';
++
++  @override
++  String get phoneAgentSettingsUnavailable =>
++      '접근성 설정을 열 수 없습니다. Android 설정 → 접근성을 수동으로 여세요.';
++
++  @override
++  String get phoneAgentNoAssistants => '아직 어시스턴트가 없습니다. 먼저 어시스턴트를 생성하세요.';
++
++  @override
++  String get phoneAgentConflict =>
++      '이 어시스턴트에는 두 가지 전화 제어 구현이 모두 활성화되어 있습니다. 충돌을 해결하려면 하나를 선택하세요.';
+ }
+diff --git a/lib/l10n/app_localizations_ru.dart b/lib/l10n/app_localizations_ru.dart
+index a6bb4b7..c96e323 100644
+--- a/lib/l10n/app_localizations_ru.dart
++++ b/lib/l10n/app_localizations_ru.dart
+@@ -16938,4 +16938,83 @@ class AppLocalizationsRu extends AppLocalizations {
+ 
+   @override
+   String get themePaletteCustom => 'Пользовательская';
++
++  @override
++  String get modsPageTitle => 'Mods';
++
++  @override
++  String get phoneAgentTitle => 'Phone Agent';
++
++  @override
++  String get phoneAgentSubtitle =>
++      'Выберите набор инструментов управления телефоном, который может использовать этот ассистент, и проверьте отдельный сервис доступности.';
++
++  @override
++  String get phoneAgentStatusChecking => 'Проверка статуса сервиса…';
++
++  @override
++  String get phoneAgentStatusReady => 'Включено и подключено';
++
++  @override
++  String get phoneAgentStatusDisabled => 'Не включено';
++
++  @override
++  String get phoneAgentStatusDisconnected =>
++      'Включено, но не подключено. Попробуйте выключить и включить службу в системных настройках, затем обновите.';
++
++  @override
++  String get phoneAgentStatusUnavailable =>
++      'Не удалось прочитать статус службы. Обновите, чтобы повторить.';
++
++  @override
++  String get phoneAgentUnsupportedPlatform =>
++      'Phone Agent доступен только на Android.';
++
++  @override
++  String get phoneAgentOpenAccessibilitySettings =>
++      'Открыть настройки доступности';
++
++  @override
++  String get phoneAgentRefreshStatus => 'Обновить статус';
++
++  @override
++  String get phoneAgentScreenshotUnavailable =>
++      'Снимки экрана и действия по координатам требуют Android 11 или более поздней версии.';
++
++  @override
++  String get phoneAgentAssistantSectionTitle => 'Ассистент';
++
++  @override
++  String get phoneAgentAssistantLabel => 'Текущий ассистент';
++
++  @override
++  String get phoneAgentControlLabel => 'Управление телефоном';
++
++  @override
++  String get phoneAgentControlOff => 'Выкл.';
++
++  @override
++  String get phoneAgentControlNative => 'Системное управление телефоном';
++
++  @override
++  String get phoneAgentControlMod => 'Phone Agent';
++
++  @override
++  String get phoneAgentDisclosureTitle => 'Возможности и конфиденциальность';
++
++  @override
++  String get phoneAgentDisclosure =>
++      'Phone Agent использует отдельный сервис специальных возможностей, и каждый ассистент может использовать либо встроенное управление телефоном, либо Phone Agent, но не оба. Во время работы он может читать текущий экран, нажимать, вводить текст, прокручивать, делать снимки экрана и переходить по экранам. Содержимое экрана отправляется провайдеру модели, настроенному для текущего чата, и сохраняется в результатах его инструментов. Поля пароля скрыты. Этот сервис не непрерывно записывает содержимое экрана. Эта частная сборка позволяет вводить данные только в тестовом пакете, а выбор Phone Agent не выдает разрешение сервису и не изменяет системные настройки специальных возможностей.';
++
++  @override
++  String get phoneAgentSettingsUnavailable =>
++      'Не удалось открыть настройки специальных возможностей. Откройте Настройки Android → Специальные возможности вручную.';
++
++  @override
++  String get phoneAgentNoAssistants =>
++      'Пока нет ассистентов. Сначала создайте ассистента.';
++
++  @override
++  String get phoneAgentConflict =>
++      'У этого ассистента включены оба варианта управления телефоном. Выберите один, чтобы устранить конфликт.';
+ }
+diff --git a/lib/l10n/app_localizations_tr.dart b/lib/l10n/app_localizations_tr.dart
+index d0261a3..0f40fdf 100644
+--- a/lib/l10n/app_localizations_tr.dart
++++ b/lib/l10n/app_localizations_tr.dart
+@@ -16742,4 +16742,83 @@ class AppLocalizationsTr extends AppLocalizations {
+ 
+   @override
+   String get themePaletteCustom => 'Özel';
++
++  @override
++  String get modsPageTitle => 'Mods';
++
++  @override
++  String get phoneAgentTitle => 'Phone Agent';
++
++  @override
++  String get phoneAgentSubtitle =>
++      'Bu asistanın kullanabileceği telefon kontrolü araç setini seçin ve ayrı erişilebilirlik hizmetini kontrol edin.';
++
++  @override
++  String get phoneAgentStatusChecking => 'Hizmet durumu kontrol ediliyor…';
++
++  @override
++  String get phoneAgentStatusReady => 'Etkin ve bağlı';
++
++  @override
++  String get phoneAgentStatusDisabled => 'Etkin değil';
++
++  @override
++  String get phoneAgentStatusDisconnected =>
++      'Etkinleştirildi, ancak bağlı değil. Sistem ayarlarında hizmeti kapatıp açmayı deneyin, ardından yenileyin.';
++
++  @override
++  String get phoneAgentStatusUnavailable =>
++      'Hizmet durumu okunamıyor. Tekrar denemek için yenileyin.';
++
++  @override
++  String get phoneAgentUnsupportedPlatform =>
++      'Phone Agent yalnızca Android\'da kullanılabilir.';
++
++  @override
++  String get phoneAgentOpenAccessibilitySettings =>
++      'Erişilebilirlik ayarlarını aç';
++
++  @override
++  String get phoneAgentRefreshStatus => 'Durumu yenile';
++
++  @override
++  String get phoneAgentScreenshotUnavailable =>
++      'Ekran görüntüleri ve koordinat işlemleri Android 11 veya üzeri gerektirir.';
++
++  @override
++  String get phoneAgentAssistantSectionTitle => 'Asistan';
++
++  @override
++  String get phoneAgentAssistantLabel => 'Mevcut asistan';
++
++  @override
++  String get phoneAgentControlLabel => 'Telefon kontrolü';
++
++  @override
++  String get phoneAgentControlOff => 'Kapalı';
++
++  @override
++  String get phoneAgentControlNative => 'Yerel telefon kontrolü';
++
++  @override
++  String get phoneAgentControlMod => 'Phone Agent';
++
++  @override
++  String get phoneAgentDisclosureTitle => 'Yetenekler ve gizlilik';
++
++  @override
++  String get phoneAgentDisclosure =>
++      'Phone Agent ayrı bir erişilebilirlik hizmeti kullanır ve her asistan yalnızca yerel telefon denetimi veya Phone Agent\'tan birini kullanabilir, ikisini birden kullanamaz. Etkinken mevcut ekranı okuyabilir, dokunabilir, metin girebilir, kaydırabilir, ekran görüntüsü alabilir ve gezinebilir. Ekran içeriği, geçerli sohbet için yapılandırılan model sağlayıcısına gönderilir ve araç sonuçlarında saklanır. Şifre alanları gizlenir. Bu hizmet ekran içeriğini sürekli kaydetmez. Bu özel derleme yalnızca test paketinde girişe izin verir ve Phone Agent seçmek hizmeti yetkilendirmez veya sistem erişilebilirlik ayarlarını değiştirmez.';
++
++  @override
++  String get phoneAgentSettingsUnavailable =>
++      'Erişilebilirlik ayarları açılamıyor. Android Ayarları → Erişilebilirlik\'i manuel olarak açın.';
++
++  @override
++  String get phoneAgentNoAssistants =>
++      'Henüz asistan yok. Önce bir asistan oluşturun.';
++
++  @override
++  String get phoneAgentConflict =>
++      'Bu asistanda her iki telefon denetimi uygulaması da etkin. Çakışmayı çözmek için birini seçin.';
+ }
+diff --git a/lib/l10n/app_localizations_zh.dart b/lib/l10n/app_localizations_zh.dart
+index 5ed2d3a..d02661b 100644
+--- a/lib/l10n/app_localizations_zh.dart
++++ b/lib/l10n/app_localizations_zh.dart
+@@ -15779,6 +15779,77 @@ class AppLocalizationsZh extends AppLocalizations {
+ 
+   @override
+   String get themePaletteCustom => '自定义';
++
++  @override
++  String get modsPageTitle => 'Mods';
++
++  @override
++  String get phoneAgentTitle => 'Phone Agent';
++
++  @override
++  String get phoneAgentSubtitle => '选择此助手使用的手机控制工具，并查看独立无障碍服务的状态。';
++
++  @override
++  String get phoneAgentStatusChecking => '正在检查服务状态…';
++
++  @override
++  String get phoneAgentStatusReady => '已启用并连接';
++
++  @override
++  String get phoneAgentStatusDisabled => '未启用';
++
++  @override
++  String get phoneAgentStatusDisconnected => '已启用，但尚未连接。请在系统设置中关闭再开启服务，然后刷新状态。';
++
++  @override
++  String get phoneAgentStatusUnavailable => '无法读取服务状态，请刷新后重试。';
++
++  @override
++  String get phoneAgentUnsupportedPlatform => 'Phone Agent 仅支持 Android。';
++
++  @override
++  String get phoneAgentOpenAccessibilitySettings => '前往无障碍设置';
++
++  @override
++  String get phoneAgentRefreshStatus => '刷新状态';
++
++  @override
++  String get phoneAgentScreenshotUnavailable => '截图和坐标操作需要 Android 11 或更高版本。';
++
++  @override
++  String get phoneAgentAssistantSectionTitle => '助手';
++
++  @override
++  String get phoneAgentAssistantLabel => '当前助手';
++
++  @override
++  String get phoneAgentControlLabel => '手机控制';
++
++  @override
++  String get phoneAgentControlOff => '关闭';
++
++  @override
++  String get phoneAgentControlNative => '原生手机控制';
++
++  @override
++  String get phoneAgentControlMod => 'Phone Agent';
++
++  @override
++  String get phoneAgentDisclosureTitle => '能力与隐私';
++
++  @override
++  String get phoneAgentDisclosure =>
++      'Phone Agent 使用独立无障碍服务，每个助手只能在原生手机控制和 Phone Agent 之间二选一。启用后可读取当前屏幕、点击、输入、滚动、截图和导航。屏幕内容会发送给当前对话配置的模型服务商，并保存在工具结果中。密码字段会隐藏，服务不会持续记录屏幕内容。当前私有构建仅允许在测试包内输入，选择 Phone Agent 不会自动授权服务，也不会修改系统无障碍开关。';
++
++  @override
++  String get phoneAgentSettingsUnavailable =>
++      '无法打开无障碍设置，请手动进入 Android 系统设置 → 无障碍。';
++
++  @override
++  String get phoneAgentNoAssistants => '暂无助手，请先创建助手。';
++
++  @override
++  String get phoneAgentConflict => '这个助手同时启用了两套手机控制，请重新选择其中一项。';
+ }
+ 
+ /// The translations for Chinese, using the Han script (`zh_Hans`).
+@@ -31556,6 +31627,77 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
+ 
+   @override
+   String get themePaletteCustom => '自定义';
++
++  @override
++  String get modsPageTitle => 'Mods';
++
++  @override
++  String get phoneAgentTitle => 'Phone Agent';
++
++  @override
++  String get phoneAgentSubtitle => '选择此助手使用的手机控制工具，并查看独立无障碍服务的状态。';
++
++  @override
++  String get phoneAgentStatusChecking => '正在检查服务状态…';
++
++  @override
++  String get phoneAgentStatusReady => '已启用并连接';
++
++  @override
++  String get phoneAgentStatusDisabled => '未启用';
++
++  @override
++  String get phoneAgentStatusDisconnected => '已启用，但尚未连接。请在系统设置中关闭再开启服务，然后刷新状态。';
++
++  @override
++  String get phoneAgentStatusUnavailable => '无法读取服务状态，请刷新后重试。';
++
++  @override
++  String get phoneAgentUnsupportedPlatform => 'Phone Agent 仅支持 Android。';
++
++  @override
++  String get phoneAgentOpenAccessibilitySettings => '前往无障碍设置';
++
++  @override
++  String get phoneAgentRefreshStatus => '刷新状态';
++
++  @override
++  String get phoneAgentScreenshotUnavailable => '截图和坐标操作需要 Android 11 或更高版本。';
++
++  @override
++  String get phoneAgentAssistantSectionTitle => '助手';
++
++  @override
++  String get phoneAgentAssistantLabel => '当前助手';
++
++  @override
++  String get phoneAgentControlLabel => '手机控制';
++
++  @override
++  String get phoneAgentControlOff => '关闭';
++
++  @override
++  String get phoneAgentControlNative => '原生手机控制';
++
++  @override
++  String get phoneAgentControlMod => 'Phone Agent';
++
++  @override
++  String get phoneAgentDisclosureTitle => '能力与隐私';
++
++  @override
++  String get phoneAgentDisclosure =>
++      'Phone Agent 使用独立无障碍服务，每个助手只能在原生手机控制和 Phone Agent 之间二选一。启用后可读取当前屏幕、点击、输入、滚动、截图和导航。屏幕内容会发送给当前对话配置的模型服务商，并保存在工具结果中。密码字段会隐藏，服务不会持续记录屏幕内容。当前私有构建仅允许在测试包内输入，选择 Phone Agent 不会自动授权服务，也不会修改系统无障碍开关。';
++
++  @override
++  String get phoneAgentSettingsUnavailable =>
++      '无法打开无障碍设置，请手动进入 Android 系统设置 → 无障碍。';
++
++  @override
++  String get phoneAgentNoAssistants => '暂无助手，请先创建助手。';
++
++  @override
++  String get phoneAgentConflict => '这个助手同时启用了两套手机控制，请重新选择其中一项。';
+ }
+ 
+ /// The translations for Chinese, using the Han script (`zh_Hant`).
+@@ -47340,4 +47482,76 @@ class AppLocalizationsZhHant extends AppLocalizationsZh {
+ 
+   @override
+   String get themePaletteCustom => '自訂';
++
++  @override
++  String get modsPageTitle => 'Mods';
++
++  @override
++  String get phoneAgentTitle => 'Phone Agent';
++
++  @override
++  String get phoneAgentSubtitle => '選擇此助手可使用的手機控制工具集，並查看獨立的無障礙服務狀態。';
++
++  @override
++  String get phoneAgentStatusChecking => '正在檢查服務狀態…';
++
++  @override
++  String get phoneAgentStatusReady => '已啟用並連線';
++
++  @override
++  String get phoneAgentStatusDisabled => '未啟用';
++
++  @override
++  String get phoneAgentStatusDisconnected =>
++      '已啟用，但尚未連線。請在系統設定中關閉再開啟服務，然後重新整理狀態。';
++
++  @override
++  String get phoneAgentStatusUnavailable => '無法讀取服務狀態，請重新整理後再試。';
++
++  @override
++  String get phoneAgentUnsupportedPlatform => 'Phone Agent 僅支援 Android。';
++
++  @override
++  String get phoneAgentOpenAccessibilitySettings => '前往無障礙設定';
++
++  @override
++  String get phoneAgentRefreshStatus => '重新整理狀態';
++
++  @override
++  String get phoneAgentScreenshotUnavailable => '截圖與座標操作需要 Android 11 或更高版本。';
++
++  @override
++  String get phoneAgentAssistantSectionTitle => '助手';
++
++  @override
++  String get phoneAgentAssistantLabel => '目前助手';
++
++  @override
++  String get phoneAgentControlLabel => '手機控制';
++
++  @override
++  String get phoneAgentControlOff => '關閉';
++
++  @override
++  String get phoneAgentControlNative => '原生手機控制';
++
++  @override
++  String get phoneAgentControlMod => 'Phone Agent';
++
++  @override
++  String get phoneAgentDisclosureTitle => '能力與隱私';
++
++  @override
++  String get phoneAgentDisclosure =>
++      'Phone Agent 使用獨立的無障礙服務，每個助手只能使用原生手機控制或 Phone Agent，絕不同時使用。啟用後可讀取目前螢幕、點擊、輸入文字、捲動、截圖和導覽。螢幕內容會傳送至目前對話設定的模型供應商，並儲存在工具結果中。密碼欄位會隱藏。此服務不會持續記錄螢幕內容。此私有版本僅允許在測試套件中輸入，選擇 Phone Agent 不會授權此服務，也不會變更系統無障礙設定。';
++
++  @override
++  String get phoneAgentSettingsUnavailable =>
++      '無法開啟無障礙設定，請手動進入 Android 系統設定 → 無障礙。';
++
++  @override
++  String get phoneAgentNoAssistants => '尚無助手，請先建立助手。';
++
++  @override
++  String get phoneAgentConflict => '此助手同時啟用了兩套手機控制，請選擇其中一項以解決衝突。';
+ }
+diff --git a/lib/l10n/app_ru.arb b/lib/l10n/app_ru.arb
+index 843087f..4a3cae3 100644
+--- a/lib/l10n/app_ru.arb
++++ b/lib/l10n/app_ru.arb
+@@ -4864,5 +4864,28 @@
+   "themePaletteTerracotta": "Терракотовая глина",
+   "themePaletteMonochrome": "Морозный серый",
+   "themePaletteDocument": "Мятно-зелёный",
+-  "themePaletteCustom": "Пользовательская"
++  "themePaletteCustom": "Пользовательская",
++  "modsPageTitle": "Mods",
++  "phoneAgentTitle": "Phone Agent",
++  "phoneAgentSubtitle": "Выберите набор инструментов управления телефоном, который может использовать этот ассистент, и проверьте отдельный сервис доступности.",
++  "phoneAgentStatusChecking": "Проверка статуса сервиса…",
++  "phoneAgentStatusReady": "Включено и подключено",
++  "phoneAgentStatusDisabled": "Не включено",
++  "phoneAgentStatusDisconnected": "Включено, но не подключено. Попробуйте выключить и включить службу в системных настройках, затем обновите.",
++  "phoneAgentStatusUnavailable": "Не удалось прочитать статус службы. Обновите, чтобы повторить.",
++  "phoneAgentUnsupportedPlatform": "Phone Agent доступен только на Android.",
++  "phoneAgentOpenAccessibilitySettings": "Открыть настройки доступности",
++  "phoneAgentRefreshStatus": "Обновить статус",
++  "phoneAgentScreenshotUnavailable": "Снимки экрана и действия по координатам требуют Android 11 или более поздней версии.",
++  "phoneAgentAssistantSectionTitle": "Ассистент",
++  "phoneAgentAssistantLabel": "Текущий ассистент",
++  "phoneAgentControlLabel": "Управление телефоном",
++  "phoneAgentControlOff": "Выкл.",
++  "phoneAgentControlNative": "Системное управление телефоном",
++  "phoneAgentControlMod": "Phone Agent",
++  "phoneAgentDisclosureTitle": "Возможности и конфиденциальность",
++  "phoneAgentDisclosure": "Phone Agent использует отдельный сервис специальных возможностей, и каждый ассистент может использовать либо встроенное управление телефоном, либо Phone Agent, но не оба. Во время работы он может читать текущий экран, нажимать, вводить текст, прокручивать, делать снимки экрана и переходить по экранам. Содержимое экрана отправляется провайдеру модели, настроенному для текущего чата, и сохраняется в результатах его инструментов. Поля пароля скрыты. Этот сервис не непрерывно записывает содержимое экрана. Эта частная сборка позволяет вводить данные только в тестовом пакете, а выбор Phone Agent не выдает разрешение сервису и не изменяет системные настройки специальных возможностей.",
++  "phoneAgentSettingsUnavailable": "Не удалось открыть настройки специальных возможностей. Откройте Настройки Android → Специальные возможности вручную.",
++  "phoneAgentNoAssistants": "Пока нет ассистентов. Сначала создайте ассистента.",
++  "phoneAgentConflict": "У этого ассистента включены оба варианта управления телефоном. Выберите один, чтобы устранить конфликт."
+ }
+diff --git a/lib/l10n/app_tr.arb b/lib/l10n/app_tr.arb
+index c0e5de2..1ed7f4e 100644
+--- a/lib/l10n/app_tr.arb
++++ b/lib/l10n/app_tr.arb
+@@ -4864,5 +4864,28 @@
+   "themePaletteTerracotta": "Terrakota Kili",
+   "themePaletteMonochrome": "Kırağı Grisi",
+   "themePaletteDocument": "Yemyeşil Nane",
+-  "themePaletteCustom": "Özel"
++  "themePaletteCustom": "Özel",
++  "modsPageTitle": "Mods",
++  "phoneAgentTitle": "Phone Agent",
++  "phoneAgentSubtitle": "Bu asistanın kullanabileceği telefon kontrolü araç setini seçin ve ayrı erişilebilirlik hizmetini kontrol edin.",
++  "phoneAgentStatusChecking": "Hizmet durumu kontrol ediliyor…",
++  "phoneAgentStatusReady": "Etkin ve bağlı",
++  "phoneAgentStatusDisabled": "Etkin değil",
++  "phoneAgentStatusDisconnected": "Etkinleştirildi, ancak bağlı değil. Sistem ayarlarında hizmeti kapatıp açmayı deneyin, ardından yenileyin.",
++  "phoneAgentStatusUnavailable": "Hizmet durumu okunamıyor. Tekrar denemek için yenileyin.",
++  "phoneAgentUnsupportedPlatform": "Phone Agent yalnızca Android'da kullanılabilir.",
++  "phoneAgentOpenAccessibilitySettings": "Erişilebilirlik ayarlarını aç",
++  "phoneAgentRefreshStatus": "Durumu yenile",
++  "phoneAgentScreenshotUnavailable": "Ekran görüntüleri ve koordinat işlemleri Android 11 veya üzeri gerektirir.",
++  "phoneAgentAssistantSectionTitle": "Asistan",
++  "phoneAgentAssistantLabel": "Mevcut asistan",
++  "phoneAgentControlLabel": "Telefon kontrolü",
++  "phoneAgentControlOff": "Kapalı",
++  "phoneAgentControlNative": "Yerel telefon kontrolü",
++  "phoneAgentControlMod": "Phone Agent",
++  "phoneAgentDisclosureTitle": "Yetenekler ve gizlilik",
++  "phoneAgentDisclosure": "Phone Agent ayrı bir erişilebilirlik hizmeti kullanır ve her asistan yalnızca yerel telefon denetimi veya Phone Agent'tan birini kullanabilir, ikisini birden kullanamaz. Etkinken mevcut ekranı okuyabilir, dokunabilir, metin girebilir, kaydırabilir, ekran görüntüsü alabilir ve gezinebilir. Ekran içeriği, geçerli sohbet için yapılandırılan model sağlayıcısına gönderilir ve araç sonuçlarında saklanır. Şifre alanları gizlenir. Bu hizmet ekran içeriğini sürekli kaydetmez. Bu özel derleme yalnızca test paketinde girişe izin verir ve Phone Agent seçmek hizmeti yetkilendirmez veya sistem erişilebilirlik ayarlarını değiştirmez.",
++  "phoneAgentSettingsUnavailable": "Erişilebilirlik ayarları açılamıyor. Android Ayarları → Erişilebilirlik'i manuel olarak açın.",
++  "phoneAgentNoAssistants": "Henüz asistan yok. Önce bir asistan oluşturun.",
++  "phoneAgentConflict": "Bu asistanda her iki telefon denetimi uygulaması da etkin. Çakışmayı çözmek için birini seçin."
+ }
+diff --git a/lib/l10n/app_zh_Hans.arb b/lib/l10n/app_zh_Hans.arb
+index fa0c5c3..fa76ea9 100644
+--- a/lib/l10n/app_zh_Hans.arb
++++ b/lib/l10n/app_zh_Hans.arb
+@@ -6090,6 +6090,29 @@
+   "themePaletteMonochrome": "纸墨灰",
+   "themePaletteDocument": "樱桃绿",
+   "themePaletteCustom": "自定义",
++  "modsPageTitle": "Mods",
++  "phoneAgentTitle": "Phone Agent",
++  "phoneAgentSubtitle": "选择此助手使用的手机控制工具，并查看独立无障碍服务的状态。",
++  "phoneAgentStatusChecking": "正在检查服务状态…",
++  "phoneAgentStatusReady": "已启用并连接",
++  "phoneAgentStatusDisabled": "未启用",
++  "phoneAgentStatusDisconnected": "已启用，但尚未连接。请在系统设置中关闭再开启服务，然后刷新状态。",
++  "phoneAgentStatusUnavailable": "无法读取服务状态，请刷新后重试。",
++  "phoneAgentUnsupportedPlatform": "Phone Agent 仅支持 Android。",
++  "phoneAgentOpenAccessibilitySettings": "前往无障碍设置",
++  "phoneAgentRefreshStatus": "刷新状态",
++  "phoneAgentScreenshotUnavailable": "截图和坐标操作需要 Android 11 或更高版本。",
++  "phoneAgentAssistantSectionTitle": "助手",
++  "phoneAgentAssistantLabel": "当前助手",
++  "phoneAgentControlLabel": "手机控制",
++  "phoneAgentControlOff": "关闭",
++  "phoneAgentControlNative": "原生手机控制",
++  "phoneAgentControlMod": "Phone Agent",
++  "phoneAgentDisclosureTitle": "能力与隐私",
++  "phoneAgentDisclosure": "Phone Agent 使用独立无障碍服务，每个助手只能在原生手机控制和 Phone Agent 之间二选一。启用后可读取当前屏幕、点击、输入、滚动、截图和导航。屏幕内容会发送给当前对话配置的模型服务商，并保存在工具结果中。密码字段会隐藏，服务不会持续记录屏幕内容。当前私有构建仅允许在测试包内输入，选择 Phone Agent 不会自动授权服务，也不会修改系统无障碍开关。",
++  "phoneAgentSettingsUnavailable": "无法打开无障碍设置，请手动进入 Android 系统设置 → 无障碍。",
++  "phoneAgentNoAssistants": "暂无助手，请先创建助手。",
++  "phoneAgentConflict": "这个助手同时启用了两套手机控制，请重新选择其中一项。",
+   "@sideDrawerDeleteConfirmContent": {
+     "placeholders": {
+       "title": {
+diff --git a/lib/l10n/app_zh_Hant.arb b/lib/l10n/app_zh_Hant.arb
+index 6ac9bb1..8975ab0 100644
+--- a/lib/l10n/app_zh_Hant.arb
++++ b/lib/l10n/app_zh_Hant.arb
+@@ -4864,5 +4864,28 @@
+   "themePaletteTerracotta": "陶砂紅",
+   "themePaletteMonochrome": "紙墨灰",
+   "themePaletteDocument": "櫻桃綠",
+-  "themePaletteCustom": "自訂"
++  "themePaletteCustom": "自訂",
++  "modsPageTitle": "Mods",
++  "phoneAgentTitle": "Phone Agent",
++  "phoneAgentSubtitle": "選擇此助手可使用的手機控制工具集，並查看獨立的無障礙服務狀態。",
++  "phoneAgentStatusChecking": "正在檢查服務狀態…",
++  "phoneAgentStatusReady": "已啟用並連線",
++  "phoneAgentStatusDisabled": "未啟用",
++  "phoneAgentStatusDisconnected": "已啟用，但尚未連線。請在系統設定中關閉再開啟服務，然後重新整理狀態。",
++  "phoneAgentStatusUnavailable": "無法讀取服務狀態，請重新整理後再試。",
++  "phoneAgentUnsupportedPlatform": "Phone Agent 僅支援 Android。",
++  "phoneAgentOpenAccessibilitySettings": "前往無障礙設定",
++  "phoneAgentRefreshStatus": "重新整理狀態",
++  "phoneAgentScreenshotUnavailable": "截圖與座標操作需要 Android 11 或更高版本。",
++  "phoneAgentAssistantSectionTitle": "助手",
++  "phoneAgentAssistantLabel": "目前助手",
++  "phoneAgentControlLabel": "手機控制",
++  "phoneAgentControlOff": "關閉",
++  "phoneAgentControlNative": "原生手機控制",
++  "phoneAgentControlMod": "Phone Agent",
++  "phoneAgentDisclosureTitle": "能力與隱私",
++  "phoneAgentDisclosure": "Phone Agent 使用獨立的無障礙服務，每個助手只能使用原生手機控制或 Phone Agent，絕不同時使用。啟用後可讀取目前螢幕、點擊、輸入文字、捲動、截圖和導覽。螢幕內容會傳送至目前對話設定的模型供應商，並儲存在工具結果中。密碼欄位會隱藏。此服務不會持續記錄螢幕內容。此私有版本僅允許在測試套件中輸入，選擇 Phone Agent 不會授權此服務，也不會變更系統無障礙設定。",
++  "phoneAgentSettingsUnavailable": "無法開啟無障礙設定，請手動進入 Android 系統設定 → 無障礙。",
++  "phoneAgentNoAssistants": "尚無助手，請先建立助手。",
++  "phoneAgentConflict": "此助手同時啟用了兩套手機控制，請選擇其中一項以解決衝突。"
+ }
+diff --git a/tool/l10n/state/ko.json b/tool/l10n/state/ko.json
+index 19f3162..3255810 100644
+--- a/tool/l10n/state/ko.json
++++ b/tool/l10n/state/ko.json
+@@ -4864,5 +4864,28 @@
+   "themePaletteTerracotta": "cdf58abca1481f52172d6a30d4d69b22cf0b6876c899149765c49660582df895",
+   "themePaletteMonochrome": "80a9328542685b3702c174f0696cf740d355caa891bcc8b7c6e3d10343bfe87f",
+   "themePaletteDocument": "fbb5ab5d35548286364af6a3913268b6969b5026169cc187a57e9948bc92a57c",
+-  "themePaletteCustom": "1dec8a21bc897b36ba6cda2feb56b3d4cb79e1698d4d93909728a75d395c9500"
++  "themePaletteCustom": "1dec8a21bc897b36ba6cda2feb56b3d4cb79e1698d4d93909728a75d395c9500",
++  "modsPageTitle": "f77f8737d062b898afb70c6b27cf511cf132ccf70f53ca7dbbd5af1324d43d41",
++  "phoneAgentTitle": "a93f921b6d26bb982724e1e4d22fbd921d21db3174c3ca2b45942e6101da0058",
++  "phoneAgentSubtitle": "3551370c3df310bbf189433b8b6811e07c5e65787e24043738fdf0f1b72134e2",
++  "phoneAgentStatusChecking": "b57538678211035b0249a83ee9205d0315b521123986ad24aaa0a47fde14393e",
++  "phoneAgentStatusReady": "32b9721796188923a5ce9c6726c27fd891303c44a46720cae1c9090d971f7319",
++  "phoneAgentStatusDisabled": "6127a92574c828bcc417230bf6f29b307fa05cc8fd1b787e46a27dc1d8a799e0",
++  "phoneAgentStatusDisconnected": "614e5622d347e0b7bab217a39b2c46ddcaac7b880e6a9252fedc2490940fb2b1",
++  "phoneAgentStatusUnavailable": "2859636b2e85f12736082d13a5fbc1a0e0e779f2f0738eaf24dfb4816eeb7954",
++  "phoneAgentUnsupportedPlatform": "1622533d12152866b7e2575f4501feb627d47afef9c8cdcd4565bf77ecefc2c1",
++  "phoneAgentOpenAccessibilitySettings": "f7c4274bfdd6fe2f20db7e2bd552127b99d9c0e64f44a6d31b73ad26f7ce0400",
++  "phoneAgentRefreshStatus": "0b15626160ce0ee3db4bf8b0ba1f8c2671b48cd71796401fe84601ccb77ec32d",
++  "phoneAgentScreenshotUnavailable": "b86c32322af5e26e42f0e36fec0657e9b9930bb933f15c1e0223f4e402a4d442",
++  "phoneAgentAssistantSectionTitle": "2016a7b8448710fe7cea8090b98123571c821bcd39c13ebf592553765cffd9bb",
++  "phoneAgentAssistantLabel": "638b383e81337b041c9816969b596ad551fd9699cd4c9e68940cf3cfd30ffa95",
++  "phoneAgentControlLabel": "20ab606f751b10b9bb8bcc4387d037f2deb5e34c6e38b391b660b8491ac2b0fb",
++  "phoneAgentControlOff": "1c7804407bf711fabfc8ea5288ef07891530ffb254c4df9186606aedd0908832",
++  "phoneAgentControlNative": "05685a3a663319fa04d588831722a06f98c1e5afdfe97fe34db4ce568f5bc9b8",
++  "phoneAgentControlMod": "c302d5c4ddeede4447a2fd6eff3e23afbc42ad19eff6c6ca1f9decfdf930183e",
++  "phoneAgentDisclosureTitle": "3ff63f2e05c3fe563f7c1af37aa152d04dbbb9c4553ca365b58d522e954ab571",
++  "phoneAgentDisclosure": "2be8318e5bf5c51d2a2bd6d906b39597a2ffc8d3f5a294f8c40ad2d86d3fe06a",
++  "phoneAgentSettingsUnavailable": "16d313620ec579cd5674f75877d2a8d792bf768cb4cc7a09201df5fef2b78914",
++  "phoneAgentNoAssistants": "c17e0fadd51b198b250f9ade7671a1633977553fba5c118cf5085716d404561f",
++  "phoneAgentConflict": "fcb7d83acf3f5bc6a8c33fe6b937f0f5641af1a69914225bfaa5662ea93b5c54"
+ }
+diff --git a/tool/l10n/state/ru.json b/tool/l10n/state/ru.json
+index 9572803..d8bc691 100644
+--- a/tool/l10n/state/ru.json
++++ b/tool/l10n/state/ru.json
+@@ -4864,5 +4864,28 @@
+   "themePaletteTerracotta": "391421e24ebb7a4ff88d4c7822e538a8927a989a5f3ea810ff6319fd9fd68b8d",
+   "themePaletteMonochrome": "94288f0d962a18d76e441cfcaf07e63dd78b584429b2671d1e170a9ac099a3d4",
+   "themePaletteDocument": "e23bdeeab30174338c0050ecf4576f9f366d96aa1764fd3faead13e6b6366d63",
+-  "themePaletteCustom": "5448be4d68873322e6ee4b60ab4972d4871e4deb9e886626a4e7bfe9d4290854"
++  "themePaletteCustom": "5448be4d68873322e6ee4b60ab4972d4871e4deb9e886626a4e7bfe9d4290854",
++  "modsPageTitle": "cd93a4970c20bfe7dbfae75cf321cb35508ada49991c5f998f6c493b47c1e13a",
++  "phoneAgentTitle": "2235dff1b0e9313a02175fe95091ce9461e21b75e3d396838e23827a9569a0b1",
++  "phoneAgentSubtitle": "f590ed01e6a44def3b219b6e3b4d0bca4c92ccfaa6663ba254ec22ca991d7be7",
++  "phoneAgentStatusChecking": "d9e29b44f6a0bb53d559f4602adb3dbc5cf2e324219d523991d9c90bdfa2da85",
++  "phoneAgentStatusReady": "05ebc32bfb8059773507118c5a37dcf944f731195d5a486f6c503e8e02f808eb",
++  "phoneAgentStatusDisabled": "8f14bb16e1ef1f792142678163280d1f0a180faa4aee928d3af1688188299819",
++  "phoneAgentStatusDisconnected": "6f56e7ddaf68a77c536420926a72add4991d176215ef7f910a90eca21c3ccc10",
++  "phoneAgentStatusUnavailable": "2296046ce2c2f3fbad7946a84f45d82d16416a5d5ebf86332b6a3ba875f37336",
++  "phoneAgentUnsupportedPlatform": "52fda979a15f2e8caa157dc631b14fb338fb6fa13593452aea2f8f5bbf18d0dc",
++  "phoneAgentOpenAccessibilitySettings": "d6b71bf3597f42c5cdff767c63a278ee76db74d1e23a122a114c678bbe0de00d",
++  "phoneAgentRefreshStatus": "aae6515030f1179718e046f44b0c300362103518e24d8f23958ccf758732adf9",
++  "phoneAgentScreenshotUnavailable": "a539405a1475d331c58c89b163fe04b183f32e905f62aa0667f547b38cb18e61",
++  "phoneAgentAssistantSectionTitle": "191aaa495a9891b1fbeb42b69173ede3c5cbdb9864693f1b28b28d307bdf241c",
++  "phoneAgentAssistantLabel": "833fea5d4d57724453cda865a72aa6f762017e8660d45b6933b815b9285ef244",
++  "phoneAgentControlLabel": "8afe74c4acbef723b9435a080a7362a1375f1d35d36d8c0dee32af2bcbb8039d",
++  "phoneAgentControlOff": "b6c61b4047e4ac7fbb0ff9a3adf13282602c0e9e3f8e7c553f096a069e1f55c5",
++  "phoneAgentControlNative": "9042c823dcf770c67b9a6a6063757806cb574d527d7f6e0ec097f62cc873cc7e",
++  "phoneAgentControlMod": "f9eab7014498cc31faf150febdb304fe375ea1fe5d01f8e4ab3961dbd96a03b2",
++  "phoneAgentDisclosureTitle": "a3c28195a89cc4a6c8b0726d1179ef314b985cc62cd901d2586632f8e55c521b",
++  "phoneAgentDisclosure": "01039c9a57a5aef5cf1902c4a2fb1d15e96eee1f56d46d78bfd6a9f1c08145be",
++  "phoneAgentSettingsUnavailable": "7adaf38825c8687666d19c043da22f24cc50adacaac9b1a1d15375845c63f0af",
++  "phoneAgentNoAssistants": "3be2df05ab947f4ae47e97ecc1ead01a01b5936d04c7bd26c070e3ac734358f1",
++  "phoneAgentConflict": "8caef2b92e0065cd5391321e3d3b5771e2ecad112a86ac23aef699724c436945"
+ }
+diff --git a/tool/l10n/state/tr.json b/tool/l10n/state/tr.json
+index 7a7bcae..1b52b91 100644
+--- a/tool/l10n/state/tr.json
++++ b/tool/l10n/state/tr.json
+@@ -4864,5 +4864,28 @@
+   "themePaletteTerracotta": "2473fae05069c47929020c28b976cc6a4a6fdfa24601b58df6bf9d430374ff60",
+   "themePaletteMonochrome": "829217b6b3a1ade1098d1d667ff9c6f3113827f3c198c1ee96845de6c82701a3",
+   "themePaletteDocument": "79a2e936e1bae49d0a9a0c9775c36db2e2138190b1db171b4acdb3b733ff1dfd",
+-  "themePaletteCustom": "01c58933481e2d72ad89ba5d6f87c3ef813ba9d10f88320e3be7727a64ef684a"
++  "themePaletteCustom": "01c58933481e2d72ad89ba5d6f87c3ef813ba9d10f88320e3be7727a64ef684a",
++  "modsPageTitle": "9c62a69e9d3c4522fceca39558d52b711e5a43f882b21104018045f6793e0a08",
++  "phoneAgentTitle": "4e5a2cc45f0a246fe6d5f3c1f5fc3dd14ca4ea2f30045748933ebbe0c89233ae",
++  "phoneAgentSubtitle": "4b7ce264c0ecda9d50c89f0717c7039fba3cc4366cf4a2548283a40847cb5a83",
++  "phoneAgentStatusChecking": "cfe7fe4d636b4a8434cdfeb50cd71107db1ae3915f866524a6ed511fa89893fa",
++  "phoneAgentStatusReady": "4baf4982d2771f9b4a673155febeb5ea1395f69ca60cd3776f0d29e9462ac385",
++  "phoneAgentStatusDisabled": "8e51f9ee97c6f046cbe42721f4bca743f1af949a5d28d449d190dc448c451b5d",
++  "phoneAgentStatusDisconnected": "e2abe13fbd8366057b8acffa7b79674909ace03fe85a8ba2b786797b6be79616",
++  "phoneAgentStatusUnavailable": "bc1921f908e5394c15c473c079c9627e26e13a1ca7f770bc0273527691c9176f",
++  "phoneAgentUnsupportedPlatform": "dcfc33b8d8467d8cc660d146a03f8a67283f2524cd723bfe96e88fb34ca93cb5",
++  "phoneAgentOpenAccessibilitySettings": "0b2eb3d8880d333a0337f158e46fb29dee688d6ef4ddc766034a7352363c99e9",
++  "phoneAgentRefreshStatus": "5f7cac6a3f629c559beeb3ee0ffb46610a309ff122cf0ede34072109159519b6",
++  "phoneAgentScreenshotUnavailable": "2c656b92e18583d684bca41f06b85bdbb62e5589e78bb4b5e4bd6e779769c687",
++  "phoneAgentAssistantSectionTitle": "24803b7feaccd423d603e8a8ba841209ff91a69cf515bd9e8264e3e485f279c2",
++  "phoneAgentAssistantLabel": "889c5032b88d041eb6440cc14bf12ddd8bfe3affc61b591dd1671e1741bcfffc",
++  "phoneAgentControlLabel": "21037f4cce2cbf5e12cd4b4633439421c541cb067fd9557309141790289ea625",
++  "phoneAgentControlOff": "9c5ae05ebacac1d9d9f21a11a2f03930bdb66ebab6c9d934b32688eea9ba1e32",
++  "phoneAgentControlNative": "c3f878ca4b481e25c5eda8299669ee12b3ee12351c722fb5fb600814b2c000f4",
++  "phoneAgentControlMod": "19ab8cd3603b05f00887620dc0fa9aaf5bbe8610fbe1c6f9a4db32a598f679ad",
++  "phoneAgentDisclosureTitle": "a4903cdedf699a0e1422468538ede6ff9ff9c3ac327c232b5acbe4905ecb4f9b",
++  "phoneAgentDisclosure": "c1f88c2b9e0948d2477211c86d4242b5cb2bd83e1918f5d06d47a92030a1a624",
++  "phoneAgentSettingsUnavailable": "5ac51db4a2a71e232ebd88438f4fe28d5a989e024c7a4b93bac5ca556db1b74d",
++  "phoneAgentNoAssistants": "c004b6796b80d4bf191a4b58e485b1bb821ea4e14f705cb17327e36c345d24c0",
++  "phoneAgentConflict": "8e342092a3b6a4385e3eb442d59a594d237120e8c3ceaddd236b2d222355f293"
+ }
+diff --git a/tool/l10n/state/zh_Hant.json b/tool/l10n/state/zh_Hant.json
+index 6a612bc..174d7d0 100644
+--- a/tool/l10n/state/zh_Hant.json
++++ b/tool/l10n/state/zh_Hant.json
+@@ -4864,5 +4864,28 @@
+   "themePaletteTerracotta": "c487246a17c0b6fd0478f56f1a5f9bacb6e5e8508aa556deefb3ad3cdc7422dc",
+   "themePaletteMonochrome": "80cf20928d911e24593cb031d6981df84c44ad27dbd02b4a41f02ee896c9700a",
+   "themePaletteDocument": "976ca8b31bbfa8850f2d473a0da26763e3278c952038d08ac851a68197f45d3b",
+-  "themePaletteCustom": "6df8ee047056570d85ecc55a0bfc6a855e38a698c86f6ba81004417025340afe"
++  "themePaletteCustom": "6df8ee047056570d85ecc55a0bfc6a855e38a698c86f6ba81004417025340afe",
++  "modsPageTitle": "ffe8b81116e449d31e32c6298857388bd57dd34f2b9eed3250a93b707fd2cfe3",
++  "phoneAgentTitle": "b8e168e170ba18f8aa8919b80231d582c7860c6adf598e64e2541599bddc5512",
++  "phoneAgentSubtitle": "68ab8ae611314bc635f2aa223a17882f5da27ee627a2165a73ac1a5094a429bd",
++  "phoneAgentStatusChecking": "d03f8c26bc395ec18e56d98fc97dfc9035aa74f9cb29e0367f3053c6ea3b8ba4",
++  "phoneAgentStatusReady": "4e19a457440f824a34ca5b94cf013f7e1cd109aa64b98d8304fd522d81e61c44",
++  "phoneAgentStatusDisabled": "a25ef1ecb94c98352beaf6e7e8427ea5f876e40e6e19558e64df795ccde66ae4",
++  "phoneAgentStatusDisconnected": "c8a4f2d48e0c19d5db3e18dc139692d325eb28be60b360b55569e48898c5d45e",
++  "phoneAgentStatusUnavailable": "ea8da666910aaa206cca4416c5292a3c88982cb4d7099285468b6600a8b6ac6e",
++  "phoneAgentUnsupportedPlatform": "e7794ba47b972e213c7c257eedf52678ae024f6dd3d02d758fc83941f3dbf73e",
++  "phoneAgentOpenAccessibilitySettings": "9a3536678f92f00ec83d23b535e5d42b08fe81a82ee9d8001723f8396c2da153",
++  "phoneAgentRefreshStatus": "00df5dbbef427ec1d0d183dfe474073371b3400469cd94fa03ecb097b1324fb6",
++  "phoneAgentScreenshotUnavailable": "fb65c02d99572766827727850faa92524a878ffd88460dc258331167631afcb2",
++  "phoneAgentAssistantSectionTitle": "c8fc0640a06dfac21be8f9eb1cf815f1bf59d3c2c55bfa5d883a8082bf616d86",
++  "phoneAgentAssistantLabel": "72f62e8f26dc883c9366041706619f2fe12d02cad6fb313054bb99e1f8961989",
++  "phoneAgentControlLabel": "1a188223a63e3339b36172e43ea8bde6e4b55676299ef8f947fb37f5d0d6633b",
++  "phoneAgentControlOff": "37949f0a98f0505048a72ca50fb82e33364f7d502cdcb54e3c1e82bcbaabd1a2",
++  "phoneAgentControlNative": "284f8da3844e70d7beefcea2ed61ea24aa37a145c701d589b7cf242db18af7c6",
++  "phoneAgentControlMod": "0ebb218a8d9e906c8c7f3877870240ad5b83b325f02d2d457f18a65c15784c77",
++  "phoneAgentDisclosureTitle": "474d1c503c21be9a62c8fe97f37966aeeae4b2b7e69785e89c32beb3abbcbd56",
++  "phoneAgentDisclosure": "70180aae63aefc078096afbd56fd31e21a632efdd379bdb43b2476ad5aa05d41",
++  "phoneAgentSettingsUnavailable": "aeb7b292db67a2be4e6c11bd322a24eef40cbff3df5a3e123b208846dbd586c3",
++  "phoneAgentNoAssistants": "15251c4d170f49a7e88ee24b58a5af16bcaf9e00f437a7f36fc76aaf8045923a",
++  "phoneAgentConflict": "e8c16c9114ced73bc0ee6c493c84b85bde71904d2b6eff2aeb093bcbf691c777"
+ }

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="kelivo_phone_agent_service_label">Kelivo Phone Agent</string>
+    <string name="kelivo_phone_agent_service_description">Allows assistants you enable to read the current screen and perform taps, text input, scrolling and navigation for phone agent tasks. Screen content is sent to the model provider configured for the conversation. This service is separate from Kelivo phone control and can be turned off at any time in Accessibility settings.</string>
+</resources>

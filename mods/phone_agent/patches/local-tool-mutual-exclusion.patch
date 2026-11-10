@@ -1,0 +1,70 @@
+diff --git a/lib/features/home/services/local_tool_toggle.dart b/lib/features/home/services/local_tool_toggle.dart
+index cff3c1b..9365072 100644
+--- a/lib/features/home/services/local_tool_toggle.dart
++++ b/lib/features/home/services/local_tool_toggle.dart
+@@ -11,6 +11,7 @@ import 'package:Kelivo/shared/widgets/snackbar.dart';
+ 
+ import 'health_data_selection.dart';
+ import 'local_tools_service.dart';
++import '../../phone_agent/phone_agent_local_tool.dart';
+ import '../../settings/pages/phone_control_settings_page.dart';
+ 
+ /// Flips one entry of [Assistant.localToolIds], asking for the OS permission
+@@ -26,15 +27,19 @@ Future<void> setLocalToolEnabled(
+   required String toolId,
+   required bool value,
+ }) async {
+-  Future<void> write(bool enabled) {
+-    final ids = assistant.localToolIds.toSet();
++  Future<void> write(bool enabled) async {
++    // The assistant may have been edited while a permission prompt was open.
++    final provider = context.read<AssistantProvider>();
++    final current = provider.getById(assistant.id);
++    if (current == null) return;
++    final ids = current.localToolIds.toSet();
+     if (enabled) {
+       ids.add(toolId);
+     } else {
+       ids.remove(toolId);
+     }
+-    return context.read<AssistantProvider>().updateAssistant(
+-      assistant.copyWith(localToolIds: ids.toList(growable: false)),
++    await provider.updateAssistant(
++      current.copyWith(localToolIds: ids.toList(growable: false)),
+     );
+   }
+ 
+@@ -54,10 +59,12 @@ Future<void> setLocalToolEnabled(
+     final provider = context.read<AssistantProvider>();
+     final current = provider.getById(assistant.id);
+     if (current == null) return;
++    final ids = current.localToolIds
++        .where((id) => id != PhoneAgentLocalTool.id)
++        .toSet()
++      ..add(toolId);
+     await provider.updateAssistant(
+-      current.copyWith(
+-        localToolIds: {...current.localToolIds, toolId}.toList(),
+-      ),
++      current.copyWith(localToolIds: ids.toList(growable: false)),
+     );
+     return;
+   }
+@@ -154,7 +161,16 @@ Future<void> setLocalToolEnabled(
+     );
+     if (!requested) return;
+     if (!context.mounted) return;
+-    await context.read<AssistantProvider>().updateAssistant(next);
++    final provider = context.read<AssistantProvider>();
++    final current = provider.getById(assistant.id);
++    if (current == null) return;
++    await provider.updateAssistant(
++      HealthDataSelection.setMasterEnabled(
++        current,
++        enabled: true,
++        availableIds: DeviceLocalTools.availableHealthTypeIds,
++      ),
++    );
+     return;
+   }
+ 

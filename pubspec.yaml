@@ -1,0 +1,9 @@
+name: kelivo_mod_loader
+description: Kelivo 的私有编译前源码 Mod Loader。
+publish_to: none
+
+environment:
+  sdk: ^3.12.1
+
+dev_dependencies:
+  test: ^1.26.0
