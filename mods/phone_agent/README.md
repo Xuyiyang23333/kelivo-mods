@@ -11,7 +11,11 @@
 - 助手级工具 ID：`phone_agent`
 - Mod 版本：`0.2.0`
 
-> 本轮节点重验修正后：合成树 `V:/coding/kelivo-private/.tower/worktrees/wt-1/.build/worktrees/7593c21b5f9da01f`，Loader verify 通过；Loader 165、插件 Kotlin 66、插件 Dart 17、上游 PhoneControl 49、Phone Agent 103、Mods 16、settings 入口 2 通过；API 35 模拟器与 API 29 真机官方集成测试均退出码 0。仍明确未验证物理 API 30+ 真机的坐标手势 UI 效果、VLM、真实 `FLAG_SECURE`、其他真机异常和签名 release，不宣称第二阶段全部完成。
+> 本轮 VLM 验收（API 35 模拟器）：使用产品 debug APK 与本地 LM Studio 模型 `bonsai-vlm`（`prism-ml/bonsai-27b`，Image + Tools，8192 上下文）完成真实截图 → 图片请求 → 固定任务；截图图片以 `image_url` 进入后续请求，模型正确读出截图内容，tree/tap/set_text/scroll 按契约执行。仍明确未验证物理 API 30+ 真机 VLM 与坐标手势 UI 效果、新用户轮次历史图片回放、真实 `FLAG_SECURE`、其他真机异常和签名 release，不宣称第二阶段全部完成。
+>
+> 本轮合成树：`V:/coding/kelivo-private/.tower/worktrees/wt-6/.build/worktrees/5f0be65f98bb04e5`，`modsetHash` 为 `5f0be65f98bb04e5613e372731215d7b577bbeb1b4ffa3bf9c14693e74757284`，Loader verify 通过；Phone Agent 105（含新增 2 项截图 metadata → `ToolResultContent` 衔接测试）、Mods 16、settings 入口 2、上游 `tool_result_content` 14 通过 + 1 Windows 条件跳过；插件 Dart 17、插件 Kotlin 66、上游 PhoneControl 49 沿用上一轮结果。
+>
+> 上一轮节点重验修正后：合成树 `V:/coding/kelivo-private/.tower/worktrees/wt-1/.build/worktrees/7593c21b5f9da01f`，Loader verify 通过；Loader 165、插件 Kotlin 66、插件 Dart 17、上游 PhoneControl 49、Phone Agent 103、Mods 16、settings 入口 2 通过；API 35 模拟器与 API 29 真机官方集成测试均退出码 0。
 
 ## 目录与合成目标
 
@@ -285,6 +289,7 @@ flutter gen-l10n
 - 不支持 Shell、root、Shizuku、录屏或任意文件访问。
 - 不承诺任意应用、任意模型或任意任务的成功率。
 - `FLAG_SECURE` 的真实窗口测试需要可重复的安全测试界面；若只有错误映射单元测试，必须标记为“真机未验证”。
+- VLM 图片链路和固定任务已在 API 35 模拟器用本地 `bonsai-vlm` 验证；物理 API 30+ 真机 VLM 和新用户轮次历史图片回放未验证。
 - ARB 翻译质量依赖上游 l10n 工具和目标语言审查；新增键必须保持英文和中文源键集合一致。
 
 ## 维护
@@ -348,7 +353,7 @@ flutter test test/core/services/api/request_image_context_test.dart
 flutter test test/request_consistency_test.dart
 ```
 
-最终全量 Flutter 测试为 255 项（254 通过 + 1 Windows 条件跳过）；其中 Phone Agent 103、Mods 16、settings 入口 2。以下命令对应最终合成树验证。
+本轮定向验证：Phone Agent 105、Mods 16、settings 入口 2、上游 `tool_result_content` 14 通过 + 1 Windows 条件跳过；本轮未重跑全量 Flutter 套件和双 API 设备回归，理由是本轮只改文档和 overlay 测试。以下命令对应本轮合成树验证。
 
 ARB 同步与检查：
 
@@ -386,7 +391,9 @@ flutter test integration_test/phone_agent_test.dart -d <android-device-id>
 
 ## 验证状态
 
-### 本轮节点重验修正（当前实现）
+### 上一轮节点重验修正（历史结果）
+
+以下为节点重验修正轮的结果；本轮 VLM 验收见下一节。
 
 - 合成树：`V:/coding/kelivo-private/.tower/worktrees/wt-1/.build/worktrees/7593c21b5f9da01f`
 - `modsetHash`：`7593c21b5f9da01fb8b8c4dfe167d892a940efe4a1caf591b772fbe83b6b6f7d`
@@ -410,6 +417,18 @@ flutter test integration_test/phone_agent_test.dart -d <android-device-id>
 
 安装测试包和部分收尾的 force-stop 可能清除系统无障碍授权，测试会打印 `PHONE_AGENT_WAITING_FOR_SERVICE` 并等待约 300 秒，需要在窗口内通过系统界面重新启用 Kelivo Phone Agent；每轮都要检查真实绑定状态，不要假设一定被清除或一定保留。
 
+### 本轮 VLM 验收（API 35 模拟器）
+
+- 设备：API 35 模拟器 `emulator-5554`（Android 15，内部屏幕 1080x2424）；产品 APK 为 181369230 字节，SHA-256 `3ea30ee9b46342305cf11e0574b76def9a42f23abe62dd3536b664dc4ec5caeb`。
+- 模型：LM Studio 本地 `prism-ml/bonsai-27b`，identifier `bonsai-vlm`，模型 UI 勾选 Image 输入和 Tools；应用内 `Local VLM` provider 地址 `http://10.0.2.2:1234/v1`，dummy key，不读取秘密。
+- 上下文：4096 下复杂固定任务出现截图/读树循环，8192 后完成；这是本地测试经验，不是产品运行时要求。
+- 图片链路：`phone_agent_screenshot` 返回 `image 713x1600`、`screen 1080x2424`、`package_name com.psyche.kelivo.phoneagent`；后续请求包含 `image_url=data:image/png;base64,<omitted 163212 chars>`、`detail=high`；Request Log ID18 显示 `image/png · 47.7 KB · omitted`，Authorization 脱敏。模型正确读出截图中的 `10:47 / New Chat / bonsai-vlm (Local VLM)`。
+- 固定任务：`phone_agent_tree` 找 `Search settings` n3 → `tap` → 重新读树找 `EditText` n2 → `set_text Phone` → 对 n1 `scroll down` 返回 `action_unavailable` → 截图确认；UI 显示 `1 result / Phone Control / Settings`。
+- 补充滚动：初始聊天页 n1 滚动因前台改变返回 `stale_handle`，重新读树后 n4 ScrollView `forward` 成功，Settings 滚到底部显示 `Sponsor`，模型回答 `Sponsor`。这些错误是契约内可恢复结果，不是产品假成功。
+- 工具暴露：`read_file` + 三个 `phone_agent_*`，无 `phone_control`、无重复、无 `snapshot_id`、`additionalProperties=false`。
+- 证据边界：同轮工具循环图片回放已验证；新用户轮次历史图片回放、物理 API 30+ 真机 VLM、坐标手势 UI 效果、真实 `FLAG_SECURE`、其他异常路径和签名 release 未验证。本轮未确认私有 Mod 硬缺陷；Add Provider 的低置信度自动化焦点现象未被人工复现，不作为产品缺陷记录。
+- 本轮自动检查：Loader verify 通过；合成树 `dart format` 17 个文件 0 变更、`dart analyze --fatal-infos lib test integration_test tool` 无问题；Phone Agent 105、Mods 16、settings 入口 2、上游 `tool_result_content` 14 通过 + 1 Windows 条件跳过。
+
 ### 焦点修正前的历史验收记录（不代表当前实现）
 
 - Loader 165 项测试；`dart tool/mod_loader.dart verify` 通过。
@@ -425,7 +444,8 @@ flutter test integration_test/phone_agent_test.dart -d <android-device-id>
 仍明确未验证，不宣称第二阶段全部完成：
 
 - 物理 API 30+ 真机上的截图与坐标手势未验证；API 35 模拟器已验证截图、坐标手势原生接受和节点滚动，坐标手势的 UI 滚动效果受 integration_test 绑定限制。
-- VLM 固定任务和 VLM 图片链路未验证。
+- 物理 API 30+ 真机上的 VLM 固定任务未验证；API 35 模拟器已用本地 `bonsai-vlm` 完成图片链路和固定任务。
+- 新用户轮次再次请求时的历史图片回放未验证（仅验证同轮工具循环回放）。
 - 真实 `FLAG_SECURE` 窗口未验证。
 - 真机旋转、切窗、锁屏、禁用服务、超时等其他异常路径未验证。
 - 未执行带合法签名配置的 release 构建。
