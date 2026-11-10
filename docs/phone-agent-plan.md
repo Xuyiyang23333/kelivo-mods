@@ -3,13 +3,14 @@
 ## 0. 文档状态
 
 - 当前阶段：第二阶段最终验收完成（UI/选择契约改造已完成），Mod 版本 0.2.0。
-- 最终合成树：`V:/coding/kelivo-private/.build/worktrees/4ed083cf5fe7dda8`；`modsetHash` 为 `4ed083cf5fe7dda8eec575588594831d9515cbd88429cb6f5b893c9ca6544331`；`dart tool/mod_loader.dart verify` 通过。
-- 最终 Flutter 测试 255 项：254 通过，1 项 Windows 符号链接测试按条件跳过；其中 Phone Agent 103、Mods 16、settings 入口 2。
-- 插件 Dart 17 项、插件 Kotlin 55 项、上游 `PhoneControlServiceTest` 49 项、Loader 165 项通过；根项目、markstream 和插件静态分析通过。
-- 本地化：本机免费 Magpie llama-cpp/llama-cpp 翻译 23 个键；`translate.py check` 四个目标语言（ko、ru、tr、zh_Hant）均 0 pending；`l10n-generated.patch` 已生成；未使用付费服务。Magpie Python UA 适配只是临时进程环境，不属于 Mod 交付，文档不记录其临时路径作为依赖。
-- 真机官方测试退出码 0：1）设置 → Mods → 真实 enabled/connected/API 29 状态 → 助手选择 Phone Agent 且与原生互斥；2）读树、节点点击、`set_text`、节点滚动、二次读树，截图按预期返回 `unsupported_os`。
-- 最终产品 APK：`V:/coding/kelivo-private/.build/worktrees/4ed083cf5fe7dda8/build/app/outputs/flutter-apk/app-debug.apk`，181354638 字节，SHA-256 `af67f4285bef9e3d1093c6433f42669a8c84b8bee99b6397f68dfd91e1c60ceb`。
-- 仍明确未验证：API 30+ 截图与坐标手势、VLM 固定任务与图片链路、真实 `FLAG_SECURE`、其他真机异常路径、签名 release。因此不宣称 Phone Agent 第二阶段全部完成。
+- 本轮修正（节点重验）：`PhoneNode.fingerprint()` 不再包含 `isFocused` 和动作集合 `actions`；同一已刷新节点因点击/输入产生的焦点变化和动作增减不再让后续 `set_text` 返回 `stale_handle`；`isSelected`、内容、稳定能力字段、窗口/包名/尺寸/旋转和 120 秒 TTL 校验保持不变。指纹为结构化字段列表，`stale_handle` 只附带固定字段名，不从节点内容反解字段名。契约见 6.5.1。
+- 当前最终合成树：`V:/coding/kelivo-private/.tower/worktrees/wt-1/.build/worktrees/7593c21b5f9da01f`，`modsetHash` 为 `7593c21b5f9da01fb8b8c4dfe167d892a940efe4a1caf591b772fbe83b6b6f7d`，`dart tool/mod_loader.dart verify` 通过。该树由本任务私有 worktree 生成；Windows 路径长度限制通过 `GIT_CONFIG_*` 环境变量注入 `core.longpaths=true` 解决，未修改任何 Git 配置文件。
+- 当前最终自动检查：Loader format/analyze 通过、Loader 165 项通过；新合成树 `dart format`、`dart analyze --fatal-infos lib test integration_test tool` 通过；Phone Agent 103、Mods 16、settings 入口 2 通过；插件 Dart 17、插件 Kotlin 66（ObservationRegistryTest 24、NodeActionExecutorTest 3 等）、上游 PhoneControl 49 通过。
+- 本地化：23 个键已由本机免费 Magpie llama-cpp 翻译，`translate.py check` 四个目标语言（ko、ru、tr、zh_Hant）均 0 pending；本轮无 UI/ARB 改动，未重跑翻译生成。
+- 当前产品 APK：`V:/coding/kelivo-private/.tower/worktrees/wt-1/.build/worktrees/7593c21b5f9da01f/build/app/outputs/flutter-apk/app-debug.apk`，181369230 字节，SHA-256 `3ea30ee9b46342305cf11e0574b76def9a42f23abe62dd3536b664dc4ec5caeb`。
+- 设备回归：API 35 模拟器与 API 29 真机官方集成测试均退出码 0，逐项结果见 9.3；该结果对应提交 `698cace` 的运行时语义。之后仅调整诊断编码、提取纯 JVM 前置校验接缝、补测试和文档，未重复双 API 设备回归（按 R1 审查意见）。
+- 历史验收记录（焦点修正前，不代表当前实现）：最终合成树 `V:/coding/kelivo-private/.build/worktrees/4ed083cf5fe7dda8`，`modsetHash` 为 `4ed083cf5fe7dda8eec575588594831d9515cbd88429cb6f5b893c9ca6544331`；Flutter 255 项（254 通过 + 1 Windows 条件跳过）；插件 Kotlin 55；旧产品 APK 181354638 字节，SHA-256 `af67f4285bef9e3d1093c6433f42669a8c84b8bee99b6397f68dfd91e1c60ceb`；当时的未验证项包含 API 30+ 截图与坐标手势。
+- 仍明确未验证：物理 API 30+ 真机的坐标手势 UI 效果（integration_test 绑定不转发设备指针事件）、VLM 固定任务与图片链路、真实 `FLAG_SECURE`、其他真机异常路径、签名 release。因此不宣称 Phone Agent 第二阶段全部完成。
 - Mod Loader 的目录、命令、补丁机制和通用接缝见 [Mod Loader 实施计划](mod-loader-plan.md)。
 - 本文只定义 `phone_agent` Mod，不重复 Loader 的通用实现。
 - 基线仓库：`V:/coding/kelivo`。
@@ -317,6 +318,28 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 - 目标失效时返回 `stale_handle`，要求重新读树；不自动点击重新解析出的相似节点。
 - 新读取、输入失败和系统错误都不得把旧句柄误指向另一个节点。
 
+#### 6.5.1 指纹重验契约
+
+指纹用于判断“句柄是否仍指向同一个逻辑节点”，不用于判断节点当前是否处于某个交互状态。当前契约：
+
+| 字段 | 是否进入指纹 | 说明 |
+|---|---|---|
+| `windowId`、`packageName`、`className`、`viewId` | 是 | 节点身份与归属变化必须失效。 |
+| `text`、`contentDescription`、`hintText`、`stateDescription` | 是（密码节点除外） | 内容变化视为目标变化。 |
+| `isEnabled`、`isPassword`、`isEditable`、`isClickable`、`isLongClickable`、`isScrollable`、`isCheckable`、`isChecked` | 是 | 稳定能力或语义状态变化视为目标变化。 |
+| `isSelected` | 是 | 选中状态变化仍返回 `stale_handle`；本轮不一次性放宽全部指纹字段。 |
+| `isFocused` | 否 | 点击、聚焦和输入本身会改变焦点；同一已刷新节点的焦点变化不构成节点替换。 |
+| `actions` | 否 | 聚焦等交互会增减动作集合；动作可用性由执行层在动作前按当前节点重新校验，不可用返回 `action_unavailable`。 |
+| `bounds` | 否 | 允许布局漂移，坐标仍由模型按需重新截图或读树确认。 |
+
+规则：
+
+- 焦点或动作集合变化不失效只表示句柄仍可用，不表示动作成功；`performAction` 返回值仍只表示系统接受动作。
+- 节点被真正替换、内容变化、稳定能力字段变化、`isSelected` 变化、窗口/包名/尺寸/旋转变化和 120 秒 TTL 超时仍返回 `stale_handle` 或 `stale_observation`。
+- `stale_handle` 的错误信息会附带发生变化的指纹字段名（只含固定字段名，不含文本内容）；指纹是结构化字段列表，值只参与相等比较，不会被反解为字段名。
+- 该决定由 `ObservationRegistryTest` 的 focus-only 复用、action-only 复用、selected-only 拒绝和稳定能力变化拒绝用例固定；放宽更多字段必须先更新本节、`AGENTS.md` 和 `mods/phone_agent/README.md`，并补对应测试。
+- 该契约不保证节点始终有效，也不保证业务结果成功；模型仍应在页面明显变化时重新读树。
+
 该策略允许模型在同一页执行多个相互独立的操作，但是否需要重新观察由任务语义决定。它不保证节点始终有效，也不保证业务结果成功。
 
 ### 6.6 错误码
@@ -520,6 +543,11 @@ dart analyze --fatal-infos
 
 - DFS、分页、字符上限、不可见节点和密码子树；
 - 句柄重新编号、TTL、窗口变化和指纹变化；
+- 同一已刷新节点仅 `isFocused` 变化（false→true 与 true→false）时句柄仍可复用并完成 `set_text`；
+- 仅动作集合 `actions` 变化时句柄仍可复用，动作可用性由执行层按当前节点校验；
+- 仅 `isSelected` 变化时仍返回 `stale_handle`，稳定能力字段（如 `isScrollable`）变化也仍返回 `stale_handle`，证明本轮没有一次性放宽全部指纹字段；
+- 含 NUL 的文本变化只报告 `text` 字段名，`stale_handle` 不包含 NUL 后的内容；
+- `performNodeAction` 在请求动作从当前节点移除后返回 `action_unavailable`，且不执行 `beforeAction` 或 `perform`；
 - 动作后有效句柄可复用，失效句柄不会重定向；
 - 归一化坐标、越界、NaN、旋转和尺寸变化；
 - 节点动作、系统导航、手势回调和并发 `busy`；
@@ -556,9 +584,24 @@ flutter test integration_test/phone_agent_test.dart -d <android-device-id>
 1. 设置 → Mods → 真实 enabled/connected/API 29 状态 → 助手选择 Phone Agent 且与原生互斥。
 2. 读树、节点点击、`set_text`、节点滚动、二次读树；截图按预期返回 `unsupported_os`。
 
+本轮节点重验修正后的设备结果：
+
+- API 35 模拟器（`emulator-5554`，Android 15；`flutter test --no-uninstall integration_test/phone_agent_test.dart -d emulator-5554`，退出码 0，2 个用例通过）：
+  1. 真实截图（图片与屏幕尺寸有效）→ 读树 → 节点点击（回调计数 1）→ 坐标滑动（原生接受并完成手势）→ 节点滚动（`scrollController.offset > 0`，列表真实滚动）→ 聚焦输入框 → 同一观测句柄 `set_text` 成功并写入文本 → 二次读树返回节点。
+  2. Mods 页真实服务状态与 Phone Agent 三态选择通过。
+- API 29 真机（`357784090209204`，Android 10；`flutter test --no-uninstall integration_test/phone_agent_test.dart -d 357784090209204`，退出码 0，2 个用例通过）：
+  1. 截图按预期返回 `unsupported_os` → 读树 → 节点点击（回调计数 1）→ 节点滚动（`scrollController.offset > 0`，列表真实滚动）→ 聚焦输入框 → 同一观测句柄 `set_text` 成功并写入文本 → 二次读树返回节点。
+  2. Mods 页真实服务状态与 Phone Agent 三态选择通过。
+
+集成测试的坐标手势验证边界：
+
+- `flutter_test` 的 `LiveTestWidgetsFlutterBinding` 默认 `shouldPropagateDevicePointerEvents = false`，设备指针事件只进入诊断 dispatcher，不转发给 widget 树；绑定还会断言测试不得修改该开关。
+- 因此集成测试只能验证坐标手势被原生接受并完成（`onGestureCompleted`），不能断言应用侧的滚动效果；API 35 用例在坐标滑动之后再用无障碍节点滚动验证列表真的滚动。该限制只影响测试可观测性，不改变产品行为。
+- 安装测试包和部分收尾的 force-stop 可能清除系统无障碍授权；测试会打印 `PHONE_AGENT_WAITING_FOR_SERVICE` 并等待约 300 秒，需要在窗口内通过系统界面重新启用 Kelivo Phone Agent，并每轮检查真实绑定状态。
+
 仍待验证：
 
-- API 30+ 截图与坐标手势。
+- 物理 API 30+ 真机上的截图与坐标手势（API 35 模拟器已验证截图、坐标手势原生接受和节点滚动；坐标手势的 UI 效果受测试绑定限制）。
 - VLM 固定任务和 VLM 图片链路。
 - 真实 `FLAG_SECURE` 窗口。
 - 真机旋转、切窗、锁屏、禁用服务、超时等其他异常路径。
@@ -604,7 +647,7 @@ flutter test integration_test/phone_agent_test.dart -d <android-device-id>
 - `supported` 仅表示 API 30+ 截图能力；API 29 可以 ready 并使用树/节点输入，但截图返回 `unsupported_os`，页面显示截图限制。
 - 非 Android 平台可以打开 Mods 页，但只显示平台不支持；不要用 `supported=false` 表示平台不可用。
 - ARB 翻译质量依赖上游 l10n 工具和目标语言审查；新增键必须保持英文和中文源键集合一致。
-- API 30+ 截图与坐标手势未在真机验证。
+- API 30+ 截图与坐标手势已在 API 35 模拟器验证；坐标手势的 UI 滚动效果受 integration_test 绑定限制（不转发设备指针事件），未在物理 API 30+ 真机验证。
 - VLM 固定任务和 VLM 图片链路未验证。
 - 真实 `FLAG_SECURE` 窗口未验证。
 - 真机旋转、切窗、锁屏、禁用服务、超时等其他异常路径未验证。

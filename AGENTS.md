@@ -76,6 +76,7 @@
 - 插件不得 import `package:Kelivo/...`，避免循环依赖；Kelivo 侧适配代码放在 Mod overlay。
 - 使用独立 MethodChannel、Manifest、服务 XML 和资源名，不修改上游 Android 宿主文件。
 - 工具 schema 不暴露 `snapshot_id`；节点句柄、截图状态和 TTL 由原生侧管理。
+- 节点重验契约：句柄每次使用前执行 `refresh()`、可见性、可用性和指纹校验；同一已刷新节点仅 `isFocused` 变化（点击和输入本身就会改变焦点）或动作集合 `actions` 变化（聚焦会增减动作，动作可用性在动作前按当前节点重新校验）不失效；真正的节点替换、内容变化、稳定能力字段（`isEnabled`、`isEditable`、`isClickable`、`isLongClickable`、`isScrollable`、`isCheckable`、`isChecked`）、`isSelected` 变化以及窗口/包名/尺寸/旋转变化仍返回 `stale_handle`；不得一次性放宽全部指纹字段。焦点或动作集合变化不失效不等于动作成功，`performAction` 返回值仍只表示系统接受动作。
 - 模型坐标统一为 `[0, 1]` 归一化坐标，原点为截图左上角。
 - 截图复用 Kelivo 现有 `ClientToolResult` 与 `McpImageSnapshot` 链路，不修改 provider 序列化。
 - 首版只在显式测试包名中开放输入，不操作支付、社交等敏感应用。私有测试应用使用 `com.psyche.kelivo.phoneagent` 和启动名称 `Kelivo Agent`，不得覆盖设备已安装的上游 Kelivo。
@@ -134,7 +135,9 @@ flutter gen-l10n
 
 标准 sync 已由本机免费 Magpie llama-cpp/llama-cpp 完成：23 个键已翻译，`translate.py check` 四个目标语言（ko、ru、tr、zh_Hant）均 0 pending，`l10n-generated.patch` 已生成；未使用付费服务。Magpie Python UA 适配只是临时进程环境，不属于 Mod 交付，不把临时路径写成依赖。
 
-最终验收：Loader verify 通过；Flutter 255 项（254 通过 + 1 Windows 条件跳过；Phone Agent 103、Mods 16、settings 入口 2）；插件 Dart 17、插件 Kotlin 55、上游 PhoneControl 49、Loader 165；根项目、markstream 和插件静态分析通过；真机官方测试退出码 0。最终合成树为 `V:/coding/kelivo-private/.build/worktrees/4ed083cf5fe7dda8`；最终产品 APK 与 SHA-256 见 `docs/phone-agent-plan.md` 和 `mods/phone_agent/README.md`。仍明确未验证 API 30+ 截图/坐标手势、VLM、真实 `FLAG_SECURE`、其他真机异常和签名 release，不宣称第二阶段全部完成。
+焦点修正前的验收记录（历史结果，不代表当前实现）：Loader verify 通过；Flutter 255 项（254 通过 + 1 Windows 条件跳过；Phone Agent 103、Mods 16、settings 入口 2）；插件 Dart 17、插件 Kotlin 55、上游 PhoneControl 49、Loader 165；根项目、markstream 和插件静态分析通过；API 29 真机官方测试退出码 0。当时的合成树为 `V:/coding/kelivo-private/.build/worktrees/4ed083cf5fe7dda8`。
+
+本轮节点重验修正后（当前实现）：合成树为 `V:/coding/kelivo-private/.tower/worktrees/wt-1/.build/worktrees/7593c21b5f9da01f`，`modsetHash` 为 `7593c21b5f9da01fb8b8c4dfe167d892a940efe4a1caf591b772fbe83b6b6f7d`，Loader verify 通过；Loader 165、插件 Kotlin 66、插件 Dart 17、上游 PhoneControl 49、Phone Agent 103、Mods 16、settings 入口 2 通过；根项目和插件静态分析通过；API 35 模拟器与 API 29 真机官方集成测试均退出码 0（截图、读树、节点点击、坐标手势原生成功、节点滚动、聚焦后 `set_text`、二次读树、Mods 场景）。设备结果对应提交 `698cace` 的运行时语义；R1 审查后仅调整诊断编码、提取纯 JVM 前置校验接缝、补测试和文档，未重复双 API 设备回归。产品 APK 哈希以 `docs/phone-agent-plan.md` 与 `mods/phone_agent/README.md` 的最新记录为准，不得沿用旧数字冒充新结果。仍明确未验证物理 API 30+ 真机的坐标手势 UI 效果（integration_test 绑定不转发设备指针事件）、VLM、真实 `FLAG_SECURE`、其他真机异常和签名 release，不宣称第二阶段全部完成。
 
 无法执行的真机、VLM、`FLAG_SECURE` 或签名 release 验证必须明确报告为未验证，不能宣称完成。测试或构建生成的临时文件不提交；不得删除来源不明的已有文件。
 

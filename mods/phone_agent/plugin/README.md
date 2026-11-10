@@ -67,10 +67,10 @@ final Map<String, dynamic> result = await agent.input({
 - 每次调用和实际执行前检查锁屏、息屏和服务代次。
 - 服务断开、`onInterrupt`、`onUnbind` 和 `onDestroy` 会完成所有 pending 请求并清空观测。
 - 树观测 TTL 120 秒。`offset == 0` 创建新观测并重新编号；`offset > 0` 只切片当前观测，不重新遍历。
-- 句柄只在当前观测内有效。动作后保留树句柄；每次使用前执行 `refresh()`、可见性、可用性和指纹校验。目标失效返回 `stale_handle`，不会按文本或 bounds 重新解析到另一个节点。
+- 句柄只在当前观测内有效。动作后保留树句柄；每次使用前执行 `refresh()`、可见性、可用性和指纹校验。指纹不包含 `isFocused` 和动作集合 `actions`，因此点击或聚焦后同一已刷新节点仍可继续输入，动作可用性由执行层按当前节点校验；`isSelected`、内容、稳定能力字段、窗口、包名、尺寸、旋转和 TTL 变化仍失效。目标失效返回 `stale_handle`（附带变化字段名，不含内容），不会按文本或 bounds 重新解析到另一个节点。
 - 截图使用独立观测。动作后清空截图观测，坐标输入必须重新截图；窗口、包名、尺寸或旋转变化返回 `stale_observation`。截图位图与捕获前屏幕宽高比不一致时同样返回 `stale_observation`，不发出错位遮挡的图片。
 - 截图前遍历 `service.windows` 中所有可访问窗口的 root 收集密码 bounds；任一窗口 root 无法读取时截图失败，不在漏遮挡的情况下发出图片。
-- 输入白名单初期只有 `com.psyche.kelivo`。系统窗口（`com.android.systemui`、权限控制器、安装器等）一律拒绝。系统导航动作与节点、坐标动作使用同一白名单。
+- 输入白名单初期只有 `com.psyche.kelivo.phoneagent`。系统窗口（`com.android.systemui`、权限控制器、安装器等）一律拒绝。系统导航动作与节点、坐标动作使用同一白名单。
 - 动作预算：输入 120 次/分钟，读树 60 次/分钟，截图约 1 次/秒且最多 30 次/分钟。
 - 截图失败映射：系统限频为 `rate_limited`；secure window、无效窗口为 `screenshot_blocked`；窗口读取、位图处理或遮挡准备失败为 `screenshot_failed`，不发送黑图或未遮挡图片。
 - `clearScreenshot` 只清空原生截图坐标观测，供适配层在图片落盘或尺寸校验失败时调用。

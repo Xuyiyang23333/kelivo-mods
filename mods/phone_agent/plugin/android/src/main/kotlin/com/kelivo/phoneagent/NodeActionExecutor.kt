@@ -165,33 +165,7 @@ internal class NodeActionExecutor(
     ) {
         policy.requireInputAllowed(current.packageName)
         val handle = registry.handle(request.nodeId, current)
-        if (handle.record.password) {
-            throw PhoneAgentError(
-                "password_node_denied",
-                "The target is a password field. Direct input is disabled; ask the user to handle it.",
-            )
-        }
-        if (request.action == NodeAction.SET_TEXT && !handle.record.editable) {
-            throw PhoneAgentError(
-                "action_unavailable",
-                "The target is not editable. Choose an editable field or tap it to focus, then read the tree again.",
-            )
-        }
-        if (request.action !in handle.node.actions) {
-            throw PhoneAgentError(
-                "action_unavailable",
-                if (request.action == NodeAction.SET_TEXT) {
-                    "This field does not currently support setting text. Tap it to focus, then read the tree again before set_text."
-                } else {
-                    "The node does not advertise this action. Choose an actionable node, another scroll direction, or a coordinate gesture."
-                },
-            )
-        }
-        if (request.action == NodeAction.SET_TEXT && request.text == null) {
-            throw PhoneAgentError("invalid_argument", "text is required for set_text.")
-        }
-        beforeAction()
-        val accepted = handle.node.perform(request.action, request.text)
+        val accepted = performNodeAction(handle, request.action, request.text, beforeAction)
         registry.clearScreenshot()
         if (!accepted) {
             throw PhoneAgentError(
@@ -380,4 +354,43 @@ internal class NodeActionExecutor(
         NodeAction.SCROLL_RIGHT,
         -> "scroll"
     }
+}
+
+/**
+ * 节点动作的纯 JVM 前置校验与执行。调用方必须在 `registry.handle()` 刷新后调用，
+ * 动作可用性按当前节点重新校验；校验失败时不会执行 `beforeAction` 或 `perform`。
+ */
+internal fun performNodeAction(
+    handle: SavedHandle,
+    action: NodeAction,
+    text: String?,
+    beforeAction: () -> Unit = {},
+): Boolean {
+    if (handle.record.password) {
+        throw PhoneAgentError(
+            "password_node_denied",
+            "The target is a password field. Direct input is disabled; ask the user to handle it.",
+        )
+    }
+    if (action == NodeAction.SET_TEXT && !handle.record.editable) {
+        throw PhoneAgentError(
+            "action_unavailable",
+            "The target is not editable. Choose an editable field or tap it to focus, then read the tree again.",
+        )
+    }
+    if (action !in handle.node.actions) {
+        throw PhoneAgentError(
+            "action_unavailable",
+            if (action == NodeAction.SET_TEXT) {
+                "This field does not currently support setting text. Tap it to focus, then read the tree again before set_text."
+            } else {
+                "The node does not advertise this action. Choose an actionable node, another scroll direction, or a coordinate gesture."
+            },
+        )
+    }
+    if (action == NodeAction.SET_TEXT && text == null) {
+        throw PhoneAgentError("invalid_argument", "text is required for set_text.")
+    }
+    beforeAction()
+    return handle.node.perform(action, text)
 }
