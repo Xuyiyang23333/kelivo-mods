@@ -28,7 +28,7 @@ internal data class NodeRecord(
 internal data class TreeObservation(
     val records: List<NodeRecord>,
     val handles: List<PhoneNode>,
-    val fingerprints: List<String>,
+    val fingerprints: List<NodeFingerprint>,
     val truncated: Boolean,
     val textTruncated: Boolean,
     val windowId: Int,
@@ -62,7 +62,7 @@ internal class NodeTreeReader(
     ): TreeObservation {
         val records = mutableListOf<NodeRecord>()
         val handles = mutableListOf<PhoneNode>()
-        val fingerprints = mutableListOf<String>()
+        val fingerprints = mutableListOf<NodeFingerprint>()
         var visited = 0
         var remainingText = textBudget
         var truncated = false

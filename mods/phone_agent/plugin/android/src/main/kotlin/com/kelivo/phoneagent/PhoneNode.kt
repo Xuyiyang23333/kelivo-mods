@@ -207,8 +207,9 @@ internal class AndroidPhoneNode(
  * 和聚焦引起的动作增减，但拒绝内容、稳定能力或选中状态变化。
  * 动作可用性由执行层在动作前按当前节点重新校验。
  */
-internal fun PhoneNode.fingerprint(): String =
-    fingerprintFields().joinToString("\u0000") { (name, value) -> "$name=$value" }
+internal data class NodeFingerprint(val fields: List<Pair<String, String>>)
+
+internal fun PhoneNode.fingerprint(): NodeFingerprint = NodeFingerprint(fingerprintFields())
 
 /** 指纹字段；只用于比较和报告变化字段名，不输出内容。 */
 internal fun PhoneNode.fingerprintFields(): List<Pair<String, String>> {
@@ -238,13 +239,12 @@ internal fun PhoneNode.fingerprintFields(): List<Pair<String, String>> {
     return fields
 }
 
-/** 返回两个指纹中发生变化的字段名，便于诊断；不返回字段内容。 */
-internal fun fingerprintDiff(expected: String, actual: String): List<String> {
-    fun parse(value: String): Map<String, String> = value
-        .split('\u0000')
-        .filter { it.isNotEmpty() }
-        .associate { it.substringBefore('=') to it.substringAfter('=', "") }
-    val left = parse(expected)
-    val right = parse(actual)
+/**
+ * 返回两个结构化指纹中发生变化的字段名，便于诊断。
+ * 字段名来自固定定义，值只参与相等比较，不会被反解为字段名。
+ */
+internal fun fingerprintDiff(expected: NodeFingerprint, actual: NodeFingerprint): List<String> {
+    val left = expected.fields.toMap()
+    val right = actual.fields.toMap()
     return (left.keys + right.keys).filter { left[it] != right[it] }.sorted()
 }

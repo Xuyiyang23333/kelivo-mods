@@ -33,8 +33,8 @@
 
 - 上游基线：`73afa4ec77cfc9af2efea2487fee8bba1362639d`。
 - 当前 Mod 版本：`0.2.0`。
-- 本轮合成树：`V:/coding/kelivo-private/.tower/worktrees/wt-1/.build/worktrees/4e072ae5edcd23b6`。
-- 本轮 `modsetHash`：`4e072ae5edcd23b6ad9aa081263ecb9c02ed967e0e091fab03d32aee5255f92b`。
+- 本轮合成树：`V:/coding/kelivo-private/.tower/worktrees/wt-1/.build/worktrees/7593c21b5f9da01f`。
+- 本轮 `modsetHash`：`7593c21b5f9da01fb8b8c4dfe167d892a940efe4a1caf591b772fbe83b6b6f7d`。
 - 三个工具：`phone_agent_screenshot`、`phone_agent_tree`、`phone_agent_input`。
 - 每助手独立 `localToolId='phone_agent'`；Mods 页提供关闭/原生手机控制/Phone Agent 三态单选，已有助手不自动迁移。
 - 观察按需发生，不强制每步重新读取完整树；工具 schema 不暴露 `snapshot_id`。
@@ -45,10 +45,10 @@
 - Loader `dart format`、`dart analyze tool test`、165 项测试、`dart tool/mod_loader.dart verify`。
 - 新合成树 `dart format`、`dart analyze --fatal-infos lib test integration_test tool`。
 - Phone Agent 103 项、Mods 16 项、settings 入口 2 项。
-- 插件 Dart 17 项、插件 Kotlin 62 项、上游 `PhoneControlServiceTest` 49 项。
+- 插件 Dart 17 项、插件 Kotlin 66 项、上游 `PhoneControlServiceTest` 49 项。
 - API 35 模拟器官方集成测试退出码 0，2 个用例通过。
 - API 29 真机官方集成测试退出码 0，2 个用例通过。
-- 产品 debug APK：`V:/coding/kelivo-private/.tower/worktrees/wt-1/.build/worktrees/4e072ae5edcd23b6/build/app/outputs/flutter-apk/app-debug.apk`，213415604 字节，SHA-256 `436f6f56c50b4da8a1bf6bc6c8610aea9521858e4283f6d2489a3eef27095860`。
+- 产品 debug APK：`V:/coding/kelivo-private/.tower/worktrees/wt-1/.build/worktrees/7593c21b5f9da01f/build/app/outputs/flutter-apk/app-debug.apk`，181369230 字节，SHA-256 `3ea30ee9b46342305cf11e0574b76def9a42f23abe62dd3536b664dc4ec5caeb`。
 
 API 29 真机结果和任何后续改动后的数字以 `docs/phone-agent-plan.md` 9.3 与 `mods/phone_agent/README.md` 的最新记录为准，不得沿用旧结果冒充新实现通过。
 
@@ -66,12 +66,14 @@ API 29 真机结果和任何后续改动后的数字以 `docs/phone-agent-plan.m
 - 指纹不包含 `bounds`、`isFocused`、`actions`。
 - `isSelected`、内容（text/description/hint/state）、稳定能力字段（enabled/editable/clickable/long-clickable/scrollable/checkable/checked）、password、类名、viewId、窗口、包名、尺寸、旋转和 120 秒 TTL 变化仍失效。
 - 动作可用性由 `NodeActionExecutor` 在动作前按当前节点重新校验，不可用返回 `action_unavailable`。
-- 指纹改为 `name=value` 形式；`stale_handle` 附带发生变化的字段名（只含字段名，不含文本内容）。
+- 指纹为结构化字段列表 `NodeFingerprint(fields)`；比较使用数据类相等，`fingerprintDiff` 只按固定字段名比较，值不会被反解为字段名；`stale_handle` 只附带固定字段名，不含文本内容（含 NUL 文本也有回归测试）。
+- 节点动作前置校验提取为纯 JVM `performNodeAction(handle, action, text, beforeAction)`，Executor 在 `registry.handle()` 刷新后、`perform` 前调用；`action_unavailable` 负向路径由 `NodeActionExecutorTest` 覆盖。
+- 双 API 设备结果对应提交 `698cace` 的运行时语义；R1 审查后仅调整诊断编码、提取纯前置校验接缝、补测试和文档，未重复设备回归。
 
 测试：
 
 - 修正前用同一套插件测试复现：61 项中 2 项 focus 用例失败。
-- 新增：focus false→true 后复用句柄并 `set_text`、focus true→false 后复用、action-only 变化可复用、selected-only 变化拒绝、`isScrollable` 变化拒绝、禁用节点、句柄 TTL。
+- 新增：focus false→true 后复用句柄并 `set_text`、focus true→false 后复用、action-only 变化可复用、selected-only 变化拒绝、`isScrollable` 变化拒绝、禁用节点、句柄 TTL、含 NUL 文本只报告 `text` 字段名，以及 `performNodeAction` 在动作从当前节点移除时返回 `action_unavailable` 且不执行 `beforeAction`/`perform`。
 - 集成测试：聚焦后使用同一观测句柄 `set_text`；坐标滑动放在聚焦之前；随后用无障碍节点滚动验证列表真的滚动。
 
 集成测试的坐标手势边界：

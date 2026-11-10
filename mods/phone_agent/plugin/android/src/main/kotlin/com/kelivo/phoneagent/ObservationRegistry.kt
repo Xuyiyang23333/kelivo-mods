@@ -35,7 +35,7 @@ internal data class TreePage(
 internal class SavedHandle(
     val id: String,
     val node: PhoneNode,
-    val fingerprint: String,
+    val fingerprint: NodeFingerprint,
     val record: NodeRecord,
 )
 

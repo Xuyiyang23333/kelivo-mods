@@ -1,6 +1,7 @@
 package com.kelivo.phoneagent
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
@@ -222,6 +223,22 @@ class ObservationRegistryTest {
 
         assertEquals("stale_handle", error.code)
         assertTrue(error.message.contains("text"))
+    }
+
+    @Test
+    fun `content change with NUL only reports the field name`() {
+        val (root, observation) = observation()
+        registry.beginTree(observation)
+        (root.children[0] as FakeNode).text = "changed\u0000private-content"
+
+        val error = assertThrows(PhoneAgentError::class.java) {
+            registry.handle("n1", window)
+        }
+
+        assertEquals("stale_handle", error.code)
+        assertTrue(error.message.contains("text"))
+        assertFalse(error.message.contains("private-content"))
+        assertFalse(error.message.contains("\u0000"))
     }
 
     @Test
