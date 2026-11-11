@@ -24,12 +24,12 @@
 
 ## 2. 当前目标与阶段
 
-第一阶段 Mod Loader 已完成。第二阶段 Phone Agent 的主要功能已完成。当前 M16 把物理 MIUI API31 真机的验收结果写入文档：坐标 tap/swipe 的真实 UI 效果、`mistral/deepseek-v4-1-flash-1017` 的图片请求与像素专属视觉确认、物理 `FLAG_SECURE` 和旋转已验证；权限窗口、原生超时、签名 release、`stale_handle` 根因仍未验证，不能宣称全部验收完成。
+第一阶段 Mod Loader 已完成。第二阶段 Phone Agent 的主要功能已完成。当前 M16 把物理 MIUI API31 真机的验收结果写入文档：`llama-cpp/llama-cpp` 的归一化坐标 tap 与 `mistral/deepseek-v4-1-flash-1017` 的归一化坐标 swipe 的真实 UI 效果、1017 的图片请求与像素专属视觉确认、物理 `FLAG_SECURE` 和旋转已验证；权限窗口、原生超时、签名 release、`stale_handle` 根因仍未验证，不能宣称全部验收完成。
 
 本轮（M16）已完成：
 
 1. 只改中文文档（`AGENTS.md`、`docs/phone-agent-plan.md`、本文件、两个 README），产品代码/测试/`mod.json`/schema/白名单/上游均未修改。
-2. 记录物理 MIUI API31 的设备、授权例外、官方测试间歇性、物理 secure/旋转、坐标 tap 与 swipe 的真实 UI 证据、1017 的图片请求与像素专属视觉证据。
+2. 记录物理 MIUI API31 的设备、授权例外、官方测试间歇性、物理 secure/旋转、`llama-cpp/llama-cpp` 归一化坐标 tap 与 1017 归一化坐标 swipe 的真实 UI 证据、1017 的图片请求与像素专属视觉证据。
 3. 按 LF/`core.longpaths` 重新确定性 `plan`/`apply`/`verify`，在新干净合成树显式构建产品 debug APK，并检查 debug/release 夹具隔离。
 4. 明确 `flutter test` 会覆盖树内 `app-debug.apk`，产品 APK 必须显式重建；不沿用旧大小/哈希。
 
@@ -158,7 +158,7 @@ API 29 真机结果、双 API 集成测试和任何后续改动后的数字以 `
 
 ## 5. 上一轮新增聚焦测试（历史，该轮未改测试）
 
-该轮只改中文文档，未新增或修改测试；该标签仅适用于该历史 VLM 文档轮，不代表当前 M10；M10 已新增并运行异常/聚焦测试。以下为上一轮新增的测试，保留作回归说明。
+该轮只改中文文档，未新增或修改测试；该标签仅适用于该历史 VLM 文档轮，不代表当前 M16（M10 历史轮已新增并运行异常/聚焦测试）。以下为上一轮新增的测试，保留作回归说明。
 
 文件：`mods/phone_agent/overlay/test/features/phone_agent/phone_agent_tool_result_test.dart`（合成树 `test/features/phone_agent/phone_agent_tool_result_test.dart`）。
 
@@ -200,7 +200,7 @@ API 29 真机结果、双 API 集成测试和任何后续改动后的数字以 `
 - 本任务 worktree 路径较长，合成树会超过 Windows `MAX_PATH`。生成时使用环境变量注入 Git 长路径支持（不修改任何配置文件）：
 
 ```bash
-cd V:/coding/kelivo-private/.tower/worktrees/wt-6
+cd V:/coding/kelivo-private/.tower/worktrees/wt-16
 export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.longpaths GIT_CONFIG_VALUE_0=true
 dart tool/mod_loader.dart plan
 dart tool/mod_loader.dart apply

@@ -8,7 +8,7 @@
 - 上一轮 M10（API35 FLAG_SECURE/异常路径）：最终源码 `modsetHash` `5b1cde0304e687b9e3a26935cf85b5a27d102c9ecb409ff0e8b1358075aa902d`，合成树 `V:/coding/kelivo-private/.tower/worktrees/wt-10/.build/worktrees/5b1cde0304e687b9`；完整异常套件实际运行于 `2c1513ecef3f2293` 树，`+5 ~1`、EXIT=0；当前 `5b1cde...` 是仅文档哈希变化后的最终源码/构建树，关键代码/测试一致，新树未重跑设备；权限窗口未验证；API35/API29 官方测试各 2 项通过。契约和结果见 9.3.1。
 - 上一轮 magpie VLM 验收（历史，API35 模拟器）：使用当时的 debug APK 和 magpie 网关模型 `llama-cpp/llama-cpp`（provider `http://10.0.2.2:3425/v1`，UI Image + Tools；局域网访问由用户开启，未读取或记录密钥）完成真实图片链路、Kelivo 应用内固定任务和跨新用户轮次历史图片回放。证据见 9.4。该轮的合成树 `5f0be65f...` 和 APK 181369230 字节是历史记录，不代表当前实现。
 - 当前产品 debug APK（在 M16 最终源码/构建树 `V:/coding/kelivo-private/.tower/worktrees/wt-16/.build/worktrees/3d3cd25b4def3563` 显式 `flutter build apk --debug` 生成，未在该树随后运行 integration_test）：**181,369,890 字节**，SHA-256 `c6f20d250239bae223a4fdaa5ff1807ba34eab38bd8f9e7f9710e8c21747a58b`；debug merged manifest 含 `SecureWindowFixtureActivity`，release merged manifest 不含该夹具（不宣称签名 release）。
-- 上一轮自动检查（历史）：Loader 165、Phone Agent 105、Mods 16、settings 入口 2、上游 `tool_result_content` 回归、插件 Dart 17、插件 Kotlin 66 和上游 PhoneControl 49；本轮 M10 只改测试/文档，未重复这些静态套件，新增聚焦工具测试 32 项通过。
+- 上一轮自动检查（历史）：Loader 165、Phone Agent 105、Mods 16、settings 入口 2、上游 `tool_result_content` 回归、插件 Dart 17、插件 Kotlin 66 和上游 PhoneControl 49；M10 历史轮只改测试/文档，未重复这些静态套件，新增聚焦工具测试 32 项通过。
 - 上一轮节点重验合成树（历史）：`V:/coding/kelivo-private/.tower/worktrees/wt-1/.build/worktrees/7593c21b5f9da01f`，`modsetHash` 为 `7593c21b5f9da01fb8b8c4dfe167d892a940efe4a1caf591b772fbe83b6b6f7d`；当时 Phone Agent 103、Mods 16、settings 入口 2、插件 Dart 17、插件 Kotlin 66、上游 PhoneControl 49 通过。
 - 本地化：23 个键已由本机免费 Magpie llama-cpp 翻译，`translate.py check` 四个目标语言（ko、ru、tr、zh_Hant）均 0 pending；本轮无 UI/ARB 改动，未重跑翻译生成。
 - 上一轮设备回归（历史）：API 35 模拟器与 API 29 真机官方集成测试均退出码 0，逐项结果见 9.3；该结果对应提交 `698cace` 的运行时语义。之后仅调整诊断编码、提取纯 JVM 前置校验接缝、补测试和文档，未重复双 API 设备回归（按 R1 审查意见）。
@@ -472,7 +472,7 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 4. 使用 Loader 的 `rebase-drill` 检查新基线，并处理 vendored 漂移提醒。
 5. 完善中文 README：选择、授权、白名单、限制、更新和故障排查。
 
-本轮进展：第 1-3 项已在 API 35 模拟器用 magpie `llama-cpp/llama-cpp` 完成，并补充跨新用户轮次历史图片回放（见 9.4）；第 4 项 `rebase-drill` 未在本轮执行；第 5 项中文 README 已维护。物理 MIUI API31 真机已用 magpie `mistral/deepseek-v4-1-flash-1017` 完成真实图片请求、坐标 tap/swipe 的 UI 效果和像素专属视觉确认（见 9.4.2）；`llama-cpp/llama-cpp` 的物理完整坐标 swipe 仍未完成。
+本轮进展：第 1-3 项已在 API 35 模拟器用 magpie `llama-cpp/llama-cpp` 完成，并补充跨新用户轮次历史图片回放（见 9.4）；第 4 项 `rebase-drill` 未在本轮执行；第 5 项中文 README 已维护。物理 MIUI API31 真机由 `llama-cpp/llama-cpp` 完成归一化坐标 tap（打开抽屉/Settings/Search），由 magpie `mistral/deepseek-v4-1-flash-1017` 完成真实图片请求、归一化坐标 swipe 的 UI 效果和像素专属视觉确认（见 9.4.2）；`llama-cpp/llama-cpp` 的物理完整坐标 swipe 仍未完成。
 
 完成条件：所有可用环境中的 Phone Agent 验收项通过；无法执行的硬件/模型项目明确记录为未验证。
 
@@ -674,7 +674,7 @@ adb -s emulator-5554 install -r <临时项目目录>/app/build/outputs/apk/debug
 - 历史失败（保留）：`41e33b6f115e54bc` 完整套件为 `+2 ~1 -3`、EXIT=1；secure（切同包夹具只等文本未等包名，旧坐标得到 `package_not_allowed`）、锁屏（host driver 漏处理 lock 标记）、服务（未在窗口内完成系统 UI 禁用）失败。修正测试辅助与 host 协调后，实际运行树 `2c1513ecef3f2293` 完整套件 `+5 ~1`、EXIT=0；当前 `5b1cde...` 仅文档哈希变化，未重跑设备。
 - API35 官方 `phone_agent_test.dart`：**2 项通过，EXIT=0**。
 - API29 官方 `phone_agent_test.dart`：**2 项通过，EXIT=0**；截图返回 `unsupported_os`，树/节点输入回归通过。
-- 当前产品 debug APK（在最终源码/构建树 `5b1cde0304e687b9` 显式 `flutter build apk --debug`；设备套件实际运行于 `2c1513...`，未在新树重跑）：**181,373,590 字节**，SHA-256 `581d56fc03fe716c768f2554015115bffd8e2b0d610c71e74f5d3b21524703a3`；debug merged manifest 含 `SecureWindowFixtureActivity`，release merged manifest 不含该夹具（不宣称签名 release）。
+- 当时产品 debug APK（历史，M10 最终源码/构建树 `5b1cde0304e687b9` 显式 `flutter build apk --debug`；设备套件实际运行于 `2c1513...`，未在新树重跑）：**181,373,590 字节**，SHA-256 `581d56fc03fe716c768f2554015115bffd8e2b0d610c71e74f5d3b21524703a3`；debug merged manifest 含 `SecureWindowFixtureActivity`，release merged manifest 不含该夹具（不宣称签名 release）。该 APK 已被 9.3.2 的 M16 产品 APK 取代，不能再当作当前产品。
 - 权限窗口：实际运行树 `2c1513ecef3f2293` 完整套件明确跳过（90 秒内未检测到 permissioncontroller 前台），**未验证**，不写成通过。
 - 未验证：签名 release、原生超时、权限窗口、`stale_handle` 根因；物理真机部分见 9.3.2。
 - 旋转：旧树句柄 `tap` 返回 `stale_handle`；旧截图坐标 `tap` 返回 `stale_observation`；旋转后新树/新截图成功；转回后恢复。
@@ -686,7 +686,7 @@ adb -s emulator-5554 install -r <临时项目目录>/app/build/outputs/apk/debug
 边界：
 
 - 夹具启动、secure 切换、权限弹窗、锁屏和服务开关由宿主/CU 在打印标记后操作；测试自动断言结果，但不把宿主操作当成产品能力。
-- 禁止用 `settings put secure enabled_accessibility_services` 写授权；服务开关只走系统界面。
+- 默认禁止用 `settings put secure enabled_accessibility_services` 写授权；服务开关只走系统界面。唯一例外是用户明确授权的物理 MIUI 测试设备 `1960cd68` 上仅对 Phone Agent 的测试预配置，见 9.3.2；结束必须恢复原始空串与 `accessibility_enabled=0`，产品不自动授权。
 - 原生截图 10 秒、手势 duration+3 秒、插件 15/20 秒和 worker 15 秒排队超时无法在设备上确定性触发，只由 Dart 注入超时测试覆盖工具层映射，不写成真机证据。
 - API 29 不适用 secure 截图和坐标场景，只跑原官方测试验证树/节点回归和 `unsupported_os`。
 
@@ -694,7 +694,7 @@ adb -s emulator-5554 install -r <临时项目目录>/app/build/outputs/apk/debug
 
 - 物理真机的截图、坐标手势和 VLM 固定任务已由 9.3.2/9.4.2 覆盖（MIUI API31 + `mistral/deepseek-v4-1-flash-1017`）；`llama-cpp/llama-cpp` 的物理完整坐标 swipe 仍未完成。
 - 其他 Android 版本/物理设备上的 `FLAG_SECURE` 行为（API35 模拟器与 MIUI API31 真机均已观察成功黑图，不代表所有设备）。
-- 物理真机的锁屏、home/recents、服务禁用/重启和权限窗口仍未运行（API35 模拟器已验证前四项）；原生截图/手势/通道/worker 排队超时仍未设备验证。
+- 物理真机的锁屏、home/recents、服务禁用/重启和权限窗口仍未运行；API35 模拟器已验证锁屏、home/recents、服务禁用/重启三项，权限窗口在 API35 也明确跳过、仍未验证。原生截图/手势/通道/worker 排队超时仍未设备验证。
 - 带合法签名配置的 release 构建。
 
 因此不宣称 Phone Agent 第二阶段全部完成；未验证项不能用编译或单元测试代替真机结论。
@@ -718,7 +718,7 @@ adb -s emulator-5554 install -r <临时项目目录>/app/build/outputs/apk/debug
 
 ### 9.4 VLM 图片链路与固定任务验收（API 35 模拟器，magpie `llama-cpp/llama-cpp`）
 
-以下为 API 35 模拟器上的历史 VLM 验收记录；当前 M10 的 FLAG_SECURE/异常路径结果见 9.3.1，物理 MIUI API31 真机的 VLM 结果见 9.4.2。
+以下为 API 35 模拟器上的历史 VLM 验收记录；M10 历史的 FLAG_SECURE/异常路径结果见 9.3.1，物理 MIUI API31 真机的 VLM 结果见 9.4.2。
 
 该轮在 API 35 模拟器 `emulator-5554`（Android 15，内部屏幕 1080x2424）使用产品 debug APK（181369230 字节，SHA-256 `3ea30ee9b46342305cf11e0574b76def9a42f23abe62dd3536b664dc4ec5caeb`）和用户指定的 magpie 网关模型完成真实聊天、图片链路、Kelivo 应用内固定任务和跨新用户轮次历史图片回放。该轮未修改产品代码、`mod.json`、schema、节点指纹或插件行为，未重建 APK。
 
@@ -804,8 +804,8 @@ adb -s emulator-5554 install -r <临时项目目录>/app/build/outputs/apk/debug
 - Kelivo 适配层、插件 Dart 和 Android 相关检查通过。
 - debug APK 构建成功，Manifest 合并正确。
 - 真机基础输入闭环通过；真机官方测试退出码 0。
-- VLM 图片链路、Kelivo 应用内固定任务和跨新用户轮次历史图片回放已在 API 35 模拟器用 magpie `llama-cpp/llama-cpp` 通过；物理 MIUI API31 真机用 magpie `mistral/deepseek-v4-1-flash-1017` 通过真实图片请求、坐标 tap/swipe 的物理 UI 效果和像素专属视觉确认；不承诺任意模型或设备。
-- 上一轮 VLM 文档轮只改中文文档，未重跑测试；该标签仅适用于该历史 VLM 文档轮，不代表当前 M10/M16；M10 已新增并运行异常/聚焦测试。上一轮 Loader 165、Phone Agent 105、Mods 16、settings 入口 2、上游 `tool_result_content` 14 通过 + 1 Windows 条件跳过、插件 Dart 17、插件 Kotlin 66、上游 PhoneControl 49 和根项目/插件静态分析结果继续有效，不得当作当前 M16 重跑结果。
+- VLM 图片链路、Kelivo 应用内固定任务和跨新用户轮次历史图片回放已在 API 35 模拟器用 magpie `llama-cpp/llama-cpp` 通过；物理 MIUI API31 真机由 `llama-cpp/llama-cpp` 通过归一化坐标 tap（打开抽屉/Settings/Search），由 magpie `mistral/deepseek-v4-1-flash-1017` 通过真实图片请求、归一化坐标 swipe 的物理 UI 效果和像素专属视觉确认；`llama-cpp/llama-cpp` 的完整坐标 swipe 仍未验证；不承诺任意模型或设备。
+- 上一轮 VLM 文档轮只改中文文档，未重跑测试；该标签仅适用于该历史 VLM 文档轮，不代表当前 M16；M10 历史轮已新增并运行异常/聚焦测试。上一轮 Loader 165、Phone Agent 105、Mods 16、settings 入口 2、上游 `tool_result_content` 14 通过 + 1 Windows 条件跳过、插件 Dart 17、插件 Kotlin 66、上游 PhoneControl 49 和根项目/插件静态分析结果继续有效，不得当作当前 M16 重跑结果。
 - Loader verify 通过；最终 APK 已生成。
 - 中文维护文档与真实行为一致。
 
@@ -826,7 +826,7 @@ adb -s emulator-5554 install -r <临时项目目录>/app/build/outputs/apk/debug
 - `supported` 仅表示 API 30+ 截图能力；API 29 可以 ready 并使用树/节点输入，但截图返回 `unsupported_os`，页面显示截图限制。
 - 非 Android 平台可以打开 Mods 页，但只显示平台不支持；不要用 `supported=false` 表示平台不可用。
 - ARB 翻译质量依赖上游 l10n 工具和目标语言审查；新增键必须保持英文和中文源键集合一致。
-- API 30+ 截图与坐标手势已在 API 35 模拟器验证；物理 MIUI API31 真机已用产品 UI 的真实 tap/swipe 证实坐标 UI 效果；integration_test 的坐标手势 UI 滚动效果仍受绑定限制（不转发设备指针事件），不能把回调成功当 UI 效果。
+- API 30+ 截图与坐标手势已在 API 35 模拟器验证；物理 MIUI API31 真机由 `llama-cpp/llama-cpp` 的归一化坐标 tap 与 `mistral/deepseek-v4-1-flash-1017` 的归一化坐标 swipe 证实坐标 UI 效果；integration_test 的坐标手势 UI 滚动效果仍受绑定限制（不转发设备指针事件），不能把回调成功当 UI 效果。
 - VLM 图片链路、Kelivo 应用内固定任务和跨新用户轮次历史图片回放已在 API 35 模拟器用 magpie `llama-cpp/llama-cpp` 验证；物理 MIUI API31 真机用 magpie `mistral/deepseek-v4-1-flash-1017` 验证真实图片请求、坐标 swipe 的 UI 效果和像素专属视觉确认；`llama-cpp/llama-cpp` 的物理完整坐标 swipe 未验证；只验证这些模型与设备，不承诺任意模型或设备。
 - 物理设备官方测试出现一次间歇性 `set_text` `stale_handle`（`The target node changed`，`ObservationRegistry` 的 refresh/isVisibleToUser/isEnabled 前置分支），另一次全通过；根因未确认、未修复，需要后续诊断与统计，不写成稳定通过。
 - magpie 的模型能力标注可能变化，图片与工具能力需每次实测；Kelivo 手动勾选图片只是测试配置，不构成模型能力保证。

@@ -7,7 +7,7 @@
 当前任务分为两个独立阶段：
 
 1. 先实现并验收通用 Mod Loader，见 `docs/mod-loader-plan.md`。
-2. Loader 验收后再实现 `phone_agent` Mod，见 `docs/phone-agent-plan.md`。UI/选择契约改造已完成并通过最终验收；当前 `phone_agent` Mod 版本 0.2.0，VLM 图片链路、Kelivo 应用内固定任务和跨新用户轮次历史图片回放已在 API 35 模拟器用 magpie `llama-cpp/llama-cpp` 验证，物理 MIUI API31 真机已用 magpie `mistral/deepseek-v4-1-flash-1017` 验证真实图片请求、坐标 tap/swipe 的 UI 效果和像素专属视觉确认；未验证项见计划。
+2. Loader 验收后再实现 `phone_agent` Mod，见 `docs/phone-agent-plan.md`。UI/选择契约改造已完成并通过最终验收；当前 `phone_agent` Mod 版本 0.2.0，VLM 图片链路、Kelivo 应用内固定任务和跨新用户轮次历史图片回放已在 API 35 模拟器用 magpie `llama-cpp/llama-cpp` 验证；物理 MIUI API31 真机由 `llama-cpp/llama-cpp` 验证归一化坐标 tap（打开抽屉/Settings/Search），由 magpie `mistral/deepseek-v4-1-flash-1017` 验证真实图片请求、归一化坐标 swipe 的 UI 效果和像素专属视觉确认，`llama-cpp/llama-cpp` 的完整坐标 swipe 未验证；未验证项见计划。
 
 不要把两个阶段的原则、非目标或验收标准混写。完成当前阶段前，不要提前扩张下一阶段范围。
 
