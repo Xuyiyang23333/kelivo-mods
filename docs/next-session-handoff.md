@@ -1,6 +1,17 @@
-# 下一次会话交接：Phone Agent 物理 MIUI 验收
+# 下一次会话交接：Phone Agent 节点重验诊断与物理 MIUI 验收
 
-## 0. M16 当前状态（2026-11-11）
+## 0. M17 当前状态（2026-11-11）
+
+- 本轮目标：为 `stale_handle` 增加可区分诊断（`refresh_failed`/`not_visible`/`not_enabled`），不放宽 refresh/可见/可用校验，不改变错误码、指纹契约或 TTL/窗口校验；只做可区分诊断和有限复现，不宣称根因修复。
+- 代码：`ObservationRegistry.handle()` 把合并前置条件拆成 refresh → visible → enabled 三个顺序判断，统一 `targetChanged(detail)`；指纹分支消息格式不变。`ObservationRegistryTest` 新增三项精确用例，断言错误码、对应标识、无节点文本、无其它标识；refresh 用例同时验证短路优先级。
+- 最终源码 `modsetHash`：`1c1920e0e2b8bc7c397b02e2e908e59d27f979a5ddee3b263da348aa3c1ceaf3`；最终合成树：`V:/coding/kelivo-private/.tower/worktrees/wt-17/.build/worktrees/1c1920e0e2b8bc7c`；`plan`/`apply`/`verify` 通过。设备测试树为 `V:/coding/kelivo-private/.tower/worktrees/wt-17/.build/worktrees/8fe847cedc2ea513`，两树仅 `plugin/README.md` 文档副本不同，代码/测试一致。
+- 自动检查：Loader format/analyze 通过、Loader 165、插件 Kotlin 66（含三项新诊断）、插件 Dart 17、根项目 `dart analyze --fatal-infos`、Flutter 182 通过。根分析前必须先跑 `flutter pub get --directory tool/l10n --enforce-lockfile`，否则 `tool/l10n/validate.dart` 会因缺 `flutter_tools` 包解析报 15 个既有错误。
+- 当前产品 debug APK（在最终树 `V:/coding/kelivo-private/.tower/worktrees/wt-17/.build/worktrees/1c1920e0e2b8bc7c` 显式 `flutter build apk --debug` 生成）：**181,373,530 字节**，SHA-256 `dc32c4a30533c4195f0392f5533a316bbf096177b653f0623c78645d5f116026`；debug merged manifest 含 `SecureWindowFixtureActivity`，release merged manifest 不含该夹具（不宣称签名 release）。设备测试树 `8fe847...` 的 clean APK 为 181,373,066 字节 / `d7138f06...`，仅作设备证据；两树代码/测试一致，仅 `plugin/README.md` 文档副本不同。测试后仅增量构建曾复用约 249 MB 测试入口 APK，已用 clean 构建排除。
+- 设备：MIUI `1960cd68` 同一官方 `phone_agent_test.dart` 连续 4 轮均为 `+2`、`All tests passed!`、EXIT=0，未出现 `stale_handle`，也未触发新诊断标识。每轮 `adb devices -l` 重查；安装会清除组件，宿主 watcher 只恢复 Phone Agent 组件；轮末恢复当轮真实原值（组件 + `accessibility_enabled=1`）。第 1 轮设备自动息屏导致约 3 分钟停顿，唤醒后继续并通过，不是测试失败。
+- 结论边界：4 轮未复现不等于根因修复；`refresh_failed`/`not_visible`/`not_enabled` 目前只有 JVM 单元测试覆盖，设备未触发；历史 `No current tree observation` 与 `The target node changed` 仍是未确认根因。
+- 未验证：权限窗口、原生超时、签名 release、`stale_handle` 根因；物理设备未运行锁屏、home/recents、服务中断；`llama-cpp/llama-cpp` 的物理完整坐标 swipe 未完成。API35 emulator-5554 本轮不在线，未运行。
+
+### M16 历史状态（2026-11-11）
 
 - 本轮目标：把物理 MIUI API31 真机（Redmi K30 5G，`1960cd68`）的验收结果写入中文文档；只改 `AGENTS.md`、`docs/phone-agent-plan.md`、本文件、`mods/phone_agent/README.md` 和 `mods/phone_agent/plugin/README.md`，不改产品代码、测试、`mod.json`、schema、白名单或上游。
 - 最终源码 `modsetHash`：`3d3cd25b4def35633dcf848373037cbe2c5200f795339c315b3ac9c3268a3174`；合成树：`V:/coding/kelivo-private/.tower/worktrees/wt-16/.build/worktrees/3d3cd25b4def3563`；`plan`/`apply`/`verify` 通过。
@@ -8,7 +19,7 @@
 - 设备证据来自此前相同代码/测试行为，未在新树重跑设备；新树只包含文档变化。
 - 物理 MIUI API31 已通过：独立测试包安装与服务 enabled && connected、Mods 三态选择、真实截图/读树/节点输入/滚动、物理 `FLAG_SECURE`（成功黑图，清除后恢复）、旋转失效（`stale_handle` / `stale_observation`）、`llama-cpp/llama-cpp` 的坐标 tap 真实打开抽屉/Settings/Search 与 `set_text Phone`、magpie `mistral/deepseek-v4-1-flash-1017` 的真实图片请求、坐标 swipe 前后 PNG 证实 Sponsor 可见、像素专属视觉确认（`bright cyan` + `PHONE_AGENT_SECURE_FIXTURE`，与 PNG rgb(0,200,255) 一致）。
 - 官方测试间歇性：同一最终树、同一命令两次结果不同，第一次 `+1 -1`、EXIT=1（聚焦后 `set_text` 返回 `stale_handle`，`The target node changed`，属 `ObservationRegistry` 的 refresh/isVisibleToUser/isEnabled 前置分支，不是旧聚焦指纹路径），第二次 `+2`、EXIT=0。根因未确认、未修复，需要后续诊断与统计，不能写成稳定通过。
-- 授权例外：用户明确授权仅在该 MIUI 测试设备上用 `settings put secure` 预配置 Phone Agent；原始 `enabled_accessibility_services` 为空串、`accessibility_enabled=0`，每轮结束恢复。该例外不改变产品自动授权边界，其他设备默认仍禁止自动写系统授权。
+- 授权例外：用户明确授权仅在该 MIUI 测试设备上用 `settings put secure` 预配置 Phone Agent；M16 历史轮原始 `enabled_accessibility_services` 为空串、`accessibility_enabled=0`，每轮结束恢复。该例外不改变产品自动授权边界，其他设备默认仍禁止自动写系统授权。
 - `flutter test` 会把树内 `build/app/outputs/flutter-apk/app-debug.apk` 覆盖为测试入口构建；产品 APK 必须显式 `flutter build apk --debug` 重新生成并重新计算大小/SHA-256，不能沿用旧哈希。
 - 未验证：权限窗口、原生超时、签名 release、`stale_handle` 根因；物理设备未运行锁屏、home/recents、服务中断；`llama-cpp/llama-cpp` 的物理完整坐标 swipe 未完成。不能从 API35 模拟器结果推断物理设备。
 
@@ -24,14 +35,14 @@
 
 ## 2. 当前目标与阶段
 
-第一阶段 Mod Loader 已完成。第二阶段 Phone Agent 的主要功能已完成。当前 M16 把物理 MIUI API31 真机的验收结果写入文档：`llama-cpp/llama-cpp` 的归一化坐标 tap 与 `mistral/deepseek-v4-1-flash-1017` 的归一化坐标 swipe 的真实 UI 效果、1017 的图片请求与像素专属视觉确认、物理 `FLAG_SECURE` 和旋转已验证；权限窗口、原生超时、签名 release、`stale_handle` 根因仍未验证，不能宣称全部验收完成。
+第一阶段 Mod Loader 已完成。第二阶段 Phone Agent 的主要功能已完成。当前 M17 为 `stale_handle` 增加可区分诊断并做有限复现：`ObservationRegistry` 把 refresh/可见/可用前置失败拆成 `refresh_failed`/`not_visible`/`not_enabled`，错误码、指纹契约和通过条件不变；物理 MIUI 同一官方测试连续 4 轮通过，未复现历史间歇性失败，新诊断标识未在设备触发。权限窗口、原生超时、签名 release、`stale_handle` 根因仍未验证，不能宣称全部验收完成。
 
-本轮（M16）已完成：
+本轮（M17）已完成：
 
-1. 只改中文文档（`AGENTS.md`、`docs/phone-agent-plan.md`、本文件、两个 README），产品代码/测试/`mod.json`/schema/白名单/上游均未修改。
-2. 记录物理 MIUI API31 的设备、授权例外、官方测试间歇性、物理 secure/旋转、`llama-cpp/llama-cpp` 归一化坐标 tap 与 1017 归一化坐标 swipe 的真实 UI 证据、1017 的图片请求与像素专属视觉证据。
-3. 按 LF/`core.longpaths` 重新确定性 `plan`/`apply`/`verify`，在新干净合成树显式构建产品 debug APK，并检查 debug/release 夹具隔离。
-4. 明确 `flutter test` 会覆盖树内 `app-debug.apk`，产品 APK 必须显式重建；不沿用旧大小/哈希。
+1. 先更新中文契约（`AGENTS.md`、`docs/phone-agent-plan.md`、本文件、两个 README），再改 `ObservationRegistry.kt` 与 `ObservationRegistryTest.kt`。
+2. 三项精确 Kotlin 测试覆盖 refresh=false、visible=false、enabled=false，断言 `stale_handle`、对应固定标识、无节点文本、无其它标识；refresh 用例同时验证短路优先级。
+3. Loader 重新合成/verify，运行 Loader、插件 Kotlin/Dart、根项目静态分析和 Flutter 测试；显式构建产品 APK，并在测试后 `flutter clean` 重建，避免把约 249 MB 测试入口构建当产品。
+4. 物理 MIUI `1960cd68` 上同一官方 `phone_agent_test.dart` 连续 4 轮，逐轮记录真实退出码；每轮重查授权、只恢复 Phone Agent 组件、轮末恢复当轮真实原值（组件 + `accessibility_enabled=1`）。
 
 当前剩余：
 
@@ -39,7 +50,7 @@
 2. 物理设备未运行锁屏、home/recents、服务中断；不能从 API35 模拟器结果推断。
 3. 原生截图/手势/通道/worker 排队超时未设备验证。
 4. 带合法签名配置的 release 构建。
-5. 官方测试在物理设备上出现一次间歇性 `set_text` `stale_handle`（`The target node changed`，refresh/可见/可用前置分支）；根因未确认、未修复，需要诊断与统计。
+5. `stale_handle` 根因仍未确认；M17 4 轮未复现，新诊断标识未在设备触发，不能据此宣称修复。
 6. `llama-cpp/llama-cpp` 的物理完整坐标 swipe 未完成（网关故障）。
 
 首版输入仍只开放给测试包名 `com.psyche.kelivo.phoneagent`。不要扩大白名单、引入自动无障碍授权，或把发送/购买/删除确认描述成原生硬护栏。
@@ -48,22 +59,22 @@
 
 - 上游基线：`73afa4ec77cfc9af2efea2487fee8bba1362639d`。
 - 当前 Mod 版本：`0.2.0`。
-- 当前 M16 合成树：`V:/coding/kelivo-private/.tower/worktrees/wt-16/.build/worktrees/3d3cd25b4def3563`。
-- 当前 M16 `modsetHash`：`3d3cd25b4def35633dcf848373037cbe2c5200f795339c315b3ac9c3268a3174`（`plan`/`apply`/`verify` 通过）。
-- 当前 M16 产品 debug APK：`V:/coding/kelivo-private/.tower/worktrees/wt-16/.build/worktrees/3d3cd25b4def3563/build/app/outputs/flutter-apk/app-debug.apk`，181,369,890 字节，SHA-256 `c6f20d250239bae223a4fdaa5ff1807ba34eab38bd8f9e7f9710e8c21747a58b`；debug merged manifest 含 `SecureWindowFixtureActivity`，release merged manifest 不含该夹具（不宣称签名 release）。该树只含文档变化，未在其后运行 integration_test。
+- 当前 M17 最终合成树：`V:/coding/kelivo-private/.tower/worktrees/wt-17/.build/worktrees/1c1920e0e2b8bc7c`；设备测试树为 `.../8fe847cedc2ea513`，两树仅 `plugin/README.md` 文档副本不同。
+- 当前 M17 `modsetHash`：`1c1920e0e2b8bc7c397b02e2e908e59d27f979a5ddee3b263da348aa3c1ceaf3`（`plan`/`apply`/`verify` 通过）。
+- 当前 M17 产品 debug APK：`V:/coding/kelivo-private/.tower/worktrees/wt-17/.build/worktrees/1c1920e0e2b8bc7c/build/app/outputs/flutter-apk/app-debug.apk`，181,373,530 字节，SHA-256 `dc32c4a30533c4195f0392f5533a316bbf096177b653f0623c78645d5f116026`；debug merged manifest 含 `SecureWindowFixtureActivity`，release merged manifest 不含该夹具（不宣称签名 release）。该 APK 在最终树显式构建，未把测试入口构建当产品；设备测试树 `8fe847...` 的 APK 仅作设备证据。
 - 三个工具：`phone_agent_screenshot`、`phone_agent_tree`、`phone_agent_input`。
 - 每助手独立 `localToolId='phone_agent'`；Mods 页提供关闭/原生手机控制/Phone Agent 三态单选，已有助手不自动迁移。
 - 观察按需发生，不强制每步重新读取完整树；工具 schema 不暴露 `snapshot_id`。
 - `supported` 只表示 API 30+ 截图能力；API 29 仍可 ready 并使用树/节点输入。
 
-本轮 M16 已通过的检查：
+本轮 M17 已通过的检查：
 
 - 只读 `dart tool/mod_loader.dart plan`：`modsetHash` 与最终树一致；`apply` 新建合成树；`verify` 校验通过。
-- 新合成树 `flutter pub get`、`flutter pub get --directory tool/l10n --enforce-lockfile` 通过；`dart analyze --fatal-infos lib test integration_test tool` 输出 `No issues found!`、EXIT=0；显式 `flutter build apk --debug` 成功（`√ Built build\app\outputs\flutter-apk\app-debug.apk`，EXIT=0），生成上条 APK。
+- 新合成树 `flutter pub get`、`flutter pub get --directory tool/l10n --enforce-lockfile` 通过；`dart analyze --fatal-infos lib test integration_test tool` 输出 `No issues found!`、EXIT=0；显式 `flutter build apk --debug` 成功。
+- 插件 Kotlin 66（含三项前置诊断）、插件 Dart 17、Loader 165、Flutter 182 通过；根项目静态分析通过。
 - debug merged manifest 含 `com.kelivo.phoneagent.SecureWindowFixtureActivity` 与 `PhoneAgentService`；release merged manifest（`:app:processReleaseMainManifest`）含 `PhoneAgentService`、不含该夹具，夹具隔离通过（不宣称签名 release）。
-- 构建环境备注：首次构建因 Kotlin 增量缓存跨盘报 `Could not close incremental caches ... different roots` / `Daemon compilation failed: null`，`./gradlew --stop` 并删除树内 `build/` 后重建成功；这是构建缓存问题，不是产品缺陷。
-- 设备证据沿用此前相同代码/测试行为（`docs/phone-agent-plan.md` 9.3.2、9.4.2），新树未重跑设备；不要求重跑未改变的设备/静态套件。
-- 既有 Loader 165、聚焦工具测试 32、插件 Dart 17、插件 Kotlin 66、上游 PhoneControl 49、API35 完整异常套件 `+5 ~1`、API35/API29 官方测试各 2 项结果保留，本轮未重复。
+- 设备：MIUI `1960cd68` 同一官方 `phone_agent_test.dart` 连续 4 轮 `+2`、`All tests passed!`、EXIT=0；每轮授权重查与恢复见第 0/6 节。
+- 构建环境备注：Kotlin 增量缓存跨盘仍会打印 `Could not close incremental caches ... different roots` / `Daemon compilation failed: null`，本轮 clean 构建最终 EXIT=0；若失败按第 6 节 `./gradlew --stop` + 删除树内 `build/` 处理，这是缓存问题，不是产品缺陷。
 - 历史 VLM 轮（magpie `llama-cpp/llama-cpp`）使用旧树 `V:/coding/kelivo-private/.tower/worktrees/wt-6/.build/worktrees/5f0be65f98bb04e5` 和旧 APK 181369230 字节 / SHA-256 `3ea30ee9b46342305cf11e0574b76def9a42f23abe62dd3536b664dc4ec5caeb`，只作历史记录，不代表当前实现。
 
 API 29 真机结果、双 API 集成测试和任何后续改动后的数字以 `docs/phone-agent-plan.md` 9.3/9.4 与 `mods/phone_agent/README.md` 的最新记录为准，不得沿用旧结果冒充新实现通过。
@@ -131,7 +142,7 @@ API 29 真机结果、双 API 集成测试和任何后续改动后的数字以 `
 - 设备：Redmi K30 5G（`1960cd68`，picasso），Android 12 / API 31，1080x2400，density 440，MIUI V13.0.3.0.SGICNXM；用户提供并授权测试，无重要数据。
 - 模型：magpie 的 `mistral/deepseek-v4-1-flash-1017`（用户更正目标为 1017，不是 0731；Bonsai 未使用）。magpie 侧该模型未标图片输入，Kelivo 手动勾选图片后真实请求全部 200，响应头 `x-magpie-model` / `x-magpie-provider` 与请求一致。
 - 服务：Mods 页选择 Phone Agent，独立服务 enabled && connected；测试包 `com.psyche.kelivo.phoneagent`，未覆盖上游 Kelivo。
-- 授权例外：用户明确授权仅在该设备用 `settings put secure` 预配置 Phone Agent；原始 `enabled_accessibility_services` 为空串、`accessibility_enabled=0`，每轮结束恢复。该例外不改变产品自动授权边界。
+- 授权例外：用户明确授权仅在该设备用 `settings put secure` 预配置 Phone Agent；M16 历史轮原始 `enabled_accessibility_services` 为空串、`accessibility_enabled=0`，每轮结束恢复。该例外不改变产品自动授权边界。
 - 适用范围：只验证该模型与这台物理设备，不承诺任意模型或设备。
 
 证据 A：工具暴露与截图尺寸
@@ -158,7 +169,7 @@ API 29 真机结果、双 API 集成测试和任何后续改动后的数字以 `
 
 ## 5. 上一轮新增聚焦测试（历史，该轮未改测试）
 
-该轮只改中文文档，未新增或修改测试；该标签仅适用于该历史 VLM 文档轮，不代表当前 M16（M10 历史轮已新增并运行异常/聚焦测试）。以下为上一轮新增的测试，保留作回归说明。
+该轮只改中文文档，未新增或修改测试；该标签仅适用于该历史 VLM 文档轮，不代表当前 M17（M10 历史轮已新增并运行异常/聚焦测试）。以下为上一轮新增的测试，保留作回归说明。
 
 文件：`mods/phone_agent/overlay/test/features/phone_agent/phone_agent_tool_result_test.dart`（合成树 `test/features/phone_agent/phone_agent_tool_result_test.dart`）。
 
@@ -183,7 +194,8 @@ API 29 真机结果、双 API 集成测试和任何后续改动后的数字以 `
 - 集成测试在 `setUpAll` 打印 `PHONE_AGENT_WAITING_FOR_SERVICE` 后等待约 300 秒（600 × 500ms），需要在该窗口内通过系统界面重新启用服务。
 - 服务组件：`com.psyche.kelivo.phoneagent/com.kelivo.phoneagent.PhoneAgentService`；只启用 **Kelivo Phone Agent**，不要启用 **Kelivo phone control**。
 - 启用后把 `Kelivo Agent` 应用切回前台并保持，直到测试结束。
-- 默认不要用 `settings put secure` 写入授权绕过系统确认。唯一例外：用户已明确授权在物理 MIUI 测试设备 `1960cd68` 上用 `settings put secure` 预配置 Phone Agent，仅限该设备与 Phone Agent；必须保存原始 `enabled_accessibility_services`（空串）和 `accessibility_enabled`（0），结束时恢复。该例外不是产品能力，也不适用于其他设备。
+- 默认不要用 `settings put secure` 写入授权绕过系统确认。唯一例外：用户已明确授权在物理 MIUI 测试设备 `1960cd68` 上用 `settings put secure` 预配置 Phone Agent，仅限该设备与 Phone Agent；必须保存并恢复**当轮真实原始值**，不能按历史记录强制写成空串+0。M16 历史轮原值为空串+0，M17 轮原值为 Phone Agent 组件 + `accessibility_enabled=1`。该例外不是产品能力，也不适用于其他设备。
+- 物理设备测试期间保持屏幕常亮（`adb shell svc power stayon true`），并在 watcher 中检查 `mWakefulness`，避免自动息屏让测试停顿；测试结束恢复 `svc power stayon false`。M17 第 1 轮曾因息屏停顿约 3 分钟，唤醒后继续并通过，不是测试失败。
 
 ### 本地 VLM 环境（测试经验，不是产品依赖）
 
@@ -218,7 +230,7 @@ dart tool/mod_loader.dart verify
 3. 合成树：`flutter pub get`、`flutter pub get --directory tool/l10n --enforce-lockfile`、`dart format`、`dart analyze --fatal-infos lib test integration_test tool`、Phone Agent/Mods/settings 测试、上游 `tool_result_content` 回归。
 4. 插件 Kotlin 测试（修改插件时）：`cd android && ./gradlew :kelivo_phone_agent:testDebugUnitTest`。
 5. 设备：API 35（`-d emulator-5554`）、API 29（`-d 357784090209204`）、物理 MIUI（`-d 1960cd68`）；安装后按第 6 节流程授权。
-6. 修改产品代码或插件后重新构建 APK 并计算大小与 SHA-256；不要沿用旧哈希。只改文档时仍要显式 `flutter build apk --debug` 生成当前产品 APK，因为 `flutter test` 会把树内 `app-debug.apk` 覆盖为测试入口构建；产品构建后不要在同一树运行 integration_test 而不重建。
+6. 修改产品代码或插件后重新构建 APK 并计算大小与 SHA-256；不要沿用旧哈希。只改文档时仍要显式 `flutter build apk --debug` 生成当前产品 APK，因为 `flutter test` 会把树内 `app-debug.apk` 覆盖为测试入口构建；产品构建后不要在同一树运行 integration_test 而不重建。若测试后增量构建仍得到约 249 MB 的测试入口 APK，必须 `flutter clean` 后重新 `flutter pub get`、`flutter pub get --directory tool/l10n --enforce-lockfile` 和 `flutter build apk --debug`，以约 181 MB 的产品大小和 manifest 复核。
 7. 更新中文验收记录和本交接文档，如实写明未验证项。
 
 仍未完成或不能宣称完成：权限窗口、签名 release、原生超时、`stale_handle` 根因；物理设备未运行锁屏、home/recents、服务中断，不能从 API35 模拟器结果推断；`llama-cpp/llama-cpp` 的物理完整坐标 swipe 未完成。物理 MIUI API31 已验证真实截图/读树/节点输入/滚动、物理 `FLAG_SECURE`、旋转，以及 `mistral/deepseek-v4-1-flash-1017` 的真实图片请求、坐标 swipe 的 UI 效果和像素专属视觉确认。API35 模拟器已验证 secure 截图行为、旋转、home/recents、锁屏、服务禁用/重启；跨新用户轮次历史图片回放已在 API 35 模拟器通过。只验证 magpie `llama-cpp/llama-cpp`、`mistral/deepseek-v4-1-flash-1017` 与这些设备，不承诺任意模型。上游仓保持只读；不向上游提交或推送私有实现。
