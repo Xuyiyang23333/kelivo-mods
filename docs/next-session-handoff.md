@@ -1,6 +1,20 @@
-# 下一次会话交接：Phone Agent 节点重验诊断与物理 MIUI 验收
+# 下一次会话交接：Phone Agent 权限窗口验证与后续最小修复
 
-## 0. M17 当前状态（2026-11-11）
+## 0. M19 当前状态（2026-11-11）
+
+- 本轮目标：查明上一轮 API35 异常套件中权限弹窗 90 秒未出现的原因，并真实验证权限窗口输入拒绝；只改中文文档与 debug 异常测试，不改产品代码、schema、白名单或上游。
+- 最终源码 `modsetHash`：`9d4053767c74aeed1c45e743eeb868ac0ea4f08c215c17b6b9af6e8fdb37d12f`；最终合成树：`V:/coding/kelivo-private/.tower/worktrees/wt-19/.build/worktrees/9d4053767c74aeed`；`plan`/`apply`/`verify` 通过。设备运行树为 `V:/coding/kelivo-private/.tower/worktrees/wt-19/.build/worktrees/093f372e4d8513e5`，与最终树仅 `plugin/README.md` 文档副本不同，代码/测试一致。
+- 诊断结论：上一轮 90 秒未出现不是夹具或断言缺陷。设备唤醒时 `am start ... --ez requestPermission true` 会真实拉起 `com.google.android.permissioncontroller/...GrantPermissionsActivity`（`dumpsys window`、uiautomator 树、`dumpsys accessibility` 的 Active Window Id 三方一致）；设备息屏（`mWakefulness=Asleep`）时同一命令 `mCurrentFocus=null`，弹窗不获前台焦点，唤醒后立即出现。`POST_NOTIFICATIONS` 全程 `granted=false` 且无 `USER_SET`，说明从未被回答；夹具只在未授予时请求，因此“已允许导致无弹窗”不成立。
+- 真实结果：弹窗出现，但 `PhoneAgentService.rootInActiveWindow` 在弹窗期间为 null，读树返回 `type=tool_error`、`error=no_window`，输入路径因此返回 `no_window`，不会产生文档契约中的 `system_window_denied`；输入仍被拒绝，没有执行手势，权限未授予。测试打印 `PHONE_AGENT_PERMISSION_TREE: package=null type=tool_error error=no_window`（45 秒 + 60 秒重试窗口内稳定复现）。
+- Tower 裁决（2026-11-11）：选择保留文档契约 `system_window_denied`，不把 `no_window` 改写成通过条件；M19 不改生产代码，权限场景如实记为未验证；另开 M20 做输入路径系统窗口识别的最小修复与测试，不改读树/截图绕过策略，不扩大权限或白名单。已提交 finding：`.tower/comms/findings/20261111-agent-permission-window-api35-bug-rootinactivewindow-null-no-window-system-window-denied.md`。
+- 测试改动（不放宽断言）：`PHONE_AGENT_PERMISSION_WINDOW` 要求宿主先唤醒；首次 45 秒未出现时打印 `PHONE_AGENT_PERMISSION_WINDOW_RETRY`（唤醒 + 重启夹具）再等 60 秒；仍未出现才记未验证。未验证前打印 `PHONE_AGENT_PERMISSION_TREE`（只含 package/type/error）。截图辅助在 `rate_limited` 时等待 1.2 秒重试一次，解决相邻用例截图限频竞态；所有内容断言不变。
+- 本轮完整异常套件（`093f372e4d8513e5` 树，`flutter test integration_test/phone_agent_exception_test.dart -d emulator-5554`）：**`+5 ~1`，`All tests passed!`，EXIT=0**。通过：FLAG_SECURE、旋转、home/recents、锁屏、服务禁用/中断/重启（`PHONE_AGENT_SERVICE_PENDING_BATCH: size=1000 elapsed=1112ms codes=interrupted,ok`）；跳过：权限窗口（真实弹窗出现，读树/输入 `no_window`，`system_window_denied` 未产生）。
+- 首次运行（`81a2da5132d0e975` 树）的历史失败保留：旋转用例 `rate_limited`、服务禁用用例宿主未在约 2 秒批次内确认关闭；均非产品缺陷，也不是断言放宽。
+- 自动检查：Loader `dart format`/`dart analyze` 通过、Loader 165 通过、`verify` 通过；合成树 `dart analyze --fatal-infos lib test integration_test tool` 在 `flutter pub get --directory tool/l10n --enforce-lockfile` 后 `No issues found!`（未跑该 pub get 时会报 15 个既有 `tool/l10n/validate.dart` 错误，与本轮改动无关）；插件 Dart 17 项、Phone Agent Flutter 108 项通过。
+- 环境注意：本 worktree 最初以 CRLF 检出（全局 `core.autocrlf=true`），导致 Loader 的 LF 补丁无法应用；已把该 worktree 规范化为 LF 并本地设置 `core.autocrlf=false`。Windows 上创建合成 worktree 还需 `core.longpaths=true`（本轮通过 `GIT_CONFIG_COUNT/KEY_0/VALUE_0` 进程环境传入，未修改上游 Git 配置）。
+- 未验证：权限窗口 `system_window_denied`（M20）、签名 release、原生超时、`stale_handle` 根因；API29 真机 `357784090209204` 本轮不在线，未运行；物理设备未运行锁屏、home/recents、服务中断；`llama-cpp/llama-cpp` 的物理完整坐标 swipe 未完成。
+
+### M17 历史状态（2026-11-11）
 
 - 本轮目标：为 `stale_handle` 增加可区分诊断（`refresh_failed`/`not_visible`/`not_enabled`），不放宽 refresh/可见/可用校验，不改变错误码、指纹契约或 TTL/窗口校验；只做可区分诊断和有限复现，不宣称根因修复。
 - 代码：`ObservationRegistry.handle()` 把合并前置条件拆成 refresh → visible → enabled 三个顺序判断，统一 `targetChanged(detail)`；指纹分支消息格式不变。`ObservationRegistryTest` 新增三项精确用例，断言错误码、对应标识、无节点文本、无其它标识；refresh 用例同时验证短路优先级。
