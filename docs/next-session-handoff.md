@@ -1,6 +1,20 @@
-# 下一次会话交接：Phone Agent 节点重验诊断与物理 MIUI 验收
+# 下一次会话交接：Phone Agent 权限窗口验证与后续最小修复
 
-## 0. M17 当前状态（2026-11-11）
+## 0. M19 当前状态（2026-11-11）
+
+- 本轮目标：查明上一轮 API35 异常套件中权限弹窗 90 秒未出现的原因，并真实验证权限窗口输入拒绝；只改中文文档与 debug 异常测试，不改产品代码、schema、白名单或上游。
+- 最终源码 `modsetHash`：`75429900bf8fc4526fb7005729da565f210eab3d9de922d94039e6399f808d11`；最终合成树：`V:/coding/kelivo-private/.tower/worktrees/wt-19/.build/worktrees/75429900bf8fc452`；`plan`/`apply`/`verify` 通过。设备运行树为 `V:/coding/kelivo-private/.tower/worktrees/wt-19/.build/worktrees/093f372e4d8513e5`；两树仅 `plugin/README.md` 文档副本和未验证标记/skip 文案不同，断言未变，未为文案重跑设备。
+- 诊断结论：上一轮 90 秒未出现不是夹具或断言缺陷。设备唤醒时 `am start ... --ez requestPermission true` 会真实拉起 `com.google.android.permissioncontroller/...GrantPermissionsActivity`（`dumpsys window`、uiautomator 树、`dumpsys accessibility` 的 Active Window Id 三方一致）；设备息屏（`mWakefulness=Asleep`）时同一命令 `mCurrentFocus=null`，弹窗不获前台焦点，唤醒后立即出现。`POST_NOTIFICATIONS` 全程 `granted=false` 且无 `USER_SET`，说明从未被回答；夹具只在未授予时请求，因此“已允许导致无弹窗”不成立。
+- 真实结果：弹窗出现，但 `PhoneAgentService.rootInActiveWindow` 在弹窗期间为 null，读树实测返回 `type=tool_error`、`error=no_window`，不会产生文档契约中的 `system_window_denied`。输入 `no_window` 是代码路径推导而非本轮直接设备调用：`currentWindow()` 在空 root 时返回 null，输入在包名策略与执行器之前以 `no_window` 拒绝；本套件在 `permissionTree == null` 时只读树并打印诊断，未执行 tap/back。输入仍被拒绝，没有执行手势，权限未授予。测试打印 `PHONE_AGENT_PERMISSION_TREE: package=null type=tool_error error=no_window`（45 秒 + 60 秒重试窗口内稳定复现）。
+- Tower 裁决（2026-11-11）：选择保留文档契约 `system_window_denied`，不把 `no_window` 改写成通过条件；M19 不改生产代码，权限场景如实记为未验证；另开 M20 做输入路径系统窗口识别的最小修复与测试，不改读树/截图绕过策略，不扩大权限或白名单。已提交 finding：`.tower/comms/findings/20261111-agent-permission-window-api35-bug-rootinactivewindow-null-no-window-system-window-denied.md`。
+- 测试改动（不放宽断言）：`PHONE_AGENT_PERMISSION_WINDOW` 要求宿主先唤醒；首次等待 45 秒超时（未检测到预期系统窗口）时打印 `PHONE_AGENT_PERMISSION_WINDOW_RETRY`（唤醒 + 重启夹具）再等 60 秒；重试后仍未检测到可访问的权限窗口才记未验证，标记与 skip 原因写“服务未检测到可访问的权限窗口（读树返回 `no_window`）”。未验证前打印 `PHONE_AGENT_PERMISSION_TREE`（只含 package/type/error）。截图辅助在 `rate_limited` 时等待 1.2 秒重试一次，解决相邻用例截图限频竞态；所有内容断言不变。
+- 本轮完整异常套件（`093f372e4d8513e5` 树，`flutter test integration_test/phone_agent_exception_test.dart -d emulator-5554`）：**`+5 ~1`，`All tests passed!`，EXIT=0**。通过：FLAG_SECURE、旋转、home/recents、锁屏、服务禁用/中断/重启（`PHONE_AGENT_SERVICE_PENDING_BATCH: size=1000 elapsed=1112ms codes=interrupted,ok`）；跳过：权限窗口（真实弹窗出现，读树实测 `no_window`；输入按 `currentWindow` guard 推导为 `no_window`，本套件未执行 tap/back；`system_window_denied` 未产生）。
+- 首次运行（`81a2da5132d0e975` 树）的历史失败保留：旋转用例 `rate_limited`、服务禁用用例宿主未在约 2 秒批次内确认关闭；均非产品缺陷，也不是断言放宽。
+- 自动检查：Loader `dart format`/`dart analyze` 通过、Loader 165 通过、`verify` 通过；合成树 `dart analyze --fatal-infos lib test integration_test tool` 在 `flutter pub get --directory tool/l10n --enforce-lockfile` 后 `No issues found!`（未跑该 pub get 时会报 15 个既有 `tool/l10n/validate.dart` 错误，与本轮改动无关）；插件 Dart 17 项、Phone Agent Flutter 108 项通过。
+- 环境注意：本 worktree 最初以 CRLF 检出（全局 `core.autocrlf=true`），导致 Loader 的 LF 补丁无法应用；已把该 worktree 规范化为 LF 并本地设置 `core.autocrlf=false`。Windows 上创建合成 worktree 还需 `core.longpaths=true`（本轮通过 `GIT_CONFIG_COUNT/KEY_0/VALUE_0` 进程环境传入，未修改上游 Git 配置）。
+- 未验证：权限窗口 `system_window_denied`（M20）、签名 release、原生超时、`stale_handle` 根因；API29 真机 `357784090209204` 本轮不在线，未运行；物理设备未运行锁屏、home/recents、服务中断；`llama-cpp/llama-cpp` 的物理完整坐标 swipe 未完成。
+
+### M17 历史状态（2026-11-11）
 
 - 本轮目标：为 `stale_handle` 增加可区分诊断（`refresh_failed`/`not_visible`/`not_enabled`），不放宽 refresh/可见/可用校验，不改变错误码、指纹契约或 TTL/窗口校验；只做可区分诊断和有限复现，不宣称根因修复。
 - 代码：`ObservationRegistry.handle()` 把合并前置条件拆成 refresh → visible → enabled 三个顺序判断，统一 `targetChanged(detail)`；指纹分支消息格式不变。`ObservationRegistryTest` 新增三项精确用例，断言错误码、对应标识、无节点文本、无其它标识；refresh 用例同时验证短路优先级。
@@ -35,18 +49,18 @@
 
 ## 2. 当前目标与阶段
 
-第一阶段 Mod Loader 已完成。第二阶段 Phone Agent 的主要功能已完成。当前 M17 为 `stale_handle` 增加可区分诊断并做有限复现：`ObservationRegistry` 把 refresh/可见/可用前置失败拆成 `refresh_failed`/`not_visible`/`not_enabled`，错误码、指纹契约和通过条件不变；物理 MIUI 同一官方测试连续 4 轮通过，未复现历史间歇性失败，新诊断标识未在设备触发。权限窗口、原生超时、签名 release、`stale_handle` 根因仍未验证，不能宣称全部验收完成。
+第一阶段 Mod Loader 已完成。第二阶段 Phone Agent 的主要功能已完成。当前 M19 完成 API35 权限窗口真实验证：查明上一轮 90 秒未出现是设备息屏导致弹窗不获前台焦点；真实弹窗出现，但服务 `rootInActiveWindow` 为 null，读树实测 `no_window`，输入按 `currentWindow` 前置 guard 推导为 `no_window`（本套件未执行 tap/back），`system_window_denied` 未产生，按契约记为未验证。下一步 M20 做输入路径系统窗口识别的最小修复与测试，不改读树/截图绕过策略，不扩大权限或白名单。
 
-本轮（M17）已完成：
+本轮（M19）已完成：
 
-1. 先更新中文契约（`AGENTS.md`、`docs/phone-agent-plan.md`、本文件、两个 README），再改 `ObservationRegistry.kt` 与 `ObservationRegistryTest.kt`。
-2. 三项精确 Kotlin 测试覆盖 refresh=false、visible=false、enabled=false，断言 `stale_handle`、对应固定标识、无节点文本、无其它标识；refresh 用例同时验证短路优先级。
-3. Loader 重新合成/verify，运行 Loader、插件 Kotlin/Dart、根项目静态分析和 Flutter 测试；显式构建产品 APK，并在测试后 `flutter clean` 重建，避免把约 249 MB 测试入口构建当产品。
-4. 物理 MIUI `1960cd68` 上同一官方 `phone_agent_test.dart` 连续 4 轮，逐轮记录真实退出码；每轮重查授权、只恢复 Phone Agent 组件、轮末恢复当轮真实原值（组件 + `accessibility_enabled=1`）。
+1. 先更新中文契约（`AGENTS.md`、`docs/phone-agent-plan.md`、本文件、两个 README），再改异常测试；未改产品代码、夹具、schema、白名单或上游。
+2. 启动现有 API35 AVD（未 wipe data），记录安装包/targetSdk/通知权限/真实前台窗口，定位息屏导致弹窗不获前台焦点。
+3. 测试增加唤醒重试标记、只读诊断打印和 `rate_limited` 重试；保留 `system_window_denied` 精确断言与未验证结论。
+4. 完整异常套件 `+5 ~1`、EXIT=0；Loader/静态分析/插件/Flutter 测试通过；API29 不在线未运行。
 
 当前剩余：
 
-1. 权限窗口 `system_window_denied` 未触发，未验证。
+1. 权限窗口 `system_window_denied`：M20 最小修复与设备验证。
 2. 物理设备未运行锁屏、home/recents、服务中断；不能从 API35 模拟器结果推断。
 3. 原生截图/手势/通道/worker 排队超时未设备验证。
 4. 带合法签名配置的 release 构建。
@@ -59,22 +73,22 @@
 
 - 上游基线：`73afa4ec77cfc9af2efea2487fee8bba1362639d`。
 - 当前 Mod 版本：`0.2.0`。
-- 当前 M17 最终合成树：`V:/coding/kelivo-private/.tower/worktrees/wt-17/.build/worktrees/1c1920e0e2b8bc7c`；设备测试树为 `.../8fe847cedc2ea513`，两树仅 `plugin/README.md` 文档副本不同。
-- 当前 M17 `modsetHash`：`1c1920e0e2b8bc7c397b02e2e908e59d27f979a5ddee3b263da348aa3c1ceaf3`（`plan`/`apply`/`verify` 通过）。
-- 当前 M17 产品 debug APK：`V:/coding/kelivo-private/.tower/worktrees/wt-17/.build/worktrees/1c1920e0e2b8bc7c/build/app/outputs/flutter-apk/app-debug.apk`，181,373,530 字节，SHA-256 `dc32c4a30533c4195f0392f5533a316bbf096177b653f0623c78645d5f116026`；debug merged manifest 含 `SecureWindowFixtureActivity`，release merged manifest 不含该夹具（不宣称签名 release）。该 APK 在最终树显式构建，未把测试入口构建当产品；设备测试树 `8fe847...` 的 APK 仅作设备证据。
+- 当前 M19 最终合成树：`V:/coding/kelivo-private/.tower/worktrees/wt-19/.build/worktrees/75429900bf8fc452`；设备运行树为 `.../093f372e4d8513e5`，两树仅 `plugin/README.md` 文档副本和未验证标记/skip 文案不同，断言未变。
+- 当前 M19 `modsetHash`：`75429900bf8fc4526fb7005729da565f210eab3d9de922d94039e6399f808d11`（`plan`/`apply`/`verify` 通过）。
+- 当前产品 debug APK（M17 最终树构建；M19 无原生变化，仍有效）：`V:/coding/kelivo-private/.tower/worktrees/wt-17/.build/worktrees/1c1920e0e2b8bc7c/build/app/outputs/flutter-apk/app-debug.apk`，181,373,530 字节，SHA-256 `dc32c4a30533c4195f0392f5533a316bbf096177b653f0623c78645d5f116026`；debug merged manifest 含 `SecureWindowFixtureActivity`，release merged manifest 不含该夹具（不宣称签名 release）。该 APK 在 M17 最终树显式构建，未把测试入口构建当产品；M19 运行 `flutter test` 已把 M19 运行树内 APK 覆盖为测试入口构建，不能当产品。
 - 三个工具：`phone_agent_screenshot`、`phone_agent_tree`、`phone_agent_input`。
 - 每助手独立 `localToolId='phone_agent'`；Mods 页提供关闭/原生手机控制/Phone Agent 三态单选，已有助手不自动迁移。
 - 观察按需发生，不强制每步重新读取完整树；工具 schema 不暴露 `snapshot_id`。
 - `supported` 只表示 API 30+ 截图能力；API 29 仍可 ready 并使用树/节点输入。
 
-本轮 M17 已通过的检查：
+本轮 M19 已通过的检查：
 
-- 只读 `dart tool/mod_loader.dart plan`：`modsetHash` 与最终树一致；`apply` 新建合成树；`verify` 校验通过。
-- 新合成树 `flutter pub get`、`flutter pub get --directory tool/l10n --enforce-lockfile` 通过；`dart analyze --fatal-infos lib test integration_test tool` 输出 `No issues found!`、EXIT=0；显式 `flutter build apk --debug` 成功。
-- 插件 Kotlin 66（含三项前置诊断）、插件 Dart 17、Loader 165、Flutter 182 通过；根项目静态分析通过。
-- debug merged manifest 含 `com.kelivo.phoneagent.SecureWindowFixtureActivity` 与 `PhoneAgentService`；release merged manifest（`:app:processReleaseMainManifest`）含 `PhoneAgentService`、不含该夹具，夹具隔离通过（不宣称签名 release）。
-- 设备：MIUI `1960cd68` 同一官方 `phone_agent_test.dart` 连续 4 轮 `+2`、`All tests passed!`、EXIT=0；每轮授权重查与恢复见第 0/6 节。
-- 构建环境备注：Kotlin 增量缓存跨盘仍会打印 `Could not close incremental caches ... different roots` / `Daemon compilation failed: null`，本轮 clean 构建最终 EXIT=0；若失败按第 6 节 `./gradlew --stop` + 删除树内 `build/` 处理，这是缓存问题，不是产品缺陷。
+- `dart run tool/mod_loader.dart plan`：`modsetHash` 与最终树一致；`apply` 新建合成树；`verify` 校验通过。
+- Loader `dart format --output=none --set-exit-if-changed tool test`、`dart analyze tool test`、`dart test`（165 项）通过。
+- 合成树 `flutter pub get`、`flutter pub get --directory tool/l10n --enforce-lockfile` 通过；`dart analyze --fatal-infos lib test integration_test tool` 输出 `No issues found!`。
+- 插件 Dart 17、Phone Agent Flutter 108 通过；本轮未改原生代码，未重建产品 APK，debug/release 夹具隔离沿用 M17 结论。
+- 设备：API35 `emulator-5554` 完整异常套件 `+5 ~1`、`All tests passed!`、EXIT=0；权限窗口按第 0 节记为未验证。
+- 构建环境备注：Kotlin 增量缓存跨盘仍会打印 `Could not close incremental caches ... different roots` / `Daemon compilation failed: null`，Gradle 回退后构建成功；这是缓存问题，不是产品缺陷。
 - 历史 VLM 轮（magpie `llama-cpp/llama-cpp`）使用旧树 `V:/coding/kelivo-private/.tower/worktrees/wt-6/.build/worktrees/5f0be65f98bb04e5` 和旧 APK 181369230 字节 / SHA-256 `3ea30ee9b46342305cf11e0574b76def9a42f23abe62dd3536b664dc4ec5caeb`，只作历史记录，不代表当前实现。
 
 API 29 真机结果、双 API 集成测试和任何后续改动后的数字以 `docs/phone-agent-plan.md` 9.3/9.4 与 `mods/phone_agent/README.md` 的最新记录为准，不得沿用旧结果冒充新实现通过。
@@ -208,7 +222,7 @@ API 29 真机结果、双 API 集成测试和任何后续改动后的数字以 `
 ### Windows 环境
 
 - Flutter 全局使用 JDK 17：`flutter config --jdk-dir="C:/Users/David/scoop/apps/openjdk17/current"`；不要切回 JDK 25。
-- 私有仓 `core.autocrlf=true`，Tower 创建的 worktree 会以 CRLF 检出全部文件，导致 Loader 补丁无法应用、`dart format` 失败。处理方式：在 worktree 内执行 `git ls-files -z | xargs -0 perl -pi -e 's/\r\n/\n/g'` 就地转 LF，不改仓库 config。转换后 `git status` 会把大量文件标为 M（stat 噪声），但 `git diff --name-only` 只显示真实改动。未转 LF 时 `plan` 的 `modsetHash` 也会因 CRLF 字节不同而偏差；比对哈希前先按上述方式转 LF。
+- 私有仓 `core.autocrlf=true`，Tower 创建的 worktree 会以 CRLF 检出全部文件，导致 Loader 补丁无法应用、`dart format` 失败。处理方式（M19 实践）：在该 worktree 内执行 `git config core.autocrlf false`（仅 worktree 本地，不修改全局或上游配置），再用 `git ls-files --eol | grep 'w/crlf'` 列出 CRLF 文件并逐个 `sed -i 's/\r$//'` 就地转 LF。转换后 `git status` 会把大量文件标为 M（stat 噪声），但 `git diff --name-only` 只显示真实改动。未转 LF 时 `plan` 的 `modsetHash` 也会因 CRLF 字节不同而偏差；比对哈希前先转 LF。
 - 本任务 worktree 路径较长，合成树会超过 Windows `MAX_PATH`。生成时使用环境变量注入 Git 长路径支持（不修改任何配置文件）：
 
 ```bash

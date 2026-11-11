@@ -15,9 +15,10 @@ import 'package:Kelivo/utils/mcp_structured_image.dart';
 // 真实 FLAG_SECURE 与受控异常路径套件。
 //
 // 前置条件：
-// - Android API 30+ 设备已解锁，系统无障碍设置中已启用 Kelivo Phone Agent；
+// - Android API 30+ 设备已解锁并保持唤醒，系统无障碍设置中已启用 Kelivo Phone Agent；
 // - Mods 页已为测试助手选择 Phone Agent；
 // - 测试会打印 PHONE_AGENT_* 标记，宿主/CU 在标记后执行对应 adb 或系统 UI 操作；
+// - 权限窗口场景要求设备唤醒：息屏时权限弹窗不会获得前台焦点；
 // - 禁止用 settings put secure 写无障碍授权。
 //
 // flutter test integration_test/phone_agent_exception_test.dart -d <android-device-id>
@@ -300,21 +301,49 @@ void main() {
 
     _hostStep(
       'PHONE_AGENT_PERMISSION_WINDOW',
-      'adb shell am start -n $_fixtureActivity --ez requestPermission true',
+      '确保设备已唤醒并解锁，然后执行：'
+          'adb shell am start -n $_fixtureActivity --ez requestPermission true',
     );
-    final permissionTree = await _waitForTreeWhere(
+    var permissionTree = await _waitForTreeWhere(
       service,
       (tree) => _systemPackages.contains(tree['package_name']),
-      timeout: const Duration(seconds: 90),
+      timeout: const Duration(seconds: 45),
     );
     if (permissionTree == null) {
+      // API35 实测：设备息屏时 am start 不会让权限弹窗获得前台焦点
+      // （mCurrentFocus=null），唤醒后弹窗立即出现。这里给宿主一次唤醒重试，
+      // 仍然没有可访问的系统窗口才记录为未验证。
+      _hostStep(
+        'PHONE_AGENT_PERMISSION_WINDOW_RETRY',
+        'adb shell input keyevent KEYCODE_WAKEUP && '
+            'adb shell wm dismiss-keyguard && '
+            'adb shell am start -n $_fixtureActivity --ez requestPermission true',
+      );
+      permissionTree = await _waitForTreeWhere(
+        service,
+        (tree) => _systemPackages.contains(tree['package_name']),
+        timeout: const Duration(seconds: 60),
+      );
+    }
+    if (permissionTree == null) {
+      // 诊断：记录弹窗期间读树实际返回的包名或错误码。只打印固定字段，
+      // 不打印节点文本；不据此断言系统弹窗不存在。
+      final probe = await _tryTreePayload(service);
+      debugPrint(
+        'PHONE_AGENT_PERMISSION_TREE: package=${probe?['package_name']} '
+        'type=${probe?['type']} error=${probe?['error']}',
+      );
       _hostStep(
         'PHONE_AGENT_PERMISSION_WINDOW_UNVERIFIED',
-        '系统权限弹窗没有出现；本场景记录为未验证，不写成通过。',
+        '服务未检测到可访问的权限窗口（读树返回 no_window）；'
+            '本场景记录为未验证，不写成通过。',
       );
       _hostStep('PHONE_AGENT_DISMISS_PERMISSION', 'adb shell input keyevent 4');
       await _returnToApp(service);
-      markTestSkipped('系统权限弹窗没有出现，权限窗口场景未验证。');
+      markTestSkipped(
+        '服务未检测到可访问的权限窗口（读树返回 no_window），'
+        '权限窗口场景未验证。',
+      );
       return;
     }
     final permissionPackage = permissionTree['package_name'] as String?;
@@ -617,12 +646,35 @@ Future<Map<String, dynamic>?> _tryTree(PhoneAgentService service) async {
   }
 }
 
-Future<ClientToolResult> _screenshot(PhoneAgentService service) {
-  return _callResult(
+Future<Map<String, dynamic>?> _tryTreePayload(PhoneAgentService service) async {
+  try {
+    final result = await _callResult(
+      service,
+      PhoneAgentToolNames.tree,
+      <String, dynamic>{'offset': 0},
+    );
+    return _payload(result);
+  } catch (_) {
+    return null;
+  }
+}
+
+Future<ClientToolResult> _screenshot(PhoneAgentService service) async {
+  var result = await _callResult(
     service,
     PhoneAgentToolNames.screenshot,
     const <String, dynamic>{},
   );
+  if (_payload(result)['error'] == 'rate_limited') {
+    // 截图限频约一次/秒；相邻用例之间可能不足一秒，重试一次而不是判失败。
+    await Future<void>.delayed(const Duration(milliseconds: 1200));
+    result = await _callResult(
+      service,
+      PhoneAgentToolNames.screenshot,
+      const <String, dynamic>{},
+    );
+  }
+  return result;
 }
 
 Future<ClientToolResult> _input(

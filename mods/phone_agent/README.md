@@ -11,6 +11,8 @@
 - 助手级工具 ID：`phone_agent`
 - Mod 版本：`0.2.0`
 
+> 本轮 M19（权限窗口真实验证，API35 模拟器）：只改中文文档与 debug 异常测试，不改产品代码、schema、白名单或上游。真实 `com.google.android.permissioncontroller` 弹窗已出现；上一轮 90 秒未出现的原因是设备息屏时 `am start` 不获前台焦点，唤醒后立即出现。弹窗期间服务 `rootInActiveWindow` 为 null，读树实测返回 `no_window`，输入按 `currentWindow` 前置 guard 推导为 `no_window`（本套件未执行 tap/back），`system_window_denied` 未产生，输入仍被拒绝、权限未授予；该场景按契约记为未验证，最小修复另开 M20。完整异常套件 `+5 ~1`、`All tests passed!`、EXIT=0。记录见 `docs/phone-agent-plan.md` 9.3.3。
+>
 > 本轮物理 MIUI API31 验收（`llama-cpp/llama-cpp` 与 magpie `mistral/deepseek-v4-1-flash-1017`）：真实截图/读树/节点输入/滚动、物理 `FLAG_SECURE`（成功黑图，清除后恢复）、旋转失效均通过；`llama-cpp/llama-cpp` 用归一化坐标 tap 打开抽屉/Settings/Search，1017 用归一化坐标 swipe 让 Sponsor 从不可见变为可见，并完成图片请求与像素专属视觉确认；官方测试一次 `+1 -1`、EXIT=1（聚焦后 `set_text` `stale_handle`），一次 `+2`、EXIT=0，属间歇性、根因未确认；`llama-cpp/llama-cpp` 的完整坐标 swipe 仍未验证。当前交付的合成树、`modsetHash`、APK 大小/SHA-256 和 manifest 检查记录在 `docs/phone-agent-plan.md` 9.3.2/9.4.2 与 `docs/next-session-handoff.md`。本 README 不参与 Mod treeHash（`tool/src/config.dart` 只散列 `mod.json`、声明的 patches 和 copy 源，根 README 不在 copy 列表），参与的是 `plugin/README.md`（`copy[7]/README.md`）；因此本文件不写当前数字只为避免与 docs 重复，而改动 plugin README 会改变交付哈希。
 >
 > 上一轮 M10（API35 FLAG_SECURE/异常路径）：完整异常套件 `+5 ~1`、EXIT=0；权限窗口未验证。整屏 `takeScreenshot` 不保证对 `FLAG_SECURE` 报错，可能返回成功黑图或内容图；不保证检测、不承诺不发送黑图。记录见 `docs/phone-agent-plan.md` 9.3.1。
