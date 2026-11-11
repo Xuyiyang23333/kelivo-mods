@@ -88,7 +88,7 @@
 - `home`/`recents` 后前台离开白名单，后续输入（包括 `back`）被拒绝，模型无法自行恢复；文档和测试必须记录需要用户或宿主切回测试应用。
 - 真实 `FLAG_SECURE`、权限弹窗和异常路径使用插件 `android/src/debug` 的 `SecureWindowFixtureActivity` 测试夹具：只新增 debug 源码和 manifest，不修改上游 `MainActivity`、`KelivoApplication`、`PhoneControlService`，不新增上游补丁或 `touches`，release 不编译、不合并。夹具只请求上游已声明的权限用于拉起系统窗口，不授予、不录音、不使用其他敏感能力。
 - 异常集成测试的夹具启动、secure 切换、权限弹窗、锁屏和服务开关由宿主/CU 在打印标记后操作；测试只轮询并断言结果。禁止用 `settings put secure enabled_accessibility_services` 写授权；服务开关只走系统界面。
-- 权限弹窗要求设备唤醒：API35 实测息屏时 `am start` 不会让弹窗获得前台焦点（`mCurrentFocus=null`），唤醒后立即出现；宿主在 `PHONE_AGENT_PERMISSION_WINDOW` 标记后先唤醒再启动夹具，测试在首次等待超时后打印 `PHONE_AGENT_PERMISSION_WINDOW_RETRY`，仍无弹窗才记录为未验证。夹具只在 `POST_NOTIFICATIONS` 未授予时请求，已允许时不会产生弹窗。
+- 权限弹窗要求设备唤醒：API35 实测息屏时 `am start` 不会让弹窗获得前台焦点（`mCurrentFocus=null`），唤醒后立即出现；宿主在 `PHONE_AGENT_PERMISSION_WINDOW` 标记后先唤醒再启动夹具，测试在首次等待 45 秒超时（未检测到预期系统窗口）后打印 `PHONE_AGENT_PERMISSION_WINDOW_RETRY`，重试后仍未检测到可访问的权限窗口才记录为未验证。夹具只在 `POST_NOTIFICATIONS` 未授予时请求，已允许时不会产生弹窗。
 - 例外：用户已明确授权在指定的 MIUI 物理测试设备（Redmi K30 5G，`1960cd68`）上用 `settings put secure` 预配置 Phone Agent 服务，仅限该设备与 Phone Agent，且必须保存并在结束时恢复**当轮真实原始值**，不能按历史记录强制写成空串+0；历史轮原值为空串+0，M17 轮原值为 Phone Agent 组件 + `accessibility_enabled=1`。该授权不改变产品自动授权边界，不得写成产品能力、默认许可或其他设备的通用做法。
 - magpie 的模型能力标注可能变化：即使型号看起来支持视觉，也必须每次实测图片输入与工具调用；Kelivo 手动勾选图片只是测试配置，不能当作模型能力保证。网关 `api_error`/空响应属外部故障，与产品坐标动作失败分开记录。
 - `flutter test`（含集成测试）会把合成树内 `build/app/outputs/flutter-apk/app-debug.apk` 覆盖为测试入口构建；产品 APK 必须在干净合成树显式 `flutter build apk --debug` 重新生成并重新计算大小与 SHA-256，不能沿用旧哈希，也不能把测试入口构建当产品；在产品构建后若再运行 integration_test，必须重新构建产品 APK。测试后仅做增量 `flutter build apk --debug` 可能仍复用约 249 MB 的测试入口 APK；必须用 `flutter clean` 后重建，并以约 181 MB 的产品大小和 manifest 复核。

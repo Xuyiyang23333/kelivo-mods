@@ -642,7 +642,7 @@ flutter test integration_test/phone_agent_test.dart -d <android-device-id>
 - `--ez secure true|false`：添加/清除 `WindowManager.LayoutParams.FLAG_SECURE`；同一 `singleTop` Activity 通过 `onNewIntent` 切换。
 - `--ez requestPermission true`：只调用 `requestPermissions` 请求上游已声明的 `POST_NOTIFICATIONS`（API 33+），用于拉起系统权限窗口；不授予、不使用其他敏感能力。夹具只在 `checkSelfPermission` 不是 `GRANTED` 时请求，权限已允许时不会产生弹窗。
 - 根布局为纯色 `#00C8FF` 和文本 `PHONE_AGENT_SECURE_FIXTURE`，作为前台就绪信号和截图像素校验。
-- 权限窗口前置：设备必须处于唤醒且解锁状态。API35 实测设备息屏（`mWakefulness=Asleep`）时执行同一 `am start` 不会让权限弹窗获得前台焦点（`mCurrentFocus=null`），唤醒后弹窗立即出现；因此宿主在标记后先唤醒设备再启动夹具，测试在首次等待超时后打印 `PHONE_AGENT_PERMISSION_WINDOW_RETRY` 再给一次唤醒重试机会，仍无弹窗才记录为未验证。
+- 权限窗口前置：设备必须处于唤醒且解锁状态。API35 实测设备息屏（`mWakefulness=Asleep`）时执行同一 `am start` 不会让权限弹窗获得前台焦点（`mCurrentFocus=null`），唤醒后弹窗立即出现；因此宿主在标记后先唤醒设备再启动夹具，测试在首次等待 45 秒超时（未检测到预期系统窗口）后打印 `PHONE_AGENT_PERMISSION_WINDOW_RETRY` 再给一次唤醒重试机会，重试后仍未检测到可访问的权限窗口才记录为未验证。
 
 UID 与 secure 检测：API35 实测同 UID 和不同 UID 的 secure 夹具都返回成功黑图；UID 不是原因，整屏 `takeScreenshot` 路径本身没有 secure 检查。不同 UID 夹具 `com.kelivo.phoneagent.securefixture` 保留用于排除 UID 因素和验证文档化行为；该 APK 只是测试 harness，不属于 Mod 交付。插件内夹具继续用于权限窗口和同包切窗（旧坐标 `stale_observation`）。
 
@@ -685,7 +685,7 @@ adb -s emulator-5554 install -r <临时项目目录>/app/build/outputs/apk/debug
 - 未验证：签名 release、原生超时、权限窗口、`stale_handle` 根因；物理真机部分见 9.3.2。
 - 旋转：旧树句柄 `tap` 返回 `stale_handle`；旧截图坐标 `tap` 返回 `stale_observation`；旋转后新树/新截图成功；转回后恢复。
 - home/recents：执行后读树取实际前台包名；`com.android.systemui` 断言 `system_window_denied`，其他非白名单包断言 `package_not_allowed`，空包名或未知包名直接失败。`back` 同样被拒，证明 home/recents 后需要宿主恢复。
-- 权限窗口：宿主先确保设备唤醒，再启动夹具请求权限；前台包名必须属于 `com.android.permissioncontroller` / `com.google.android.permissioncontroller`，节点输入和 `back` 都返回 `system_window_denied`。首次 45 秒未出现时打印 `PHONE_AGENT_PERMISSION_WINDOW_RETRY`，宿主唤醒并重新启动夹具后再等 60 秒；仍无弹窗时记录为未验证，不写成通过。
+- 权限窗口：宿主先确保设备唤醒，再启动夹具请求权限；前台包名必须属于 `com.android.permissioncontroller` / `com.google.android.permissioncontroller`，节点输入和 `back` 都返回 `system_window_denied`。首次等待 45 秒超时（未检测到预期系统窗口）时打印 `PHONE_AGENT_PERMISSION_WINDOW_RETRY`，宿主唤醒并重新启动夹具后再等 60 秒；重试后仍未检测到可访问的权限窗口时记录为未验证，不写成通过。
 - 锁屏：宿主息屏再亮屏停在锁屏后，读树/截图/输入返回 `device_locked`，`status().ready` 仍为 true；解锁后旧句柄 `stale_handle`，新树/新截图成功。
 - 服务禁用/中断：测试先建立 Settings 观测并启动一批有界只读 `readTree(offset:1)` 请求，保留同一批 Future；宿主在 pending 时通过系统 UI 关闭服务；等待原 Future 在 35 秒内完成，至少一个返回 `interrupted` 或 `service_unavailable`，不得返回 `timeout`；`status().enabled == false` 且 `ready == false`；重新启用后旧句柄 `stale_handle`，新树/新截图成功。
 
@@ -749,7 +749,7 @@ adb -s emulator-5554 install -r <临时项目目录>/app/build/outputs/apk/debug
 
 测试改动（不放宽断言）：
 
-- `PHONE_AGENT_PERMISSION_WINDOW` 标记要求宿主先唤醒设备；首次 45 秒未出现时打印 `PHONE_AGENT_PERMISSION_WINDOW_RETRY`（唤醒 + 重新启动夹具），再等 60 秒；仍未检测到可访问的系统窗口才记录未验证。
+- `PHONE_AGENT_PERMISSION_WINDOW` 标记要求宿主先唤醒设备；首次等待 45 秒超时（未检测到预期系统窗口）时打印 `PHONE_AGENT_PERMISSION_WINDOW_RETRY`（唤醒 + 重新启动夹具），再等 60 秒；重试后仍未检测到可访问的权限窗口才记录未验证。
 - 未验证标记与 skip 原因写“服务未检测到可访问的权限窗口（读树返回 `no_window`）”，不断言系统弹窗不存在，避免与 `dumpsys` 已确认真实弹窗的事实矛盾。
 - 未验证前打印 `PHONE_AGENT_PERMISSION_TREE`，只含 `package`/`type`/`error` 固定字段，不打印节点文本。
 - 截图辅助在 `rate_limited` 时等待 1.2 秒重试一次，解决相邻用例间截图限频竞态；所有内容断言不变。
