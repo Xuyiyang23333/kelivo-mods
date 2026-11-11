@@ -312,7 +312,7 @@ void main() {
     if (permissionTree == null) {
       // API35 实测：设备息屏时 am start 不会让权限弹窗获得前台焦点
       // （mCurrentFocus=null），唤醒后弹窗立即出现。这里给宿主一次唤醒重试，
-      // 仍然没有弹窗才记录为未验证。
+      // 仍然没有可访问的系统窗口才记录为未验证。
       _hostStep(
         'PHONE_AGENT_PERMISSION_WINDOW_RETRY',
         'adb shell input keyevent KEYCODE_WAKEUP && '
@@ -326,8 +326,8 @@ void main() {
       );
     }
     if (permissionTree == null) {
-      // 诊断：记录弹窗期间读树实际返回的包名或错误码，避免把“未检测到”
-      // 当成“弹窗没出现”。只打印固定字段，不打印节点文本。
+      // 诊断：记录弹窗期间读树实际返回的包名或错误码。只打印固定字段，
+      // 不打印节点文本；不据此断言系统弹窗不存在。
       final probe = await _tryTreePayload(service);
       debugPrint(
         'PHONE_AGENT_PERMISSION_TREE: package=${probe?['package_name']} '
@@ -335,11 +335,15 @@ void main() {
       );
       _hostStep(
         'PHONE_AGENT_PERMISSION_WINDOW_UNVERIFIED',
-        '系统权限弹窗没有出现；本场景记录为未验证，不写成通过。',
+        '服务未检测到可访问的权限窗口（读树返回 no_window）；'
+            '本场景记录为未验证，不写成通过。',
       );
       _hostStep('PHONE_AGENT_DISMISS_PERMISSION', 'adb shell input keyevent 4');
       await _returnToApp(service);
-      markTestSkipped('系统权限弹窗没有出现，权限窗口场景未验证。');
+      markTestSkipped(
+        '服务未检测到可访问的权限窗口（读树返回 no_window），'
+        '权限窗口场景未验证。',
+      );
       return;
     }
     final permissionPackage = permissionTree['package_name'] as String?;

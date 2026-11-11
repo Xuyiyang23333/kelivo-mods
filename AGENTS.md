@@ -7,7 +7,7 @@
 当前任务分为两个独立阶段：
 
 1. 先实现并验收通用 Mod Loader，见 `docs/mod-loader-plan.md`。
-2. Loader 验收后再实现 `phone_agent` Mod，见 `docs/phone-agent-plan.md`。UI/选择契约改造已完成并通过最终验收；当前 `phone_agent` Mod 版本 0.2.0，VLM 图片链路、Kelivo 应用内固定任务和跨新用户轮次历史图片回放已在 API 35 模拟器用 magpie `llama-cpp/llama-cpp` 验证；物理 MIUI API31 真机由 `llama-cpp/llama-cpp` 验证归一化坐标 tap（打开抽屉/Settings/Search），由 magpie `mistral/deepseek-v4-1-flash-1017` 验证真实图片请求、归一化坐标 swipe 的 UI 效果和像素专属视觉确认，`llama-cpp/llama-cpp` 的完整坐标 swipe 未验证。M17 已为 `stale_handle` 增加 `refresh_failed`/`not_visible`/`not_enabled` 前置诊断，并在物理 MIUI 上用同一官方测试连续 4 轮通过、未复现历史间歇性失败，诊断标识未在设备触发，根因仍未确认。M19 已在 API35 真实触发权限弹窗：上一轮 90 秒未出现是因为设备息屏时 `am start` 不获前台焦点，唤醒后立即出现；但弹窗期间服务 `rootInActiveWindow` 为 null，读树/输入返回 `no_window`，`system_window_denied` 未产生，输入仍被拒绝、权限未授予，该场景按契约仍记为未验证，最小修复另开 M20。未验证项见计划。
+2. Loader 验收后再实现 `phone_agent` Mod，见 `docs/phone-agent-plan.md`。UI/选择契约改造已完成并通过最终验收；当前 `phone_agent` Mod 版本 0.2.0，VLM 图片链路、Kelivo 应用内固定任务和跨新用户轮次历史图片回放已在 API 35 模拟器用 magpie `llama-cpp/llama-cpp` 验证；物理 MIUI API31 真机由 `llama-cpp/llama-cpp` 验证归一化坐标 tap（打开抽屉/Settings/Search），由 magpie `mistral/deepseek-v4-1-flash-1017` 验证真实图片请求、归一化坐标 swipe 的 UI 效果和像素专属视觉确认，`llama-cpp/llama-cpp` 的完整坐标 swipe 未验证。M17 已为 `stale_handle` 增加 `refresh_failed`/`not_visible`/`not_enabled` 前置诊断，并在物理 MIUI 上用同一官方测试连续 4 轮通过、未复现历史间歇性失败，诊断标识未在设备触发，根因仍未确认。M19 已在 API35 真实触发权限弹窗：上一轮 90 秒未出现是因为设备息屏时 `am start` 不获前台焦点，唤醒后立即出现；但弹窗期间服务 `rootInActiveWindow` 为 null，读树实测返回 `no_window`，按 `currentWindow` 前置 guard 推导输入也会返回 `no_window`（本套件未执行 tap/back），`system_window_denied` 未产生，输入仍被拒绝、权限未授予，该场景按契约仍记为未验证，最小修复另开 M20。未验证项见计划。
 
 不要把两个阶段的原则、非目标或验收标准混写。完成当前阶段前，不要提前扩张下一阶段范围。
 

@@ -3,7 +3,7 @@
 ## 0. 文档状态
 
 - 当前阶段：第二阶段验收进行中（UI/选择契约改造已完成），Mod 版本 0.2.0。
-- 当前 M19（权限窗口真实验证）：只改中文文档与 debug 异常测试，不改产品代码、schema、白名单或上游。已查明上一轮 API35 权限弹窗 90 秒未出现的原因是设备息屏（`mWakefulness=Asleep` 时 `am start` 不获前台焦点，唤醒后立即出现）；真实 `com.google.android.permissioncontroller` 弹窗已出现，但服务 `rootInActiveWindow` 为 null，读树/输入返回 `no_window`，`system_window_denied` 未产生，按契约记为未验证；输入仍被拒绝、权限未授予。最终合成树 `V:/coding/kelivo-private/.tower/worktrees/wt-19/.build/worktrees/9d4053767c74aeed`，`modsetHash` `9d4053767c74aeed1c45e743eeb868ac0ea4f08c215c17b6b9af6e8fdb37d12f`，`verify` 通过；设备运行树 `093f372e4d8513e5` 与最终树仅 `plugin/README.md` 文档副本不同，代码/测试一致；完整异常套件 `+5 ~1`、`All tests passed!`、EXIT=0。结果见 9.3.3，后续最小修复另开 M20。
+- 当前 M19（权限窗口真实验证）：只改中文文档与 debug 异常测试，不改产品代码、schema、白名单或上游。已查明上一轮 API35 权限弹窗 90 秒未出现的原因是设备息屏（`mWakefulness=Asleep` 时 `am start` 不获前台焦点，唤醒后立即出现）；真实 `com.google.android.permissioncontroller` 弹窗已出现，但服务 `rootInActiveWindow` 为 null，**读树实测返回 `no_window`**；按 `currentWindow` 前置 guard 推导输入也会返回 `no_window`（本套件未执行 tap/back，属代码路径推导），`system_window_denied` 未产生，按契约记为未验证；输入仍被拒绝、权限未授予。最终合成树 `V:/coding/kelivo-private/.tower/worktrees/wt-19/.build/worktrees/75429900bf8fc452`，`modsetHash` `75429900bf8fc4526fb7005729da565f210eab3d9de922d94039e6399f808d11`，`verify` 通过；设备运行树 `093f372e4d8513e5` 与最终树仅 `plugin/README.md` 文档副本和未验证标记/skip 文案不同，断言未变，未为文案重跑设备；完整异常套件 `+5 ~1`、`All tests passed!`、EXIT=0。结果见 9.3.3，后续最小修复另开 M20。
 - 上一轮 M17（节点重验诊断）：`stale_handle` 错误码不变；`ObservationRegistry` 把 `refresh()`、可见性和可用性前置失败拆成固定诊断标识 `refresh_failed`、`not_visible`、`not_enabled`，按该顺序短路判断，消息不含节点文本、类名、viewId 或其他内容，不改变任何通过条件、指纹字段或 TTL/窗口校验。契约见 6.5.1，设备诊断结果见 9.3.2。
 - 上一轮修正（节点重验，历史）：`PhoneNode.fingerprint()` 不再包含 `isFocused` 和动作集合 `actions`；同一已刷新节点因点击/输入产生的焦点变化和动作增减不再让后续 `set_text` 返回 `stale_handle`；`isSelected`、内容、稳定能力字段、窗口/包名/尺寸/旋转和 120 秒 TTL 校验保持不变。指纹为结构化字段列表，`stale_handle` 只附带固定字段名，不从节点内容反解字段名。契约见 6.5.1。
 - 上一轮 M16（物理 MIUI API31 验收记录，历史）：该轮只改中文文档，产品代码/测试/`mod.json`/schema/白名单/上游均未修改。最终源码 `modsetHash` `3d3cd25b4def35633dcf848373037cbe2c5200f795339c315b3ac9c3268a3174`，合成树 `V:/coding/kelivo-private/.tower/worktrees/wt-16/.build/worktrees/3d3cd25b4def3563`，`plan`/`apply`/`verify` 通过；该轮产品 debug APK 为 181,369,890 字节，SHA-256 `c6f20d250239bae223a4fdaa5ff1807ba34eab38bd8f9e7f9710e8c21747a58b`。设备证据来自此前相同代码/测试行为，未在新树重跑设备。结果见 9.3.2 与 9.4.2。
@@ -700,7 +700,7 @@ adb -s emulator-5554 install -r <临时项目目录>/app/build/outputs/apk/debug
 
 - 物理真机的截图、坐标手势和 VLM 固定任务已由 9.3.2/9.4.2 覆盖（MIUI API31 + `mistral/deepseek-v4-1-flash-1017`）；`llama-cpp/llama-cpp` 的物理完整坐标 swipe 仍未完成。
 - 其他 Android 版本/物理设备上的 `FLAG_SECURE` 行为（API35 模拟器与 MIUI API31 真机均已观察成功黑图，不代表所有设备）。
-- 物理真机的锁屏、home/recents、服务禁用/重启和权限窗口仍未运行；API35 模拟器已验证锁屏、home/recents、服务禁用/重启三项。权限窗口在 API35 已真实触发，但服务 `rootInActiveWindow` 为 null，读树/输入返回 `no_window`，`system_window_denied` 未产生，按契约仍记为未验证（见 9.3.3）。原生截图/手势/通道/worker 排队超时仍未设备验证。
+- 物理真机的锁屏、home/recents、服务禁用/重启和权限窗口仍未运行；API35 模拟器已验证锁屏、home/recents、服务禁用/重启三项。权限窗口在 API35 已真实触发，但服务 `rootInActiveWindow` 为 null，读树实测 `no_window`，输入按 `currentWindow` 前置 guard 推导为 `no_window`（本套件未执行 tap/back），`system_window_denied` 未产生，按契约仍记为未验证（见 9.3.3）。原生截图/手势/通道/worker 排队超时仍未设备验证。
 - 带合法签名配置的 release 构建。
 
 因此不宣称 Phone Agent 第二阶段全部完成；未验证项不能用编译或单元测试代替真机结论。
@@ -729,7 +729,7 @@ adb -s emulator-5554 install -r <临时项目目录>/app/build/outputs/apk/debug
 
 环境与前置：
 
-- `emulator-5554`（Android 15 / API 35，AVD `Kelivo_Phone_Agent_API_35`，未 wipe data）；设备运行树 `V:/coding/kelivo-private/.tower/worktrees/wt-19/.build/worktrees/093f372e4d8513e5`（`modsetHash` `093f372e4d8513e556b4b2292045bb180a3b756a125543bbb34dbf2eceead3be`），最终树 `V:/coding/kelivo-private/.tower/worktrees/wt-19/.build/worktrees/9d4053767c74aeed`（`modsetHash` `9d4053767c74aeed1c45e743eeb868ac0ea4f08c215c17b6b9af6e8fdb37d12f`）与运行树仅 `plugin/README.md` 文档副本不同，代码/测试一致，`verify` 通过。
+- `emulator-5554`（Android 15 / API 35，AVD `Kelivo_Phone_Agent_API_35`，未 wipe data）；设备运行树 `V:/coding/kelivo-private/.tower/worktrees/wt-19/.build/worktrees/093f372e4d8513e5`（`modsetHash` `093f372e4d8513e556b4b2292045bb180a3b756a125543bbb34dbf2eceead3be`），最终树 `V:/coding/kelivo-private/.tower/worktrees/wt-19/.build/worktrees/75429900bf8fc452`（`modsetHash` `75429900bf8fc4526fb7005729da565f210eab3d9de922d94039e6399f808d11`）与运行树仅 `plugin/README.md` 文档副本和未验证标记/skip 文案不同，断言未变，`verify` 通过；未为文案重跑设备。
 - 测试包 `com.psyche.kelivo.phoneagent`（versionCode 85，targetSdk 36），manifest 声明 `POST_NOTIFICATIONS`；实测 `granted=false`，flags 只有 `USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED`，没有 `USER_SET`，说明从未被回答。
 - 服务由系统无障碍界面启用（`Use Kelivo Phone Agent` → `Allow`），未使用 `settings put secure`；未授予任何权限、未撤销权限、未清应用数据。
 - 未修改系统分辨率；宿主命令全部带 `-s emulator-5554`，每次先执行 `adb devices -l`。
@@ -743,13 +743,14 @@ adb -s emulator-5554 install -r <临时项目目录>/app/build/outputs/apk/debug
 
 实测结果（真实权限弹窗）：
 
-- 弹窗确实出现，但 `PhoneAgentService` 的 `rootInActiveWindow` 在弹窗期间为 null：读树返回 `type=tool_error`、`error=no_window`（测试打印 `PHONE_AGENT_PERMISSION_TREE: package=null type=tool_error error=no_window`，45 秒 + 60 秒重试窗口内稳定复现）。
-- 因此输入路径返回 `no_window`（优先级最高的拒绝码），不会走到 `system_window_denied`；输入仍被拒绝，没有执行任何手势，权限未授予。
+- 弹窗确实出现，但 `PhoneAgentService` 的 `rootInActiveWindow` 在弹窗期间为 null：读树返回 `type=tool_error`、`error=no_window`（测试打印 `PHONE_AGENT_PERMISSION_TREE: package=null type=tool_error error=no_window`，45 秒 + 60 秒重试窗口内稳定复现）。这是本套件的直接设备证据。
+- 输入 `no_window` 是代码路径推导，不是本轮直接设备调用证据：`PhoneAgentService.currentWindow()` 在 `rootInActiveWindow` 为 null 时返回 null，输入在包名策略和执行器之前以 `no_window` 拒绝；本套件在 `permissionTree == null` 时只读树和打印诊断，未执行 tap/back。输入仍被拒绝，没有执行任何手势，权限未授予。
 - 文档契约仍要求 `system_window_denied`；本轮不把 `no_window` 改写成通过条件，该场景在套件中明确记录为未验证。根因和最小修复另开任务（M20：输入路径系统窗口识别），不在本轮修改生产代码。
 
 测试改动（不放宽断言）：
 
-- `PHONE_AGENT_PERMISSION_WINDOW` 标记要求宿主先唤醒设备；首次 45 秒未出现时打印 `PHONE_AGENT_PERMISSION_WINDOW_RETRY`（唤醒 + 重新启动夹具），再等 60 秒；仍未出现才记录未验证。
+- `PHONE_AGENT_PERMISSION_WINDOW` 标记要求宿主先唤醒设备；首次 45 秒未出现时打印 `PHONE_AGENT_PERMISSION_WINDOW_RETRY`（唤醒 + 重新启动夹具），再等 60 秒；仍未检测到可访问的系统窗口才记录未验证。
+- 未验证标记与 skip 原因写“服务未检测到可访问的权限窗口（读树返回 `no_window`）”，不断言系统弹窗不存在，避免与 `dumpsys` 已确认真实弹窗的事实矛盾。
 - 未验证前打印 `PHONE_AGENT_PERMISSION_TREE`，只含 `package`/`type`/`error` 固定字段，不打印节点文本。
 - 截图辅助在 `rate_limited` 时等待 1.2 秒重试一次，解决相邻用例间截图限频竞态；所有内容断言不变。
 
@@ -757,7 +758,7 @@ adb -s emulator-5554 install -r <临时项目目录>/app/build/outputs/apk/debug
 
 - `flutter test integration_test/phone_agent_exception_test.dart -d emulator-5554`：**`+5 ~1`，`All tests passed!`，EXIT=0**。
 - 通过：FLAG_SECURE 截图行为与恢复（secure 截图成功黑图，平台行为；同包切窗旧坐标 `stale_observation`；恢复后非黑夹具截图）、旋转（旧句柄 `stale_handle`、旧坐标 `stale_observation`）、home/recents（`system_window_denied`/`package_not_allowed`）、锁屏（tree/screenshot/input 均 `device_locked`）、服务禁用/中断/重启（`PHONE_AGENT_SERVICE_PENDING_BATCH: size=1000 elapsed=1112ms codes=interrupted,ok`）。
-- 跳过：权限窗口（真实弹窗出现，读树/输入为 `no_window`，`system_window_denied` 未产生，按契约记录为未验证）。
+- 跳过：权限窗口（真实弹窗出现，读树实测 `no_window`；输入按 `currentWindow` guard 推导为 `no_window`，本套件未执行 tap/back；`system_window_denied` 未产生，按契约记录为未验证）。
 - 历史失败保留：首次运行（`81a2da5132d0e975` 树）旋转用例因 `rate_limited` 失败、服务禁用用例因宿主未在约 2 秒批次内确认关闭而失败；修正测试等待与宿主反应后本轮 `+5 ~1`。两次失败都不是产品缺陷，也不是断言放宽。
 - API 29 真机 `357784090209204` 本轮不在线，未运行；不写成通过。
 - 自动检查：Loader `dart format --output=none --set-exit-if-changed tool test`、`dart analyze tool test`、`dart test`（165 项）通过；`plan`/`apply`/`verify` 通过；合成树 `dart analyze --fatal-infos lib test integration_test tool` 在 `flutter pub get --directory tool/l10n --enforce-lockfile` 后 `No issues found!`；插件 Dart 17 项、Phone Agent Flutter 108 项通过。本轮未改原生代码，因此未重建产品 APK；`flutter test` 已把运行树内 `app-debug.apk` 覆盖为测试入口构建，不能当作产品 APK，M17 产品 APK（181,373,530 字节 / `dc32c4a3...`）仍是当前产品；debug 夹具 manifest 本轮未改动，M17 的 debug/release 隔离结论不变。
