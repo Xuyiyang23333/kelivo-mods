@@ -67,7 +67,7 @@ final Map<String, dynamic> result = await agent.input({
 - 每次调用和实际执行前检查锁屏、息屏和服务代次。
 - 服务断开、`onInterrupt`、`onUnbind` 和 `onDestroy` 会完成所有 pending 请求并清空观测。
 - 树观测 TTL 120 秒。`offset == 0` 创建新观测并重新编号；`offset > 0` 只切片当前观测，不重新遍历。
-- 句柄只在当前观测内有效。动作后保留树句柄；每次使用前执行 `refresh()`、可见性、可用性和指纹校验。指纹不包含 `isFocused` 和动作集合 `actions`，因此点击或聚焦后同一已刷新节点仍可继续输入，动作可用性由执行层按当前节点校验；`isSelected`、内容、稳定能力字段、窗口、包名、尺寸、旋转和 TTL 变化仍失效。目标失效返回 `stale_handle`（附带变化字段名，不含内容），不会按文本或 bounds 重新解析到另一个节点。
+- 句柄只在当前观测内有效。动作后保留树句柄；每次使用前执行 `refresh()`、可见性、可用性和指纹校验。指纹不包含 `isFocused` 和动作集合 `actions`，因此点击或聚焦后同一已刷新节点仍可继续输入，动作可用性由执行层按当前节点校验；`isSelected`、内容、稳定能力字段、窗口、包名、尺寸、旋转和 TTL 变化仍失效。目标失效返回 `stale_handle`（附带变化字段名，不含内容），不会按文本或 bounds 重新解析到另一个节点。前置重验失败按 `refresh()` → 可见性 → 可用性短路，消息只追加固定诊断标识 `refresh_failed`、`not_visible`、`not_enabled`，不含节点文本、类名或 viewId；诊断不改变通过条件。
 - 截图使用独立观测。动作后清空截图观测，坐标输入必须重新截图；窗口、包名、尺寸或旋转变化返回 `stale_observation`。截图位图与捕获前屏幕宽高比不一致时同样返回 `stale_observation`，不发出错位遮挡的图片。
 - 截图前遍历 `service.windows` 中所有可访问窗口的 root 收集密码 bounds；任一窗口 root 无法读取时截图失败，不在漏遮挡的情况下发出图片。
 - 输入白名单初期只有 `com.psyche.kelivo.phoneagent`。系统窗口（`com.android.systemui`、权限控制器、安装器等）一律拒绝。系统导航动作与节点、坐标动作使用同一白名单。
@@ -121,7 +121,7 @@ Dart 测试覆盖通道参数、默认值、错误映射、超时、`clearScreen
 ## 未验证项与限制
 
 - 物理 MIUI API31 真机（Redmi K30 5G，`1960cd68`）已验证真实截图、读树、节点点击/输入、节点滚动、旋转失效和物理 `FLAG_SECURE`（secure 夹具返回成功黑图，清除后恢复）；坐标手势的物理 UI 效果由产品 UI 中的真实 tap/swipe 证实，不是本插件单元测试或 integration_test 回调。锁屏、home/recents、服务中断未在物理设备运行，不能从 API35 模拟器结果推断。
-- 物理设备官方测试出现一次间歇性 `set_text` `stale_handle`（`The target node changed`，`ObservationRegistry` 的 refresh/isVisibleToUser/isEnabled 前置分支），另一次全通过；根因未确认、未修复，不写成稳定通过。
+- 物理设备官方测试在 M16 出现一次间歇性 `set_text` `stale_handle`（`The target node changed`，`ObservationRegistry` 的 refresh/isVisibleToUser/isEnabled 前置分支），另一次全通过；M17 用同一官方测试连续 4 轮均为 `+2`、EXIT=0，未复现，也未触发 `refresh_failed`/`not_visible`/`not_enabled`。根因仍未确认、未修复，不写成稳定通过或根因修复。
 - 权限窗口、原生截图/手势/通道/worker 排队超时和带合法签名配置的 release 构建仍未验证；超时只由 Dart 注入测试覆盖工具层映射，不是设备证据。
 - 读树依赖目标应用的 `AccessibilityNodeInfo` IPC。极端情况下单次读树可能被目标应用阻塞；通道超时会让模型收到错误，但原生 worker 只能等待该调用返回，随后按队列超时跳过积压请求。
 - 整屏 `AccessibilityService.takeScreenshot(Display.DEFAULT_DISPLAY)` 不保证对 `FLAG_SECURE` 报错：官方 `TakeScreenshotCallback.onFailure` 文档列出的错误码不含 `ERROR_TAKE_SCREENSHOT_SECURE_WINDOW`；该码是 API 34+ 窗口级 `takeScreenshotOfWindow` 的错误，AOSP 整屏路径没有 secure 检查。API35 模拟器实测同 UID/不同 UID 的 secure 夹具曾返回成功黑图，也观察到成功内容图；插件不根据像素猜 secure，不承诺不发送黑图，正常黑色页面保留；平台明确报错时仍映射为 `screenshot_blocked`，不发送图片。

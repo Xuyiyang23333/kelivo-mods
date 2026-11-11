@@ -222,6 +222,8 @@ dart tool/mod_loader.dart clean --modset <完整哈希或 16 位前缀>
 
 指纹只判断“句柄是否仍指向同一个逻辑节点”：`isFocused` 和动作集合 `actions` 不进入指纹，因此点击或聚焦输入框后，同一已刷新节点仍可直接 `set_text`，动作是否可用仍由执行层按当前节点校验；`isSelected`、内容（text/description/hint/state）、稳定能力（enabled/editable/clickable/long-clickable/scrollable/checkable/checked）、password、类名、viewId、窗口、包名、尺寸、旋转和 120 秒 TTL 变化仍会让句柄失效。`stale_handle` 会附带发生变化的字段名（只含字段名，不含文本内容）。焦点或动作集合变化不失效不等于动作成功，原生 `performAction` 返回值仍只表示系统接受动作。
 
+`stale_handle` 的前置重验失败会按 `refresh()` → 可见性 → 可用性短路，并在消息中追加固定诊断标识 `refresh_failed`、`not_visible` 或 `not_enabled`；标识不含节点文本、类名、viewId 或其他内容，错误码和通过条件都不变。诊断只用于区分失败来源，不代表根因已修复，也不会自动重读或重试。
+
 坐标一律为 `[0, 1]` 归一化值，原点为截图左上角。模型不需要计算截图像素、物理像素或缩放比。坐标动作必须存在最近一次截图，否则返回 `screenshot_required`；截图与输入之间发生包名、窗口、尺寸或旋转变化时返回 `stale_observation`，不静默重试。secure 窗口可能产生黑图；不要用黑图坐标，改用 `phone_agent_tree` 的节点句柄。
 
 输入错误码优先级固定为：空包名 `no_window` → 系统包 `system_window_denied` → 非白名单包 `package_not_allowed` → 白名单内句柄/截图校验（`stale_handle` / `stale_observation`）。因此系统窗口或非白名单应用在前台时，即使句柄已失效，也先返回包名策略错误。`home`/`recents` 执行后前台会离开白名单，后续输入（包括 `back`）会被拒绝，模型无法自行回到测试应用，需要用户或宿主把应用切回前台。
@@ -306,9 +308,9 @@ flutter gen-l10n
 - `SecureWindowFixtureActivity` 只是 debug 测试夹具，不是产品能力；release 不包含该 Activity。
 - API35 模拟器已验证旋转、home/recents、锁屏、服务禁用/重启；物理 MIUI API31 真机已验证旋转和物理 `FLAG_SECURE`，但锁屏、home/recents、服务禁用/重启未在物理设备运行，不能从模拟器结果推断；原生超时仍无法在设备上确定性触发。
 - VLM 图片链路、Kelivo 应用内固定任务和跨新用户轮次历史图片回放已在 API 35 模拟器用 magpie `llama-cpp/llama-cpp` 验证；物理 MIUI API31 真机由 `llama-cpp/llama-cpp` 验证归一化坐标 tap（打开抽屉/Settings/Search），由 magpie `mistral/deepseek-v4-1-flash-1017` 验证真实图片请求、归一化坐标 swipe 的 UI 效果和像素专属视觉确认；`llama-cpp/llama-cpp` 的物理完整坐标 swipe 未验证；只验证这些模型与设备，不承诺任意模型或设备。
-- 物理设备官方测试出现一次间歇性 `set_text` `stale_handle`（`The target node changed`，refresh/可见/可用前置分支），另一次全通过；根因未确认、未修复，不写成稳定通过。
+- 物理设备官方测试在 M16 出现一次间歇性 `set_text` `stale_handle`（`The target node changed`，refresh/可见/可用前置分支），另一次全通过；M17 用同一官方测试连续 4 轮均为 `+2`、EXIT=0，未复现，也未触发 `refresh_failed`/`not_visible`/`not_enabled`。根因未确认、未修复，不写成稳定通过或根因修复。
 - magpie 的模型能力标注可能变化，图片与工具能力需每次实测；Kelivo 手动勾选图片只是测试配置，不构成模型能力保证。
-- `settings put secure` 预配置仅限用户明确授权的该台测试设备，不是产品能力，也不代表其他设备可以自动写入无障碍授权。
+- `settings put secure` 预配置仅限用户明确授权的该台测试设备，不是产品能力，也不代表其他设备可以自动写入无障碍授权；每轮必须记录并恢复当轮真实原值，不能按历史空串+0 强制关闭。
 - ARB 翻译质量依赖上游 l10n 工具和目标语言审查；新增键必须保持英文和中文源键集合一致。
 
 ## 维护
@@ -418,9 +420,10 @@ flutter test integration_test/phone_agent_exception_test.dart -d <android-device
 本轮在用户提供的物理设备上完成 Phone Agent 的物理验收。当前交付的合成树、`modsetHash`、APK 大小/SHA-256 和 manifest 隔离记录在 `docs/phone-agent-plan.md` 9.3.2/9.4.2 与 `docs/next-session-handoff.md`。本 README 不参与 Mod treeHash（`tool/src/config.dart` 只散列 `mod.json`、声明的 patches 和 copy 源，根 README 不在 copy 列表）；参与的是 `plugin/README.md`（`copy[7]/README.md`），改动它会改变交付哈希。
 
 - 设备：Redmi K30 5G（`1960cd68`，picasso），Android 12 / API 31，1080x2400，density 440，MIUI V13.0.3.0.SGICNXM。用户提供该测试设备并授权安装应用、操作界面。
-- 授权边界：用户明确授权仅在该测试设备上用 `settings put secure` 预配置 Phone Agent 服务；原始 `enabled_accessibility_services` 为空串、`accessibility_enabled=0`，每轮结束恢复。该例外只适用于本设备与 Phone Agent，不改变产品自动授权边界，其他设备默认仍禁止自动写系统授权。
+- 授权边界：用户明确授权仅在该测试设备上用 `settings put secure` 预配置 Phone Agent 服务；M16 历史轮原始 `enabled_accessibility_services` 为空串、`accessibility_enabled=0`，M17 轮原始值为 Phone Agent 组件 + `accessibility_enabled=1`。每轮必须记录并恢复当轮真实原值，不能按历史空串+0 强制关闭。该例外只适用于本设备与 Phone Agent，不改变产品自动授权边界，其他设备默认仍禁止自动写系统授权。
 - 安装与状态：独立测试包 `com.psyche.kelivo.phoneagent` 安装成功，未覆盖上游 Kelivo；服务 enabled && connected；Mods 页三态选择与真实工具暴露一致。
-- 官方 `phone_agent_test.dart` 在物理 API31 上两次结果不同：第一次 `+1 -1`、EXIT=1，聚焦后 `set_text` 返回 `stale_handle`（`The target node changed`，属 `ObservationRegistry` 的 refresh/isVisibleToUser/isEnabled 前置分支，不是旧聚焦指纹路径）；第二次 `+2`、EXIT=0。属间歇性，根因未确认、未修复，不能写成稳定通过。
+- 官方 `phone_agent_test.dart` 在 M16 物理 API31 上两次结果不同：第一次 `+1 -1`、EXIT=1，聚焦后 `set_text` 返回 `stale_handle`（`The target node changed`，属 `ObservationRegistry` 的 refresh/isVisibleToUser/isEnabled 前置分支，不是旧聚焦指纹路径）；第二次 `+2`、EXIT=0。属间歇性，根因未确认、未修复，不能写成稳定通过。
+- M17 诊断轮：同一官方测试连续 4 轮均为 `+2`、`All tests passed!`、EXIT=0，未出现 `stale_handle`，也未触发 `refresh_failed`/`not_visible`/`not_enabled`。每轮安装后组件被清除，宿主只恢复 Phone Agent 组件，轮末恢复当轮真实原值。4 轮未复现不等于根因修复；新诊断标识目前只有 JVM 单元测试覆盖。
 - 物理 `FLAG_SECURE`：secure 夹具截图返回成功黑图（平台行为），清除 flag 后恢复真实截图；旋转后旧句柄 `stale_handle`、旧截图坐标 `stale_observation`，新树/新截图成功。
 - 坐标 UI 效果（真实产品 UI，不是 integration_test 回调）：在 `llama-cpp/llama-cpp` 轮，归一化坐标 tap 真实打开抽屉、Settings 和 Search，`set_text Phone` 成功；后续 swipe 因网关故障未完成，该模型的完整坐标 swipe 仍属未验证。
 - 指定模型 `mistral/deepseek-v4-1-flash-1017`（不是 0731，也不是 Bonsai）：magpie 侧该模型未标图片输入，Kelivo 手动勾选图片后真实请求全部 200，响应头 `x-magpie-model` / `x-magpie-provider` 与请求一致；工具集为 `read_file` + 三个 `phone_agent_*`，无 `snapshot_id`、无 `phone_control`；截图 720x1600，screen 1080x2400。
@@ -459,6 +462,7 @@ flutter test integration_test/phone_agent_exception_test.dart -d <android-device
 - 插件 Dart 17 项；插件 Kotlin 66 项；上游 `PhoneControlServiceTest` 49 项。
 - 修正前用同一套插件测试复现问题：61 项中 2 项 focus 用例失败（`gaining focus keeps a handle reusable for set_text`、`losing focus keeps a handle reusable`）。
 - 新增插件测试覆盖：focus false→true 后复用句柄并 `set_text`、focus true→false 后复用、action-only 变化仍可复用、selected-only 变化仍返回 `stale_handle`、稳定能力字段（`isScrollable`）变化仍拒绝、禁用节点、句柄 TTL、含 NUL 文本只报告 `text` 字段名，以及 `performNodeAction` 在动作从当前节点移除时返回 `action_unavailable` 且不执行 `beforeAction`/`perform`。
+- 前置重验诊断测试覆盖：`refresh()` 为 false 时 `stale_handle` 消息含 `refresh_failed`、`isVisibleToUser` 为 false 时含 `not_visible`、`isEnabled` 为 false 时含 `not_enabled`；三项均断言不含节点文本和另外两个标识，刷新失败优先于可见性/可用性判断。
 - API 35 模拟器（`emulator-5554`）官方集成测试退出码 0，2 个用例通过：真实截图、读树、节点点击、坐标滑动（原生接受并完成手势）、节点滚动（列表真实滚动）、聚焦后同一句柄 `set_text`、二次读树，以及 Mods 页真实服务状态与三态选择。
 - API 29 真机（`357784090209204`）官方集成测试退出码 0，2 个用例通过：截图按预期返回 `unsupported_os`、读树、节点点击、节点滚动（列表真实滚动）、聚焦后同一句柄 `set_text`、二次读树，以及 Mods 页真实服务状态与三态选择。
 - 设备结果对应提交 `698cace` 的运行时语义；R1 审查后仅调整诊断编码、提取纯 JVM 前置校验接缝、补测试和文档，未重复双 API 设备回归。
@@ -498,7 +502,7 @@ flutter test integration_test/phone_agent_exception_test.dart -d <android-device
 - 该历史时点物理真机的 VLM 固定任务未验证；API 35 模拟器已用 magpie `llama-cpp/llama-cpp` 完成图片链路、应用内固定任务和跨新用户轮次历史图片回放，本轮物理 MIUI 用 `mistral/deepseek-v4-1-flash-1017` 完成真实图片请求与像素专属视觉确认。
 - 当时真实 `FLAG_SECURE` 窗口未验证；后续 M10 已在 API35 模拟器补充，物理 MIUI 也已验证物理 secure 行为，见“API35 FLAG_SECURE/异常路径（上一轮）”与“本轮物理 MIUI API31 验收”。
 - 该历史时点真机旋转、切窗、锁屏、禁用服务、超时等异常路径未验证；物理 MIUI 已补齐旋转，锁屏、home/recents、服务中断仍未在物理设备运行，原生超时仍未设备验证。
-- 一次 `stale_handle`（`No current tree observation`）未复现、根因未确认、未修复；重读树后恢复。本轮物理设备又出现一次间歇性 `set_text` `stale_handle`（`The target node changed`），同样未确认根因。
+- 一次 `stale_handle`（`No current tree observation`）未复现、根因未确认、未修复；重读树后恢复。M16 物理设备又出现一次间歇性 `set_text` `stale_handle`（`The target node changed`），同样未确认根因；M17 连续 4 轮官方测试未复现，也未触发新诊断标识，不能据此宣称根因修复。
 - 未执行带合法签名配置的 release 构建。
 - 只验证 magpie `llama-cpp/llama-cpp`、`mistral/deepseek-v4-1-flash-1017` 与对应设备，不承诺任意模型或设备。
 

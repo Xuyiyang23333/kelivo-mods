@@ -102,20 +102,19 @@ internal class ObservationRegistry(
             )
         }
         val node = observation.handles[index]
-        if (!node.refresh() || !node.isVisibleToUser || !node.isEnabled) {
-            throw PhoneAgentError(
-                "stale_handle",
-                "The target node changed. Call phone_agent_tree with offset 0.",
-            )
+        if (!node.refresh()) {
+            throw targetChanged("refresh_failed")
+        }
+        if (!node.isVisibleToUser) {
+            throw targetChanged("not_visible")
+        }
+        if (!node.isEnabled) {
+            throw targetChanged("not_enabled")
         }
         val current = node.fingerprint()
         if (current != observation.fingerprints[index]) {
             val changed = fingerprintDiff(observation.fingerprints[index], current)
-            throw PhoneAgentError(
-                "stale_handle",
-                "The target node changed (${changed.joinToString(", ")}). " +
-                    "Call phone_agent_tree with offset 0.",
-            )
+            throw targetChanged(changed.joinToString(", "))
         }
         return SavedHandle(
             id = nodeId,
@@ -199,6 +198,11 @@ internal class ObservationRegistry(
             observation.rotation == current.rotation
 
     private fun isExpired(createdAt: Long): Boolean = now() - createdAt > ttlMillis
+
+    private fun targetChanged(detail: String): PhoneAgentError = PhoneAgentError(
+        "stale_handle",
+        "The target node changed ($detail). Call phone_agent_tree with offset 0.",
+    )
 
     private fun clearTreeLocked() {
         tree?.handles?.forEach { handle ->

@@ -185,19 +185,6 @@ class ObservationRegistryTest {
     }
 
     @Test
-    fun `disabled handle is rejected`() {
-        val (root, observation) = observation()
-        registry.beginTree(observation)
-        (root.children[0] as FakeNode).isEnabled = false
-
-        val error = assertThrows(PhoneAgentError::class.java) {
-            registry.handle("n1", window)
-        }
-
-        assertEquals("stale_handle", error.code)
-    }
-
-    @Test
     fun `handle expires after the ttl`() {
         val (_, observation) = observation()
         registry.beginTree(observation)
@@ -242,29 +229,62 @@ class ObservationRegistryTest {
     }
 
     @Test
-    fun `refresh failure invalidates a handle`() {
+    fun `refresh failure reports refresh_failed without node content`() {
         val (root, observation) = observation()
         registry.beginTree(observation)
-        (root.children[0] as FakeNode).refreshResult = false
+        val child = root.children[0] as FakeNode
+        child.text = "secret-refresh-content"
+        child.refreshResult = false
+        child.isVisibleToUser = false
+        child.isEnabled = false
 
         val error = assertThrows(PhoneAgentError::class.java) {
             registry.handle("n1", window)
         }
 
         assertEquals("stale_handle", error.code)
+        assertTrue(error.message.contains("refresh_failed"))
+        assertFalse(error.message.contains("not_visible"))
+        assertFalse(error.message.contains("not_enabled"))
+        assertFalse(error.message.contains("secret-refresh-content"))
     }
 
     @Test
-    fun `invisible handle is rejected`() {
+    fun `invisible node reports not_visible without node content`() {
         val (root, observation) = observation()
         registry.beginTree(observation)
-        (root.children[0] as FakeNode).isVisibleToUser = false
+        val child = root.children[0] as FakeNode
+        child.text = "secret-hidden-content"
+        child.isVisibleToUser = false
 
         val error = assertThrows(PhoneAgentError::class.java) {
             registry.handle("n1", window)
         }
 
         assertEquals("stale_handle", error.code)
+        assertTrue(error.message.contains("not_visible"))
+        assertFalse(error.message.contains("refresh_failed"))
+        assertFalse(error.message.contains("not_enabled"))
+        assertFalse(error.message.contains("secret-hidden-content"))
+    }
+
+    @Test
+    fun `disabled node reports not_enabled without node content`() {
+        val (root, observation) = observation()
+        registry.beginTree(observation)
+        val child = root.children[0] as FakeNode
+        child.text = "secret-disabled-content"
+        child.isEnabled = false
+
+        val error = assertThrows(PhoneAgentError::class.java) {
+            registry.handle("n1", window)
+        }
+
+        assertEquals("stale_handle", error.code)
+        assertTrue(error.message.contains("not_enabled"))
+        assertFalse(error.message.contains("refresh_failed"))
+        assertFalse(error.message.contains("not_visible"))
+        assertFalse(error.message.contains("secret-disabled-content"))
     }
 
     @Test
