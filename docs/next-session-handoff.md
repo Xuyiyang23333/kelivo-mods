@@ -1,6 +1,20 @@
 # 下一次会话交接：Phone Agent 前台可视化叠加层
 
-## 0. M23 当前状态（2026-11-12）
+## 0. M24 当前状态（2026-11-13）
+
+- 本轮目标：处理"聚焦后同一句柄 `set_text` 返回 `stale_handle`"的长期未结问题——先在设备上复现与解释机制，再做最小修复，并跑双 API 与物理 MIUI 回归。
+- **自然循环未复现**（如实记录，不写成已复现）：API35 四版夹具共 278 次迭代、MIUI 80 次迭代、MIUI 官方 `phone_agent_test.dart` 连续 4 轮，均未出现 `stale_handle`。唯一稳定失败是 `delay=0` 的 `action_unavailable`（tap 后语义树尚未更新出 `SET_TEXT`）。
+- **受控机制验证成功**：读树拿句柄 → tap 聚焦 → 强制重建输入框语义子树（`KeyedSubtree` 换 key）→ 旧句柄 `set_text` 连续 3/3 返回 `stale_handle`，消息精确为 `The target node changed (refresh_failed)`；不重建的对照组 3/3 成功。重建后新树里逻辑节点仍在（同 class/hint/bounds、`editable=true`），说明平台重建了节点对象、逻辑节点未变。
+- **修复（`520de30`）**：`NodeTreeReader` 记录每个节点的"根→节点子索引路径"；`ObservationRegistry` 在 `refresh()` 失败时按该路径在当前活动窗口重解析一次，并要求指纹**逐字段完全一致**才继续。路径缺失、节点不存在或任一字段不等仍返回 `stale_handle`（路径失败保留 `refresh_failed`）。
+- **A/B 设备证据**（API35，同一夹具 8 轮，含 `refocus=false/true`）：把重解析短路为 `return null` 时 8/8 `stale_handle(refresh_failed)`；启用修复后 8/8 成功并真实写入（`textApplied=fix N`）。
+- **修复的真实边界**（不得写成"彻底解决"）：只对"平台重建节点对象、逻辑节点未变且重建后的节点仍 advertise 所需动作"生效。若重建后语义节点不再 advertise `SET_TEXT`，执行层仍返回 `action_unavailable`——本轮没有放宽 `performNodeAction`。第一版验证时重建销毁了 `TextField` 并丢焦点，结果从 `stale_handle` 变成 `action_unavailable`；改用显式 `FocusNode` 重建后才对应真实场景。
+- 自动检查（合成树 `47675033b3d132e0`）：Loader format/analyze 通过、Loader 165、插件 Kotlin 104（新增 7）、Flutter 126、上游 seam 56、`dart analyze --fatal-infos` 无问题、`verify` 通过。
+- 设备结果：API35 官方 `phone_agent_test.dart` `+2`、EXIT=0；物理 MIUI `1960cd68` 官方 `+2`、EXIT=0。API35 完整异常套件**未取得绿色整轮**（最好 `+6 -2`，最后一轮 `+5 -3`），三条失败均为宿主脚本时序（叠加层截图 518/409920 像素差异属 M23 既有断言、权限用例宿主重建 Activity 丢 harness、服务禁用用例确认弹窗晚于 pending 排空），不是 M24 产品断言失败；已通过 FLAG_SECURE、旋转、home/recents、锁屏、叠加层宿主触摸。按收口规则不再迭代宿主脚本，不写成全绿。
+- API 29 `357784090209204` 本轮离线，按用户决定记录为**未运行**。
+- 产品 APK（最终树 `47675033b3d132e0`，全部设备测试后 `flutter clean` + `pub get` + `pub get --directory tool/l10n --enforce-lockfile` + 显式 `flutter build apk --debug`，构建后未再运行 integration_test）：**181,404,642 字节**，SHA-256 `677c26d93163dac581be3c4429db8bd27436877e2cf20e8e9a723bd5e7093afd`；debug merged manifest 含 `SecureWindowFixtureActivity`（1 处）与 `PhoneAgentService`（1 处）；未构建 release。
+- 环境记录（本机）：`C:/Users/David/AppData/Local/Pub/Cache` 曾有 36 个空包目录（含 `window_manager`、`dynamic_color`、`file_picker` 等），导致 `flutter build apk --debug` 在 `compileFlutterBuildDebug` 失败；删除空目录后 `flutter pub get` 重新拉取即恢复。另：`flutter test` 生成的 `app-debug.apk` 只含 x86_64 的 `libflutter.so`，直接装到 arm 设备会 `Could not find 'libflutter.so'` 崩溃，`flutter test -d 1960cd68` 会自行按 ABI 构建。
+
+### M23 历史状态（2026-11-12）
 
 - 本轮目标：按 M18 只读设计实现首版前台可视化叠加层（V1 原生核心），不新增设置开关、`status` 字段、ARB 文案或插件通道方法；不改 schema、白名单、上游宿主和 `mod.json`。
 - 契约：独立 `PhoneAgentOverlay` 使用 `TYPE_ACCESSIBILITY_OVERLAY` + `FLAG_NOT_TOUCHABLE | FLAG_NOT_FOCUSABLE`，不申请普通悬浮窗权限，不复用上游 `BackgroundRuntime`/`BackgroundOverlay`。只在真实工具观察（读树、截图完成后）和允许包内已接受的动作（`perform`/`dispatchGesture`/`performGlobalAction` 返回 true）时短暂显示；拒绝路径不产生动画；动画不代表业务成功、任务进度、模型思考或用户审批。

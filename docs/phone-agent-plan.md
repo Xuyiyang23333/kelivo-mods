@@ -617,6 +617,8 @@ dart analyze --fatal-infos
 - 含 NUL 的文本变化只报告 `text` 字段名，`stale_handle` 不包含 NUL 后的内容；
 - 前置重验三项精确诊断：`refresh()` 为 false 时消息含 `refresh_failed`、`isVisibleToUser` 为 false 时含 `not_visible`、`isEnabled` 为 false 时含 `not_enabled`，错误码均为 `stale_handle`，且消息不含节点文本；刷新失败优先于可见性和可用性判断；
 - `performNodeAction` 在请求动作从当前节点移除后返回 `action_unavailable`，且不执行 `beforeAction` 或 `perform`；
+- M24 路径重解析：`refresh()` 失败后按子索引路径重解析并要求指纹逐字段一致时句柄可继续用于 `set_text`；重解析出的节点指纹不同、路径缺失、无活动窗口 root 时仍返回 `stale_handle`（含 `refresh_failed`）；`refresh()` 成功时不触发重解析；重解析结果会被同一观测的后续动作复用；
+- 读树记录每个节点的从根子索引路径（`TreeObservation.paths`），嵌套节点的路径与父 id 一致；
 - 动作后有效句柄可复用，失效句柄不会重定向；
 - 归一化坐标、越界、NaN、旋转和尺寸变化；
 - 节点动作、系统导航、手势回调和并发 `busy`；
@@ -759,6 +761,41 @@ adb -s emulator-5554 install -r <临时项目目录>/app/build/outputs/apk/debug
 - 坐标 UI 效果：`llama-cpp/llama-cpp` 轮用归一化坐标 tap 真实打开抽屉、Settings 和 Search，`set_text Phone` 成功；后续 swipe 因网关故障未完成，该模型的完整坐标 swipe 仍属未验证。
 - 未在物理设备运行：锁屏、home/recents、服务禁用/重启、权限窗口；这些场景不能从 API35 模拟器结果推断为物理设备通过。
 - 产品 APK 覆盖提醒：`flutter test` 会把树内 `build/app/outputs/flutter-apk/app-debug.apk` 覆盖为测试入口构建；产品 APK 必须在干净合成树显式 `flutter build apk --debug` 重新生成并重新计算大小与 SHA-256，不能沿用旧哈希，也不能把测试入口构建当产品。旧 M10 树 `5b1cde0304e687b9` 的 APK 就曾被覆盖为测试入口构建（249,642,846 字节，SHA-256 前缀 `1138b4d2`），之后才显式重建；因此旧 181,373,590 字节 / `581d56...` 与 249,642,846 字节 / `1138b4d2...` 都不能当作当前产品 APK。
+
+#### 9.3.2.1 M24 聚焦后 `stale_handle` 复现与路径重解析修复
+
+本轮目标：处理"聚焦后同一句柄 `set_text` 返回 `stale_handle`"这一长期未结问题，先复现、再解释机制、最后做最小修复。
+
+自然循环复现（均未触发）：
+
+- API35 `emulator-5554`：同一句柄 tap → 0/50/100/200/400ms → `set_text` 共 150 次；改为真实焦点切换（先点空白目标再点输入框）后 48 次；改为单次读树 + 6 档延迟后 60 次；再改为按官方序列（读树 → 点目标 → 滚动 → 读树 → 点输入框 → 400ms → `set_text`）循环 20 次。全部未出现 `stale_handle`，唯一稳定失败是 `delay=0` 时的 `action_unavailable`（tap 后语义树尚未更新出 `SET_TEXT` 动作）。
+- 物理 MIUI `1960cd68`：同款焦点切换夹具 60 次、官方序列循环 20 次，均未出现 `stale_handle`；官方 `phone_agent_test.dart` 连续 4 轮 `+2`、`All tests passed!`、EXIT=0。
+- 字段探针（聚焦后延迟读树并逐字段比较输入框）：API35 15 次、MIUI 15 次全部为 `same`，说明仅靠聚焦本身不重建语义节点。
+
+受控机制验证（设备实测，非代码推断）：
+
+- 夹具在第 2 步后强制重建输入框所在子树（`KeyedSubtree` 更换 key）。重建后旧句柄 `set_text` 连续 3/3 次返回 `stale_handle`，消息精确为 `The target node changed (refresh_failed)`；未重建的对照组 3/3 成功。
+- 重建后重新读树可见同一逻辑节点仍在（同 `class`、`hint`、`bounds`，`editable=true`），说明是平台重建了 `AccessibilityNodeInfo` 对象、逻辑节点未变，`refresh()` 因此失败。
+- A/B 对照（同一夹具 8 轮，含 `refocus=false`/`true` 各半）：把 `resolveByPath` 短路为 `return null` 模拟修复前行为时 **8/8** 返回 `stale_handle(refresh_failed)`；启用修复后 **8/8** `set_text` 成功并真实写入控件（`textApplied=fix N`）。
+
+修复边界（写清楚，不宣称彻底解决）：
+
+- 只对"平台重建节点对象、逻辑节点未变且重建后的节点仍 advertise 所需动作"的情况生效。若重建后的语义节点不再 advertise `SET_TEXT`，执行层仍按当前节点返回 `action_unavailable`；本轮没有放宽 `performNodeAction` 的动作校验。
+- 第一版验证时重建销毁了 `TextField` 并丢失焦点，重解析拿到的节点不 advertise `SET_TEXT`，结果从 `stale_handle` 变成 `action_unavailable`。因此改用显式 `FocusNode` 重建，模拟真实场景中"节点对象被重建但逻辑节点与焦点仍在"。这不是产品缺陷被掩盖，而是动作可用性校验按设计生效。
+- 不按文本/描述/相似度查找节点，不放宽任何指纹字段，不改变可见性、可用性、TTL 和窗口/包名/尺寸/旋转校验，不自动重试动作。
+
+自动检查（合成树 `47675033b3d132e0`，`modsetHash` `47675033b3d132e0ba18d29b3fcd7dfde38f8302d1f744757d8f7927f458c1cf`）：Loader format/analyze 通过、Loader 165、插件 Kotlin 104（新增 7 项）、Flutter Mod/Phone Agent 126、上游 seam 56、`dart analyze --fatal-infos lib test integration_test tool` 无问题、`verify` 通过。
+
+设备结果：
+
+- API35 `emulator-5554` 官方 `phone_agent_test.dart` `+2`、`All tests passed!`、EXIT=0。
+- API35 完整异常套件本轮未取得绿色整轮：最好一轮 `+6 -2`，最后一轮 `+5 -3`。逐条判定：叠加层截图污染（`518/409920` 像素差异，M24 未改 `OverlayVisuals`/`PhoneAgentOverlay`/`ScreenshotCapture`，属 M23 既有宿主/时序敏感断言）、权限窗口用例（宿主 `am start` 重建了 Activity 导致 harness 丢失）、服务禁用用例（宿主确认弹窗在 1000 个 pending 请求排空后才到达）。这三条均为宿主脚本时序，不是本轮产品断言失败；已通过的用例为 FLAG_SECURE、旋转、home/recents、锁屏、叠加层可见时宿主触摸。按收口规则不再为宿主脚本继续迭代，不写成全绿。
+- 物理 MIUI `1960cd68` 官方 `phone_agent_test.dart` `+2`、`All tests passed!`、EXIT=0（新树 `47675033b3d132e0`）。
+- API 29 真机 `357784090209204` 本轮离线，按用户决定记录为**未运行**，不以任何替代手段伪造。
+
+产品 APK（M24 最终树 `47675033b3d132e0`，全部设备测试后 `flutter clean` + `flutter pub get` + `flutter pub get --directory tool/l10n --enforce-lockfile` + 显式 `flutter build apk --debug`，构建后未再运行 integration_test）：**181,404,642 字节**，SHA-256 `677c26d93163dac581be3c4429db8bd27436877e2cf20e8e9a723bd5e7093afd`；debug merged manifest 含 `SecureWindowFixtureActivity`（1 处）与 `PhoneAgentService`（1 处）。本轮未构建 release，不宣称签名 release。
+
+未验证：`stale_handle` 真实自然触发仍属窄窗口间歇性，本轮只以受控夹具复现机制，不能写成"已彻底修复历史间歇性失败"；"重建后语义节点不接受所需动作"的情况仍返回 `action_unavailable`，属已知边界；API 29 未运行；签名 release 未验证；完整异常套件本轮未取得绿色整轮（原因见上）；物理设备未运行锁屏、home/recents、服务中断和权限弹窗。
 
 #### 9.3.3 M19 权限窗口真实验证（API35 模拟器）
 
