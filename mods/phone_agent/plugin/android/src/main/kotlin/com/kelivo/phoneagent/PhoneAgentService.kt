@@ -113,10 +113,11 @@ class PhoneAgentService : AccessibilityService() {
                 ensureUnlocked()
                 ensureActive()
             },
-            visual = { event, isActive ->
+            visual = { event, isActive, generation ->
                 val guard = visualGuard()
-                overlay.show(event) { guard() && isActive() }
+                overlay.show(event, { guard() && isActive() }, generation)
             },
+            visualGeneration = { overlay.currentGeneration() },
             clearVisual = { overlay.clear() },
         )
         screenshots = ScreenshotCapture(
@@ -128,6 +129,7 @@ class PhoneAgentService : AccessibilityService() {
                 ensureActive()
             },
             gate = overlay,
+            currentWindow = ::currentWindow,
         )
     }
 

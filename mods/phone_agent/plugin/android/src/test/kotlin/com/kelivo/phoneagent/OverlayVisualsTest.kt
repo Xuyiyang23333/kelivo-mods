@@ -174,6 +174,50 @@ class OverlayVisualsTest {
     }
 
     @Test
+    fun `state begin replaces the previous plan without stacking`() {
+        val state = OverlayState(now = { now })
+        val first = OverlayVisuals.plan(OverlayEvent.Observing, 100, 100)!!
+        val second = OverlayVisuals.plan(OverlayEvent.Captured, 100, 100)!!
+
+        assertTrue(state.begin(first))
+        now = 100
+        assertTrue(state.begin(second))
+        assertEquals(second, state.plan())
+        assertEquals(100L, state.startedAt())
+    }
+
+    @Test
+    fun `window change is detected for same size other app and unreadable window`() {
+        val original = WindowState(7, "com.psyche.kelivo.phoneagent", 1080, 2400, 0)
+        assertFalse(OverlayVisuals.windowChanged(original, original))
+        assertTrue(
+            OverlayVisuals.windowChanged(
+                original,
+                original.copy(windowId = 8),
+            ),
+        )
+        assertTrue(
+            OverlayVisuals.windowChanged(
+                original,
+                original.copy(packageName = "com.example.password"),
+            ),
+        )
+        assertTrue(
+            OverlayVisuals.windowChanged(
+                original,
+                original.copy(width = 1081),
+            ),
+        )
+        assertTrue(
+            OverlayVisuals.windowChanged(
+                original,
+                original.copy(rotation = 1),
+            ),
+        )
+        assertTrue(OverlayVisuals.windowChanged(original, null))
+    }
+
+    @Test
     fun `gate proceeds immediately when no window is visible`() {
         val scheduler = FakeScheduler()
         val gate = OverlayCaptureGate(scheduler, { OverlayHideResult.NONE })

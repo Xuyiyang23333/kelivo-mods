@@ -279,7 +279,7 @@ dart tool/mod_loader.dart clean --modset <完整哈希或 16 位前缀>
 - 动画只表示“系统接受了动作”或“手势完成”，不代表业务成功、任务进度、模型思考或用户审批，也不是安全护栏。
 - 只用无文本图形，不显示输入文字、密码、截图字节或缩略图、节点文本、包名和坐标数值；`set_text` 只画输入框边框和光标。
 - 坐标手势的视觉 travel 复用真实 `duration_ms`（50–2000ms），尾段可以额外存在，但不会把真实时长改成更慢的视觉时长。
-- 截图前会移除叠加层并等待两帧加约 48ms 合成周期再截图；隐藏失败或附着状态未知时返回 `screenshot_failed` 且不发送图片，不会把叠加层带进模型图片。读树不需要隐藏叠加层。
+- 截图前会移除叠加层并等待两帧加约 48ms 合成周期再截图；隐藏失败或附着状态未知时返回 `screenshot_failed` 且不发送图片，不会把叠加层带进模型图片。隐藏等待结束后、真正截图前会重新校验前台窗口（窗口 id、包名、宽高、旋转）；变化或不可读返回 `stale_observation` 且不发图，避免同尺寸切应用时用旧密码遮挡。读树不需要隐藏叠加层。
 - 密码窗口遍历只排除能可靠确认属于本服务自己的 accessibility overlay 窗口；root 包名未知或其他包名的窗口继续参与遮挡。
 - 事件在主线程绘制前会再次校验清理代次和手势/服务状态；旋转、切窗或清理先于绘制时旧动画不会重新出现。移除失败时不会继续叠加新窗口。
 - 旋转、锁屏、服务中断、服务停用和前台切到其他应用时会清理；每个动画有边界时长并自动消失。
@@ -441,7 +441,8 @@ flutter test integration_test/phone_agent_exception_test.dart -d <android-device
 
 本轮新增独立 `TYPE_ACCESSIBILITY_OVERLAY` 前台可视化叠加层（无文本图形、无设置开关、无 ARB、无插件通道方法），并接入读树、截图、节点动作、坐标手势和系统动作。交付树、`modsetHash`、APK 大小/SHA-256 和 manifest 隔离记录在 `docs/phone-agent-plan.md` 9.3.7 与 `docs/next-session-handoff.md`。
 
-- API35 模拟器（`emulator-5554`，Android 15）：返工树官方 `phone_agent_test.dart` **`+2`、EXIT=0**。完整异常套件返工后多次整轮运行的真实退出码均为 1，未得到绿色整轮：一次 `+6 -2`（锁屏/服务禁用失败，期间模拟器 system_server 重启），一次 `+7 -1`（权限窗口后的宿主恢复时序），最后一次有界整轮在 `setUpAll` 失败。`dumpsys activity lastanr` 为 `Input dispatching timed out (Application does not have a focused window)`，ANR 发生在任何工具调用之前、应用进程存活、无障碍连接为 DEAD，属宿主/模拟器窗口焦点与输入分发问题，不是 overlay 主线程死锁；ANR 弹窗阻塞宿主通过系统 UI 启用服务。返工树未生成产品 APK。
+- API35 模拟器（`emulator-5554`，Android 15）：返工树官方 `phone_agent_test.dart` **`+2`、EXIT=0**。完整异常套件返工后多次整轮运行的真实退出码均为 1，未得到绿色整轮：一次 `+6 -2`（锁屏/服务禁用失败，期间模拟器 system_server 重启），一次 `+7 -1`（唯一失败为「服务禁用中断与重新启用恢复」的宿主设置页时序），最后一次有界整轮在 `setUpAll` 失败。`dumpsys activity lastanr` 为 `Input dispatching timed out (Application does not have a focused window)`，ANR 发生在任何工具调用之前、应用进程存活、无障碍连接为 DEAD，属宿主/模拟器窗口焦点与输入分发问题，不是 overlay 主线程死锁；ANR 弹窗阻塞宿主通过系统 UI 启用服务。返工树未生成产品 APK。
+- 独立测试 AVD（`Kelivo_M23_API_35`，`.build/avd`，使用已有 android-35 google_apis_playstore x86_64 镜像，不 wipe 旧 AVD）：官方 `phone_agent_test.dart` **`+2`、EXIT=0**；完整异常套件最好 **`+7 -1`、EXIT=1**，唯一失败为「服务禁用中断与重新启用恢复」的宿主打开无障碍设置页/关闭确认时序；另一次 `+6 -2`（FLAG_SECURE/截图无污染在同包夹具切换步骤超时）。旧 AVD 另出现 `com.android.systemui` 的 `Input dispatching timed out ([Gesture Monitor] edge-swipe (server) is not responding)`，属系统 UI 手势监视器/宿主输入注入问题，无产品栈；旧 AVD 诊断保存在 `.build/diagnostics/` 并已正常关闭。
 - 新增「叠加层不污染产品截图」通过：debug 夹具纯色 `#00C8FF`，坐标 tap 动画进行中立即通过产品截图链路截图，中心 60% 与基线逐像素一致；状态栏隐私盾牌本身带强调色像素，因此断言比较新增像素而不是要求整图零强调色。仅等两帧时截图仍会抓到旧帧，握手改为「两帧 + 48ms 合成周期」，总等待仍远小于 250ms 有界失败。
 - 新增「叠加层可见时真实触摸不被拦截」通过：宿主用 `adb shell input swipe` 独立注入真实触摸（不是 `phone_agent_input`），截图完成脉冲可见时从顶部下滑，通知栏真实打开，前台包名变为 `com.android.systemui`，证明 `FLAG_NOT_TOUCHABLE` 生效。
 - 物理 MIUI API31（Redmi K30 5G，`1960cd68`，返工树）：官方 `phone_agent_test.dart` **`+2`、EXIT=0**；「叠加层不污染产品截图」**`+1`、EXIT=0**；「叠加层可见时真实触摸不被拦截」**`+1`、EXIT=0**（`PHONE_AGENT_OVERLAY_HOST_TOUCH_RESULT: package=com.android.systemui`）。服务停用后 `dumpsys window windows` 中 `PhoneAgentOverlay` 窗口数为 0，无孤儿窗口。

@@ -71,7 +71,7 @@ final Map<String, dynamic> result = await agent.input({
 - 截图使用独立观测。动作后清空截图观测，坐标输入必须重新截图；窗口、包名、尺寸或旋转变化返回 `stale_observation`。截图位图与捕获前屏幕宽高比不一致时同样返回 `stale_observation`，不发出错位遮挡的图片。
 - 前台可视化叠加层：服务内新增 `TYPE_ACCESSIBILITY_OVERLAY` 窗口（`FLAG_NOT_TOUCHABLE | FLAG_NOT_FOCUSABLE`），不需要普通悬浮窗权限。读树显示无文本边缘脉冲；截图成功后显示短暂完成脉冲；节点动作在刷新后的 `bounds` 中心显示圆环；坐标手势按同一物理起点/终点和真实 `duration_ms` 显示移动圆点；系统动作显示无文本方向图形。只在 `perform`/`dispatchGesture`/`performGlobalAction` 返回 true 后显示，拒绝路径不产生动画；动画只表示系统接受动作，不代表业务成功或用户审批。不显示输入文本、密码、节点文本、包名或坐标数值。
 - 叠加层在旋转、锁屏、`onInterrupt`/`onUnbind`/`onDestroy`、服务中断和前台窗口切换到其他包时清理；`addView` 失败只禁用本会话可视化，不改变工具结果。事件在主线程绘制前再次校验清理代次和手势/服务状态，清理先于绘制时旧动画不会重新出现；移除失败或附着状态未知时不再添加新窗口。
-- 截图前在主线程移除叠加层并等待两帧加约 48ms 合成周期再调用 `takeScreenshot`；没有窗口时零等待，隐藏失败、附着状态未知或约 250ms 有界等待超时返回 `screenshot_failed`，不发送图片或图片 metadata。等待可被服务中断解除，迟到的帧回调不会触发第二次截图。读树不隐藏叠加层。
+- 截图前在主线程移除叠加层并等待两帧加约 48ms 合成周期再调用 `takeScreenshot`；没有窗口时零等待，隐藏失败、附着状态未知或约 250ms 有界等待超时返回 `screenshot_failed`，不发送图片或图片 metadata。等待可被服务中断解除，迟到的帧回调不会触发第二次截图。隐藏等待结束后、`takeScreenshot` 前重新读取当前窗口并比较 `windowId`/包名/宽高/旋转；变化或不可读返回 `stale_observation` 且不发图，避免同尺寸切应用时用旧密码遮挡。读树不隐藏叠加层。
 - 截图前遍历 `service.windows` 中所有可访问窗口的 root 收集密码 bounds；任一窗口 root 无法读取时截图失败，不在漏遮挡的情况下发出图片。遍历只跳过能可靠确认属于本服务自己的 `TYPE_ACCESSIBILITY_OVERLAY` 窗口（root 存在且 root 包名等于自身包）；root 包名未知或其他包名的窗口继续参与遮挡，不屏蔽其他服务或应用的窗口。
 - 坐标手势的视觉 travel 复用真实 `duration_ms`（50–2000ms），尾段另算，不把真实时长改成更慢的视觉时长。
 - 输入白名单初期只有 `com.psyche.kelivo.phoneagent`。系统窗口（`com.android.systemui`、权限控制器、安装器等）一律拒绝。系统导航动作与节点、坐标动作使用同一白名单。
@@ -124,7 +124,7 @@ Dart 测试覆盖通道参数、默认值、错误映射、超时、`clearScreen
 
 ## 未验证项与限制
 
-- M23 前台可视化叠加层（返工树）：API35 模拟器官方测试 `+2`、EXIT=0；完整异常套件返工后多次整轮运行的真实退出码均为 1，未得到绿色整轮（`+6 -2` 与 `+7 -1` 各一次，最后一次在 `setUpAll` 失败）。`dumpsys activity lastanr` 为 `Input dispatching timed out (Application does not have a focused window)`，ANR 发生在任何工具调用之前、应用进程存活、无障碍连接为 DEAD，属宿主/模拟器窗口焦点与输入分发问题，不是 overlay 主线程死锁。物理 MIUI API31 官方测试 `+2`、截图无污染 `+1`、宿主 adb 独立触摸 `+1`，均 EXIT=0；服务停用后无孤儿窗口。返工树未生成产品 APK；API35 绿色整轮、API29、签名 release 未验证。
+- M23 前台可视化叠加层（返工树）：API35 模拟器官方测试 `+2`、EXIT=0；完整异常套件返工后多次整轮运行的真实退出码均为 1，未得到绿色整轮（旧 AVD `+6 -2` 与 `+7 -1` 各一次，最后一次在 `setUpAll` 失败；独立测试 AVD `Kelivo_M23_API_35` 最好 `+7 -1`，唯一失败为服务禁用宿主时序）。`dumpsys activity lastanr` 为 `Input dispatching timed out (Application does not have a focused window)`，旧 AVD 另出现 `com.android.systemui` 的 edge-swipe 手势监视器 ANR，均无产品栈，属宿主/模拟器窗口焦点与输入分发问题，不是 overlay 主线程死锁。物理 MIUI API31 官方测试 `+2`、截图无污染 `+1`、宿主 adb 独立触摸 `+1`，均 EXIT=0；服务停用后无孤儿窗口。返工树未生成产品 APK；API35 绿色整轮、API29、签名 release 未验证。
 - 物理 MIUI API31 真机（Redmi K30 5G，`1960cd68`）已验证真实截图、读树、节点点击/输入、节点滚动、旋转失效和物理 `FLAG_SECURE`（secure 夹具返回成功黑图，清除后恢复）；坐标手势的物理 UI 效果由产品 UI 中的真实 tap/swipe 证实，不是本插件单元测试或 integration_test 回调。锁屏、home/recents、服务中断未在物理设备运行，不能从 API35 模拟器结果推断。
 - 物理设备官方测试在 M16 出现一次间歇性 `set_text` `stale_handle`（`The target node changed`，`ObservationRegistry` 的 refresh/isVisibleToUser/isEnabled 前置分支），另一次全通过；M17 用同一官方测试连续 4 轮均为 `+2`、EXIT=0，未复现，也未触发 `refresh_failed`/`not_visible`/`not_enabled`。根因仍未确认、未修复，不写成稳定通过或根因修复。
 - 原生截图/手势/通道/worker 排队超时和带合法签名配置的 release 构建仍未验证；权限弹窗的保守拒绝已在 API35 模拟器验证（`no_window` + 条件式提示，未执行手势/系统导航），物理设备和其他 Android 版本未验证；超时只由 Dart 注入测试覆盖工具层映射，不是设备证据。

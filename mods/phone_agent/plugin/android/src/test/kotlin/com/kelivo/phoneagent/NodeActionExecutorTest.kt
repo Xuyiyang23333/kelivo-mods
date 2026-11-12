@@ -9,9 +9,17 @@ import org.junit.Test
 class NodeActionExecutorTest {
     private val window = WindowState(7, "com.psyche.kelivo", 100, 100, 0)
 
-    private fun handle(actions: Set<NodeAction>): Pair<SavedHandle, FakeNode> {
+    private fun handle(
+        actions: Set<NodeAction>,
+        password: Boolean = false,
+    ): Pair<SavedHandle, FakeNode> {
         val root = FakeNode(text = "root")
-        val child = FakeNode(text = "child", isClickable = true, actions = actions)
+        val child = FakeNode(
+            text = "child",
+            isClickable = true,
+            isPassword = password,
+            actions = actions,
+        )
         root.children += child
         val observation = NodeTreeReader().read(
             root = root,
@@ -82,6 +90,28 @@ class NodeActionExecutorTest {
         assertEquals("action_unavailable", error.code)
         assertFalse(beforeCalled)
         assertTrue(child.performed.isEmpty())
+    }
+
+    @Test
+    fun `password node is rejected before perform and visual`() {
+        val (saved, child) = handle(setOf(NodeAction.CLICK), password = true)
+        var beforeCalled = false
+        val visuals = mutableListOf<Pair<Bounds, NodeAction>>()
+
+        val error = assertThrows(PhoneAgentError::class.java) {
+            performNodeAction(
+                handle = saved,
+                action = NodeAction.CLICK,
+                text = null,
+                beforeAction = { beforeCalled = true },
+                visual = { bounds, action -> visuals += bounds to action },
+            )
+        }
+
+        assertEquals("password_node_denied", error.code)
+        assertFalse(beforeCalled)
+        assertTrue(child.performed.isEmpty())
+        assertTrue(visuals.isEmpty())
     }
 
     @Test

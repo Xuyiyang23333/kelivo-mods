@@ -119,7 +119,8 @@ internal class NodeActionExecutor(
     private val budget: ActionBudget = ActionBudget(now = { SystemClock.elapsedRealtime() }),
     private val handler: Handler = Handler(Looper.getMainLooper()),
     private val beforeAction: () -> Unit = {},
-    private val visual: (OverlayEvent, () -> Boolean) -> Unit = { _, _ -> },
+    private val visual: (OverlayEvent, () -> Boolean, Long) -> Unit = { _, _, _ -> },
+    private val visualGeneration: () -> Long = { 0L },
     private val clearVisual: () -> Unit = {},
 ) {
     @Volatile
@@ -167,12 +168,16 @@ internal class NodeActionExecutor(
     ) {
         policy.requireInputAllowed(current.packageName)
         val handle = registry.handle(request.nodeId, current)
+        // 动作开始时捕获清理代次；动作后切窗/clear 会让这个旧动作的视觉失效。
+        val generation = visualGeneration()
         val accepted = performNodeAction(
             handle = handle,
             action = request.action,
             text = request.text,
             beforeAction = beforeAction,
-            visual = { bounds, action -> showVisual(OverlayEvent.Node(bounds, action)) },
+            visual = { bounds, action ->
+                showVisual(OverlayEvent.Node(bounds, action), { true }, generation)
+            },
         )
         registry.clearScreenshot()
         if (!accepted) {
@@ -238,6 +243,7 @@ internal class NodeActionExecutor(
             throw PhoneAgentError("invalid_argument", "long_press requires at least 500 ms.")
         }
         registry.clearScreenshot()
+        val generation = visualGeneration()
         dispatchGesture(request.action, path, duration, complete) { isActive ->
             showVisual(
                 OverlayEvent.Gesture(
@@ -249,6 +255,7 @@ internal class NodeActionExecutor(
                     durationMillis = duration,
                 ),
                 isActive,
+                generation,
             )
         }
     }
@@ -266,13 +273,14 @@ internal class NodeActionExecutor(
             SystemAction.RECENTS -> AccessibilityService.GLOBAL_ACTION_RECENTS
         }
         beforeAction()
+        val generation = visualGeneration()
         if (!service.performGlobalAction(globalAction)) {
             throw PhoneAgentError(
                 "action_failed",
                 "Android rejected the system action. Read the tree or take a screenshot before retrying.",
             )
         }
-        showVisual(OverlayEvent.System(request.action))
+        showVisual(OverlayEvent.System(request.action), { true }, generation)
         complete(
             InputOutcome.Success(
                 request.action.wireName,
@@ -371,8 +379,12 @@ internal class NodeActionExecutor(
         }
     }
 
-    private fun showVisual(event: OverlayEvent, isActive: () -> Boolean = { true }) {
-        runCatching { visual(event, isActive) }
+    private fun showVisual(
+        event: OverlayEvent,
+        isActive: () -> Boolean = { true },
+        generation: Long = visualGeneration(),
+    ) {
+        runCatching { visual(event, isActive, generation) }
     }
 
     private fun clearVisualSafely() {

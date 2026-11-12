@@ -108,6 +108,7 @@ internal class ScreenshotCapture(
     private val maxLongEdge: Int = 1600,
     private val beforeCapture: () -> Unit = {},
     private val gate: OverlayGate = OverlayGate.NONE,
+    private val currentWindow: () -> WindowState? = { null },
 ) {
     @Volatile
     private var pending = false
@@ -195,19 +196,32 @@ internal class ScreenshotCapture(
         val start = {
             try {
                 beforeCapture()
-                service.takeScreenshot(
-                    Display.DEFAULT_DISPLAY,
-                    worker,
-                    object : AccessibilityService.TakeScreenshotCallback {
-                        override fun onSuccess(result: AccessibilityService.ScreenshotResult) {
-                            finish(process(result, current, passwordBounds))
-                        }
+                // 隐藏握手可能等待两帧加 48ms；期间前台可能切到同尺寸的另一个应用，
+                // 旧密码 bounds 不会覆盖新窗口，因此必须重新校验当前窗口。
+                if (OverlayVisuals.windowChanged(current, currentWindow())) {
+                    finish(
+                        ScreenshotOutcome.Failure(
+                            PhoneAgentError(
+                                "stale_observation",
+                                "The screen changed while the visual indicator was hidden. Take a new screenshot.",
+                            ),
+                        ),
+                    )
+                } else {
+                    service.takeScreenshot(
+                        Display.DEFAULT_DISPLAY,
+                        worker,
+                        object : AccessibilityService.TakeScreenshotCallback {
+                            override fun onSuccess(result: AccessibilityService.ScreenshotResult) {
+                                finish(process(result, current, passwordBounds))
+                            }
 
-                        override fun onFailure(errorCode: Int) {
-                            finish(ScreenshotOutcome.Failure(mapError(errorCode)))
-                        }
-                    },
-                )
+                            override fun onFailure(errorCode: Int) {
+                                finish(ScreenshotOutcome.Failure(mapError(errorCode)))
+                            }
+                        },
+                    )
+                }
             } catch (error: PhoneAgentError) {
                 finish(ScreenshotOutcome.Failure(error))
             } catch (error: Exception) {

@@ -115,9 +115,14 @@ internal class PhoneAgentOverlay(
     /**
      * 事件在主线程真正绘制前再次校验：清理代次必须未变（clear/release/hide 先于 show），
      * 且调用方的 `isActive` 仍为 true（手势未取消、服务代次未变）。
+     * `expectedGeneration` 由动作开始时捕获，用于让动作后发生的 clear/切窗使旧动作失效。
      */
-    fun show(event: OverlayEvent, isActive: () -> Boolean = { true }) {
-        val requestGeneration = showGate.capture()
+    fun show(
+        event: OverlayEvent,
+        isActive: () -> Boolean = { true },
+        expectedGeneration: Long? = null,
+    ) {
+        val requestGeneration = expectedGeneration ?: showGate.capture()
         post {
             if (disabled || closed) return@post
             if (!showGate.shouldShow(requestGeneration, isActive())) return@post
@@ -127,6 +132,9 @@ internal class PhoneAgentOverlay(
             render(plan)
         }
     }
+
+    /** 动作开始时捕获的清理代次；动作后 clear/切窗会让旧视觉失效。 */
+    fun currentGeneration(): Long = showGate.capture()
 
     private fun render(plan: OverlayPlan) {
         if (!attachment.canAdd()) {
@@ -188,8 +196,12 @@ internal class PhoneAgentOverlay(
     private fun hideNow(): OverlayHideResult {
         state.suppress()
         bumpGeneration()
-        if (view == null && !attachment.isUnknown()) return OverlayHideResult.NONE
-        return if (removeView()) OverlayHideResult.HIDDEN else OverlayHideResult.FAILED
+        return when (attachment.hideResult()) {
+            OverlayHideResult.NONE -> OverlayHideResult.NONE
+            OverlayHideResult.FAILED -> OverlayHideResult.FAILED
+            OverlayHideResult.HIDDEN ->
+                if (removeView()) OverlayHideResult.HIDDEN else OverlayHideResult.FAILED
+        }
     }
 
     /** 只有成功移除才清空引用；失败或状态未知时保留，后续截图不能静默继续。 */

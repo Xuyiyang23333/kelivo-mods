@@ -128,6 +128,13 @@ internal object OverlayVisuals {
         if (rootPackageName == null || ownPackageName == null) return false
         return rootPackageName == ownPackageName
     }
+
+    /**
+     * 截图隐藏等待期间前台窗口是否已变化。窗口不可读也算变化，
+     * 避免用旧密码 bounds 和旧包名发送新窗口的截图。
+     */
+    fun windowChanged(original: WindowState, latest: WindowState?): Boolean =
+        latest != original
 }
 
 /**
@@ -152,7 +159,8 @@ internal class OverlayShowGate {
  * 叠加层窗口的附着状态。移除失败或状态未知时不允许截图静默继续，
  * 也不允许再添加新窗口，直到一次成功移除把状态恢复为 detached。
  */
-internal class OverlayAttachmentTracker {    private var attached = false
+internal class OverlayAttachmentTracker {
+    private var attached = false
     private var unknown = false
 
     fun onAddSucceeded() {
