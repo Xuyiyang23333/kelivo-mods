@@ -69,7 +69,11 @@ final Map<String, dynamic> result = await agent.input({
 - 树观测 TTL 120 秒。`offset == 0` 创建新观测并重新编号；`offset > 0` 只切片当前观测，不重新遍历。
 - 句柄只在当前观测内有效。动作后保留树句柄；每次使用前执行 `refresh()`、可见性、可用性和指纹校验。指纹不包含 `isFocused` 和动作集合 `actions`，因此点击或聚焦后同一已刷新节点仍可继续输入，动作可用性由执行层按当前节点校验；`isSelected`、内容、稳定能力字段、窗口、包名、尺寸、旋转和 TTL 变化仍失效。目标失效返回 `stale_handle`（附带变化字段名，不含内容），不会按文本或 bounds 重新解析到另一个节点。前置重验失败按 `refresh()` → 可见性 → 可用性短路，消息只追加固定诊断标识 `refresh_failed`、`not_visible`、`not_enabled`，不含节点文本、类名或 viewId；诊断不改变通过条件。
 - 截图使用独立观测。动作后清空截图观测，坐标输入必须重新截图；窗口、包名、尺寸或旋转变化返回 `stale_observation`。截图位图与捕获前屏幕宽高比不一致时同样返回 `stale_observation`，不发出错位遮挡的图片。
-- 截图前遍历 `service.windows` 中所有可访问窗口的 root 收集密码 bounds；任一窗口 root 无法读取时截图失败，不在漏遮挡的情况下发出图片。
+- 前台可视化叠加层：服务内新增 `TYPE_ACCESSIBILITY_OVERLAY` 窗口（`FLAG_NOT_TOUCHABLE | FLAG_NOT_FOCUSABLE`），不需要普通悬浮窗权限。读树显示无文本边缘脉冲；截图成功后显示短暂完成脉冲；节点动作在刷新后的 `bounds` 中心显示圆环；坐标手势按同一物理起点/终点和真实 `duration_ms` 显示移动圆点；系统动作显示无文本方向图形。只在 `perform`/`dispatchGesture`/`performGlobalAction` 返回 true 后显示，拒绝路径不产生动画；动画只表示系统接受动作，不代表业务成功或用户审批。不显示输入文本、密码、节点文本、包名或坐标数值。
+- 叠加层在旋转、锁屏、`onInterrupt`/`onUnbind`/`onDestroy`、服务中断和前台窗口切换到其他包时清理；`addView` 失败只禁用本会话可视化，不改变工具结果。事件在主线程绘制前再次校验清理代次和手势/服务状态，清理先于绘制时旧动画不会重新出现；移除失败或附着状态未知时不再添加新窗口。
+- 截图前在主线程移除叠加层并等待两帧加约 48ms 合成周期再调用 `takeScreenshot`；没有窗口时零等待，隐藏失败、附着状态未知或约 250ms 有界等待超时返回 `screenshot_failed`，不发送图片或图片 metadata。等待可被服务中断解除，迟到的帧回调不会触发第二次截图。隐藏等待结束后、`takeScreenshot` 前重新读取当前窗口并比较 `windowId`/包名/宽高/旋转，变化返回 `stale_observation` 且不发图；异步 `takeScreenshot` 回调后再次比较，不一致同样返回 `stale_observation` 且不处理、不发送图片。窗口为 null 按 `stale_observation`，读取抛异常按 `screenshot_blocked` fail closed。同一活动窗口内新出现密码字段、非活动分屏窗口变化和同窗口分屏 resize 不保证遮挡。读树不隐藏叠加层。
+- 截图前遍历 `service.windows` 中所有可访问窗口的 root 收集密码 bounds；任一窗口 root 无法读取时截图失败，不在漏遮挡的情况下发出图片。遍历只跳过能可靠确认属于本服务自己的 `TYPE_ACCESSIBILITY_OVERLAY` 窗口（root 存在且 root 包名等于自身包）；root 包名未知或其他包名的窗口继续参与遮挡，不屏蔽其他服务或应用的窗口。
+- 坐标手势的视觉 travel 复用真实 `duration_ms`（50–2000ms），尾段另算，不把真实时长改成更慢的视觉时长。
 - 输入白名单初期只有 `com.psyche.kelivo.phoneagent`。系统窗口（`com.android.systemui`、权限控制器、安装器等）一律拒绝。系统导航动作与节点、坐标动作使用同一白名单。
 - 动作预算：输入 120 次/分钟，读树 60 次/分钟，截图约 1 次/秒且最多 30 次/分钟。
 - 截图失败映射：系统限频为 `rate_limited`；平台明确返回的无效窗口/截图错误为 `screenshot_blocked`；窗口读取、位图处理或遮挡准备失败为 `screenshot_failed`。整屏 `takeScreenshot` 不保证对 `FLAG_SECURE` 报错，secure 内容可能以黑色区域出现在成功截图中；不根据像素猜 secure，不承诺不发送黑图，正常黑色页面保留。
@@ -120,6 +124,7 @@ Dart 测试覆盖通道参数、默认值、错误映射、超时、`clearScreen
 
 ## 未验证项与限制
 
+- M23 前台可视化叠加层（round 4 设备运行树 `9ebf2e991caa07ed`，最终源码树仅本 README 副本不同，hash 见 `docs/phone-agent-plan.md` 9.3.7）：API35 独立 AVD `Kelivo_M23_API_35` 完整异常套件 **`+8`、`All tests passed!`、EXIT=0**（含旋转、锁屏、服务禁用/重启、权限窗口），官方测试 `+2`、EXIT=0；物理 MIUI API31 官方测试 `+2`、截图无污染 `+1`，均 EXIT=0；服务停用后无孤儿窗口。API35 服务禁用用例单独 `+1`、EXIT=0，宿主 `dumpsys` 原始输出 `R5_OVERLAY_WINDOWS_AFTER_DISABLE: count=0`、`R5_OVERLAY_WINDOWS_AFTER_RESTART: count=0`；宿主 `screenrecord` 帧确认观察脉冲、节点点击圆环和坐标滑动轨迹（1500ms 定向验证，`#008999` 圆点沿 x≈539 从 y≈1110 上移到 y≈462，约 42 帧/1.4s）。返工期间旧 AVD 曾出现 `Input dispatching timed out (Application does not have a focused window)` 与 `com.android.systemui` 的 edge-swipe 手势监视器 ANR，均无产品栈，属宿主/模拟器窗口焦点与输入分发问题，不是 overlay 主线程死锁；round 2 树 `f1b26a580b737e14` 的历史 `+6 -2` 见计划 9.3.7。产品 APK 大小/hash 与 manifest 隔离见 `docs/phone-agent-plan.md` 9.3.7；API29、签名 release 未验证；观察脉冲、节点点击圆环和坐标滑动轨迹均已获宿主 `screenrecord` 像素证据（滑动为 1500ms 定向验证），不写成像素级验证。
 - 物理 MIUI API31 真机（Redmi K30 5G，`1960cd68`）已验证真实截图、读树、节点点击/输入、节点滚动、旋转失效和物理 `FLAG_SECURE`（secure 夹具返回成功黑图，清除后恢复）；坐标手势的物理 UI 效果由产品 UI 中的真实 tap/swipe 证实，不是本插件单元测试或 integration_test 回调。锁屏、home/recents、服务中断未在物理设备运行，不能从 API35 模拟器结果推断。
 - 物理设备官方测试在 M16 出现一次间歇性 `set_text` `stale_handle`（`The target node changed`，`ObservationRegistry` 的 refresh/isVisibleToUser/isEnabled 前置分支），另一次全通过；M17 用同一官方测试连续 4 轮均为 `+2`、EXIT=0，未复现，也未触发 `refresh_failed`/`not_visible`/`not_enabled`。根因仍未确认、未修复，不写成稳定通过或根因修复。
 - 原生截图/手势/通道/worker 排队超时和带合法签名配置的 release 构建仍未验证；权限弹窗的保守拒绝已在 API35 模拟器验证（`no_window` + 条件式提示，未执行手势/系统导航），物理设备和其他 Android 版本未验证；超时只由 Dart 注入测试覆盖工具层映射，不是设备证据。
@@ -131,4 +136,5 @@ Dart 测试覆盖通道参数、默认值、错误映射、超时、`clearScreen
 - 白名单只限制输入，不限制读树和截图；白名单应用内部仍可能发生不可逆业务操作。
 - 手势 `onCompleted` 只代表系统接受并完成手势，不代表业务成功。
 - 后台悬浮胶囊可能出现在截图中或拦截坐标手势，首版不处理。
+- 前台可视化叠加层是 `TYPE_ACCESSIBILITY_OVERLAY` 窗口，`addView` 在部分厂商 ROM 上可能失败；失败时只禁用本会话可视化，工具行为不变。叠加层无法隐藏上游胶囊，截图隐藏握手会增加约两帧等待并可能返回 `screenshot_failed`；动画不代表业务成功或用户审批。
 - 本插件不提供绝对安全保证，也不识别“发送、购买、删除”等业务语义。

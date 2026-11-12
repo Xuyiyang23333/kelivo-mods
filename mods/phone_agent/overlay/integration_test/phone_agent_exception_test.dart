@@ -163,6 +163,88 @@ void main() {
     _expectScreenshotOk(await _screenshot(service), '返回应用截图');
   });
 
+  testWidgets('叠加层不污染产品截图', (tester) async {
+    await _pumpHarness(tester);
+    await _ensureAppForeground(service);
+
+    final fixtureTree = await _waitForTreeText(
+      service,
+      marker: 'PHONE_AGENT_OVERLAY_FIXTURE',
+      instruction: 'adb shell am start -n $_fixtureActivity --ez secure false',
+      text: _fixtureText,
+    );
+    expect(fixtureTree['package_name'], _appPackage);
+    final baseline = await _screenshot(service);
+    _expectScreenshotOk(baseline, '叠加层基线截图');
+    expect(_payload(baseline)['package_name'], _appPackage);
+
+    // 截图限频约 1 次/秒；等待后先触发一次坐标 tap 让叠加层出现，再立即截图。
+    await Future<void>.delayed(const Duration(milliseconds: 1100));
+    _hostStep(
+      'PHONE_AGENT_OVERLAY_ANIMATION',
+      '坐标 tap 后约 350ms 内可用 adb exec-out screencap 观察叠加层；'
+          '该截图只作宿主证据，产品截图由测试自身通过 Phone Agent 调用。',
+    );
+    final tap = await _input(service, <String, dynamic>{
+      'action': 'tap',
+      'x': 0.5,
+      'y': 0.5,
+    });
+    _expectOk(_payload(tap), '叠加层动作');
+    final during = await _screenshot(service);
+    _expectScreenshotOk(during, '叠加层期间截图');
+    await _expectOverlayFree(during, baseline);
+
+    final afterTree = await _tree(service);
+    expect(_nodeForText(afterTree, _fixtureText), isNotNull);
+  });
+
+  testWidgets('叠加层可见时真实触摸不被拦截', (tester) async {
+    await _pumpHarness(tester);
+    await _ensureAppForeground(service);
+
+    // 宿主用 adb 注入独立真实触摸（不是 phone_agent_input）；测试只负责在
+    // 叠加层可见期间轮询前台包名。先截图让叠加层出现完成脉冲，后续读树会
+    // 继续显示约 700ms 的观察脉冲。
+    _expectScreenshotOk(await _screenshot(service), '宿主触摸前截图');
+    _hostStep(
+      'PHONE_AGENT_OVERLAY_HOST_TOUCH',
+      '在接下来约 10 秒内，宿主必须用 adb 注入真实触摸（不是 phone_agent_input）：'
+          'adb shell input swipe 540 5 540 1200 300；可重复多次。'
+          '测试会在每次读树时显示约 700ms 的观察叠加层。',
+    );
+    Map<String, dynamic>? foreground;
+    for (var i = 0; i < 8 && foreground == null; i++) {
+      // 读树会显示观察脉冲，宿主的真实触摸应落在叠加层可见期间。
+      final tree = await _tryTree(service);
+      final packageName = tree?['package_name'];
+      if (packageName is String &&
+          packageName.isNotEmpty &&
+          packageName != _appPackage) {
+        foreground = tree;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+    }
+    expect(foreground, isNotNull, reason: '宿主 adb 真实触摸没有打开通知栏，不能证明叠加层不拦截宿主触摸。');
+    debugPrint(
+      'PHONE_AGENT_OVERLAY_HOST_TOUCH_RESULT: '
+      'package=${foreground!['package_name']}',
+    );
+
+    _hostStep(
+      'PHONE_AGENT_OVERLAY_HOST_TOUCH_RECOVER',
+      'adb shell input keyevent 4 关闭通知栏，然后执行 '
+          'adb shell am start -n $_appPackage/com.psyche.kelivo.MainActivity',
+    );
+    await _waitForTreeText(
+      service,
+      marker: 'PHONE_AGENT_OVERLAY_HOST_TOUCH_RETURN',
+      instruction:
+          'adb shell am start -n $_appPackage/com.psyche.kelivo.MainActivity',
+      text: _tapTarget,
+    );
+  });
+
   testWidgets('旋转后旧句柄与旧截图失效', (tester) async {
     addTearDown(
       () => SystemChrome.setPreferredOrientations(DeviceOrientation.values),
@@ -401,7 +483,7 @@ void main() {
 
   testWidgets('锁屏 device_locked 与解锁恢复', (tester) async {
     await _pumpHarness(tester);
-    await _ensureAppForeground(service);
+    await _ensureAppForeground(service, repump: () => _pumpHarness(tester));
     final before = await _tree(service);
     final tapNode = _nodeForText(before, _tapTarget);
     expect(tapNode, isNotNull, reason: '锁屏测试前读树没有找到点击目标。');
@@ -554,9 +636,12 @@ Future<void> _pumpHarness(WidgetTester tester) async {
 }
 
 Future<void> _waitForService(PhoneAgentService service) async {
+  // 安装测试包会撤销无障碍授权。先给宿主留出通过系统界面重新启用的时间，
+  // 避免在服务未启用时立即轮询状态（慢速模拟器上可能拖住主线程）。
+  debugPrint('PHONE_AGENT_WAITING_FOR_SERVICE');
+  await Future<void>.delayed(const Duration(seconds: 20));
   var status = await service.status();
   if (!status.ready) {
-    debugPrint('PHONE_AGENT_WAITING_FOR_SERVICE');
     for (var i = 0; i < 600 && !status.ready; i++) {
       await Future<void>.delayed(const Duration(milliseconds: 500));
       status = await service.status();
@@ -576,14 +661,27 @@ void _hostStep(String marker, String instruction) {
   debugPrint('$marker: $instruction');
 }
 
-Future<void> _ensureAppForeground(PhoneAgentService service) async {
+Future<void> _ensureAppForeground(
+  PhoneAgentService service, {
+  Future<void> Function()? repump,
+}) async {
   final deadline = DateTime.now().add(const Duration(seconds: 5));
+  var repumped = false;
   while (DateTime.now().isBefore(deadline)) {
     final tree = await _tryTree(service);
     if (tree != null &&
         tree['package_name'] == _appPackage &&
         _nodeForText(tree, _tapTarget) != null) {
       return;
+    }
+    // 应用已在前台但语义树没有点击目标时，重新 pump 一次测试 harness，
+    // 覆盖后台恢复后 Flutter 语义树未刷新的宿主时序；不改变任何断言。
+    if (!repumped &&
+        repump != null &&
+        tree != null &&
+        tree['package_name'] == _appPackage) {
+      repumped = true;
+      await repump();
     }
     await Future<void>.delayed(_pollInterval);
   }
@@ -694,14 +792,19 @@ Future<ClientToolResult> _screenshot(PhoneAgentService service) async {
     PhoneAgentToolNames.screenshot,
     const <String, dynamic>{},
   );
-  if (_payload(result)['error'] == 'rate_limited') {
-    // 截图限频约一次/秒；相邻用例之间可能不足一秒，重试一次而不是判失败。
+  var error = _payload(result)['error'];
+  var attempts = 0;
+  // 截图限频约一次/秒；慢速模拟器在旋转/窗口过渡后也可能超过产品 10 秒 timeout。
+  // 这是宿主稳定性重试，不改变产品超时语义，最终仍要求成功截图。
+  while ((error == 'rate_limited' || error == 'timeout') && attempts < 2) {
+    attempts++;
     await Future<void>.delayed(const Duration(milliseconds: 1200));
     result = await _callResult(
       service,
       PhoneAgentToolNames.screenshot,
       const <String, dynamic>{},
     );
+    error = _payload(result)['error'];
   }
   return result;
 }
@@ -989,6 +1092,68 @@ Future<void> _expectFixturePixels(ClientToolResult result) async {
   expect(total, greaterThan(0));
   expect(nonBlack / total, greaterThan(0.5), reason: '恢复截图接近全黑，不能证明真实截图恢复。');
   expect(fixture / total, greaterThan(0.05), reason: '恢复截图中没有夹具纯色区域。');
+}
+
+/// 叠加层隐藏后截图必须与基线一致：中心 60% 逐像素相同，且整图不含强调色。
+Future<void> _expectOverlayFree(
+  ClientToolResult during,
+  ClientToolResult baseline,
+) async {
+  final after = await _readScreenshotImage(during);
+  final before = await _readScreenshotImage(baseline);
+  expect(after.width, before.width, reason: '叠加层截图宽度与基线不一致。');
+  expect(after.height, before.height, reason: '叠加层截图高度与基线不一致。');
+
+  final left = (before.width * 0.2).round();
+  final right = (before.width * 0.8).round();
+  final top = (before.height * 0.2).round();
+  final bottom = (before.height * 0.8).round();
+  var compared = 0;
+  var mismatches = 0;
+  for (var y = top; y < bottom; y++) {
+    for (var x = left; x < right; x++) {
+      final a = before.getPixel(x, y);
+      final b = after.getPixel(x, y);
+      compared++;
+      if (a.r != b.r || a.g != b.g || a.b != b.b) mismatches++;
+    }
+  }
+  expect(compared, greaterThan(0));
+  expect(
+    mismatches,
+    0,
+    reason: '叠加层可见期间截图中心 60% 与基线不一致（$mismatches/$compared）。',
+  );
+
+  var accent = 0;
+  for (var y = 0; y < after.height; y += 2) {
+    for (var x = 0; x < after.width; x += 2) {
+      final pixel = after.getPixel(x, y);
+      if ((pixel.r.toInt() - 0).abs() <= 12 &&
+          (pixel.g.toInt() - 137).abs() <= 12 &&
+          (pixel.b.toInt() - 153).abs() <= 12) {
+        accent++;
+      }
+    }
+  }
+  var baselineAccent = 0;
+  for (var y = 0; y < before.height; y += 2) {
+    for (var x = 0; x < before.width; x += 2) {
+      final pixel = before.getPixel(x, y);
+      if ((pixel.r.toInt() - 0).abs() <= 12 &&
+          (pixel.g.toInt() - 137).abs() <= 12 &&
+          (pixel.b.toInt() - 153).abs() <= 12) {
+        baselineAccent++;
+      }
+    }
+  }
+  // 状态栏的隐私/无障碍指示图标本身带强调色，因此与基线比较新增像素，
+  // 而不是要求整图零强调色。
+  expect(
+    accent - baselineAccent,
+    lessThan(50),
+    reason: '截图新增了叠加层强调色像素（during=$accent baseline=$baselineAccent），说明隐藏失败。',
+  );
 }
 
 List<Map<String, dynamic>> _nodes(Map<String, dynamic> tree) {

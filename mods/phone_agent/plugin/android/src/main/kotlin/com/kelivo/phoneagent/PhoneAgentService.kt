@@ -6,6 +6,7 @@ import android.app.KeyguardManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.graphics.Point
 import android.hardware.display.DisplayManager
 import android.os.Build
@@ -19,6 +20,7 @@ import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityManager
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.atomic.AtomicBoolean
@@ -93,6 +95,7 @@ class PhoneAgentService : AccessibilityService() {
     private lateinit var executor: NodeActionExecutor
     private lateinit var screenshots: ScreenshotCapture
     private lateinit var treeBudget: ActionBudget
+    private lateinit var overlay: PhoneAgentOverlay
 
     override fun onCreate() {
         super.onCreate()
@@ -102,6 +105,7 @@ class PhoneAgentService : AccessibilityService() {
             windowMillis = 60_000,
             now = { SystemClock.elapsedRealtime() },
         )
+        overlay = PhoneAgentOverlay(service = this, screenSize = ::screenSize)
         executor = NodeActionExecutor(
             service = this,
             registry = registry,
@@ -109,6 +113,12 @@ class PhoneAgentService : AccessibilityService() {
                 ensureUnlocked()
                 ensureActive()
             },
+            visual = { event, isActive, generation ->
+                val guard = visualGuard()
+                overlay.show(event, { guard() && isActive() }, generation)
+            },
+            visualGeneration = { overlay.currentGeneration() },
+            clearVisual = { overlay.clear() },
         )
         screenshots = ScreenshotCapture(
             service = this,
@@ -118,6 +128,8 @@ class PhoneAgentService : AccessibilityService() {
                 ensureUnlocked()
                 ensureActive()
             },
+            gate = overlay,
+            currentWindow = ::currentWindow,
         )
     }
 
@@ -128,7 +140,19 @@ class PhoneAgentService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        // 观测按需读取；事件只用于系统回调，不保留窗口内容。
+        // 观测按需读取，不保留窗口内容；只在其他应用窗口状态变化时清理残留可视化，
+        // 避免旧动作图形画到权限窗口或新前台应用上。自身 overlay 不触发清理。
+        val change = event ?: return
+        if (change.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
+        val foreground = change.packageName?.toString() ?: return
+        if (foreground != packageName && this::overlay.isInitialized) {
+            overlay.clear()
+        }
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (this::overlay.isInitialized) overlay.clear()
     }
 
     override fun onInterrupt() {
@@ -146,6 +170,7 @@ class PhoneAgentService : AccessibilityService() {
         if (connected === this) connected = null
         destroyed = true
         interruptPending()
+        if (this::overlay.isInitialized) overlay.shutdown()
         worker.shutdown()
         screenshotWorker.shutdown()
         super.onDestroy()
@@ -272,6 +297,7 @@ class PhoneAgentService : AccessibilityService() {
                     "Too many tree reads in the last minute. Wait before continuing.",
                 )
             }
+            overlay.observe(visualGuard())
             val observation = NodeTreeReader().read(
                 root = AndroidPhoneNode(root),
                 windowId = current.windowId,
@@ -333,6 +359,7 @@ class PhoneAgentService : AccessibilityService() {
                             ),
                         )
                         reply(PhoneAgentResult.screenshot(shot), null)
+                        overlay.captured(visualGuard())
                     }
                     is ScreenshotOutcome.Failure -> reply(null, outcome.error)
                 }
@@ -418,7 +445,8 @@ class PhoneAgentService : AccessibilityService() {
 
     /**
      * 收集整屏所有可访问窗口 root 的密码 bounds。任一窗口无法读取时让截图失败，
-     * 避免在漏遮挡的情况下发出截图。
+     * 避免在漏遮挡的情况下发出截图。只有能可靠确认属于本服务自己的 accessibility
+     * overlay 窗口才跳过；root 包名未知或其他包名的窗口继续参与遮挡。
      */
     private fun collectPasswordBounds(current: WindowState): List<Bounds> {
         val windowList = try {
@@ -434,7 +462,19 @@ class PhoneAgentService : AccessibilityService() {
             for (window in windowList) {
                 try {
                     val windowRoot = window.root
-                    if (windowRoot != null) roots += AndroidPhoneNode(windowRoot)
+                    if (windowRoot != null) {
+                        val ownOverlay = OverlayVisuals.isOwnOverlayWindow(
+                            isAccessibilityOverlay = window.type ==
+                                AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY,
+                            rootPackageName = windowRoot.packageName?.toString(),
+                            ownPackageName = packageName,
+                        )
+                        if (ownOverlay) {
+                            windowRoot.recycle()
+                        } else {
+                            roots += AndroidPhoneNode(windowRoot)
+                        }
+                    }
                 } finally {
                     window.recycle()
                 }
@@ -501,6 +541,7 @@ class PhoneAgentService : AccessibilityService() {
         val power = getSystemService(PowerManager::class.java)
         if (keyguard?.isKeyguardLocked == true || power?.isInteractive == false) {
             registry.invalidateAll()
+            if (this::overlay.isInitialized) overlay.clear()
             throw PhoneAgentError(
                 "device_locked",
                 "Unlock the phone and keep the screen on, then retry.",
@@ -514,12 +555,22 @@ class PhoneAgentService : AccessibilityService() {
         }
     }
 
+    /**
+     * 可视化事件在主线程绘制前使用的服务代次守卫。捕获事件发生时的 epoch，
+     * 服务中断/断连后旧事件即使已入队也不会重新出现。
+     */
+    private fun visualGuard(): () -> Boolean {
+        val epoch = currentEpoch
+        return { !destroyed && epoch == generation.get() }
+    }
+
     private fun interruptPending() {
         generation.incrementAndGet()
         handler.post {
             requests.toList().forEach { it(null, interrupted()) }
             pendingScreenshot = null
         }
+        if (this::overlay.isInitialized) overlay.release()
         if (!worker.isShutdown) {
             try {
                 worker.execute {

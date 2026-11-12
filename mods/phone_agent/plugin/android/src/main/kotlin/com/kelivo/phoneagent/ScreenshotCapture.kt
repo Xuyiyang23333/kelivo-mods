@@ -107,6 +107,8 @@ internal class ScreenshotCapture(
     private val handler: Handler = Handler(Looper.getMainLooper()),
     private val maxLongEdge: Int = 1600,
     private val beforeCapture: () -> Unit = {},
+    private val gate: OverlayGate = OverlayGate.NONE,
+    private val currentWindow: () -> WindowState? = { null },
 ) {
     @Volatile
     private var pending = false
@@ -176,6 +178,7 @@ internal class ScreenshotCapture(
                 pending = false
                 cancel = null
                 handler.removeCallbacks(timeout)
+                gate.resumeAfterCapture()
                 complete(outcome)
             }
         }
@@ -190,33 +193,88 @@ internal class ScreenshotCapture(
             )
         }
         handler.postDelayed(timeout, 10_000)
-        try {
-            beforeCapture()
-            service.takeScreenshot(
-                Display.DEFAULT_DISPLAY,
-                worker,
-                object : AccessibilityService.TakeScreenshotCallback {
-                    override fun onSuccess(result: AccessibilityService.ScreenshotResult) {
-                        finish(process(result, current, passwordBounds))
-                    }
+        val start = {
+            try {
+                beforeCapture()
+                // 隐藏握手可能等待两帧加 48ms；期间前台可能切到同尺寸的另一个应用，
+                // 旧密码 bounds 不会覆盖新窗口，因此必须重新校验当前窗口。
+                if (OverlayVisuals.windowChanged(current, currentWindow())) {
+                    finish(
+                        ScreenshotOutcome.Failure(
+                            PhoneAgentError(
+                                "stale_observation",
+                                "The screen changed while the visual indicator was hidden. Take a new screenshot.",
+                            ),
+                        ),
+                    )
+                } else {
+                    service.takeScreenshot(
+                        Display.DEFAULT_DISPLAY,
+                        worker,
+                        object : AccessibilityService.TakeScreenshotCallback {
+                            override fun onSuccess(result: AccessibilityService.ScreenshotResult) {
+                                // 截图是异步的；gate 后重校验到回调之间仍可能切换同尺寸应用。
+                                // 回调里再比较一次当前窗口，不一致就不处理、不发送图片。
+                                val latest = try {
+                                    currentWindow()
+                                } catch (error: Exception) {
+                                    finish(
+                                        ScreenshotOutcome.Failure(
+                                            PhoneAgentError(
+                                                "screenshot_blocked",
+                                                error.message
+                                                    ?: "The screenshot request failed. The window may be secure.",
+                                            ),
+                                        ),
+                                    )
+                                    return
+                                }
+                                if (OverlayVisuals.windowChanged(current, latest)) {
+                                    finish(
+                                        ScreenshotOutcome.Failure(
+                                            PhoneAgentError(
+                                                "stale_observation",
+                                                "The screen changed while the screenshot was captured. Take a new screenshot.",
+                                            ),
+                                        ),
+                                    )
+                                } else {
+                                    finish(process(result, current, passwordBounds))
+                                }
+                            }
 
-                    override fun onFailure(errorCode: Int) {
-                        finish(ScreenshotOutcome.Failure(mapError(errorCode)))
-                    }
-                },
-            )
-        } catch (error: PhoneAgentError) {
-            finish(ScreenshotOutcome.Failure(error))
-        } catch (error: Exception) {
-            finish(
-                ScreenshotOutcome.Failure(
-                    PhoneAgentError(
-                        "screenshot_blocked",
-                        error.message ?: "The screenshot request failed. The window may be secure.",
+                            override fun onFailure(errorCode: Int) {
+                                finish(ScreenshotOutcome.Failure(mapError(errorCode)))
+                            }
+                        },
+                    )
+                }
+            } catch (error: PhoneAgentError) {
+                finish(ScreenshotOutcome.Failure(error))
+            } catch (error: Exception) {
+                finish(
+                    ScreenshotOutcome.Failure(
+                        PhoneAgentError(
+                            "screenshot_blocked",
+                            error.message ?: "The screenshot request failed. The window may be secure.",
+                        ),
                     ),
-                ),
-            )
+                )
+            }
         }
+        gate.hideForCapture(
+            proceed = { if (!finished.get()) start() },
+            onFailure = {
+                finish(
+                    ScreenshotOutcome.Failure(
+                        PhoneAgentError(
+                            "screenshot_failed",
+                            "The visual indicator could not be hidden before the screenshot. Retry.",
+                        ),
+                    ),
+                )
+            },
+        )
     }
 
     private fun process(

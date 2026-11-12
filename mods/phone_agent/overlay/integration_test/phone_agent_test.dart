@@ -44,10 +44,12 @@ void main() {
       isTrue,
       reason: 'Phone Agent 集成测试只能在 Android 真机上运行。',
     );
+    // 安装测试包会撤销无障碍授权。先给宿主留出通过系统界面重新启用的时间，
+    // 避免在服务未启用时立即轮询状态（慢速模拟器上可能拖住主线程）。
+    debugPrint('PHONE_AGENT_WAITING_FOR_SERVICE');
+    await Future<void>.delayed(const Duration(seconds: 20));
     status = await PhoneAgentService.instance.status();
     if (!status.ready) {
-      debugPrint('PHONE_AGENT_WAITING_FOR_SERVICE');
-      // 安装测试包会撤销无障碍授权，需要人工在系统界面重新启用服务。
       for (var i = 0; i < 600 && !status.ready; i++) {
         await Future<void>.delayed(const Duration(milliseconds: 500));
         status = await PhoneAgentService.instance.status();
@@ -196,6 +198,12 @@ void main() {
     expect(firstTree['height'], greaterThan(0));
     final tapNode = _nodeForText(firstTree, 'PHONE_AGENT_TAP_TARGET');
     expect(tapNode, isNotNull, reason: '读树结果中没有找到点击目标节点。');
+    // 宿主标记：读树观察脉冲和节点点击圆环是叠加层证据，可用 adb exec-out screencap
+    // 观察叠加层本身；产品截图链路不依赖宿主截图。
+    debugPrint(
+      'PHONE_AGENT_OVERLAY_NODE_TAP: 节点点击后约 600ms 内可在设备上观察叠加层圆环；'
+      'adb 截图只作宿主证据，不是产品能力。',
+    );
     _expectInputOk(
       _payload(
         await handler(PhoneAgentToolNames.input, <String, dynamic>{
