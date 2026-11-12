@@ -44,10 +44,12 @@ void main() {
       isTrue,
       reason: 'Phone Agent 集成测试只能在 Android 真机上运行。',
     );
+    // 安装测试包会撤销无障碍授权。先给宿主留出通过系统界面重新启用的时间，
+    // 避免在服务未启用时立即轮询状态（慢速模拟器上可能拖住主线程）。
+    debugPrint('PHONE_AGENT_WAITING_FOR_SERVICE');
+    await Future<void>.delayed(const Duration(seconds: 20));
     status = await PhoneAgentService.instance.status();
     if (!status.ready) {
-      debugPrint('PHONE_AGENT_WAITING_FOR_SERVICE');
-      // 安装测试包会撤销无障碍授权，需要人工在系统界面重新启用服务。
       for (var i = 0; i < 600 && !status.ready; i++) {
         await Future<void>.delayed(const Duration(milliseconds: 500));
         status = await PhoneAgentService.instance.status();

@@ -50,7 +50,7 @@ internal object OverlayVisuals {
     const val NODE_LONG_PRESS_MILLIS = 900L
     const val SYSTEM_MILLIS = 500L
     const val GESTURE_TAIL_MILLIS = 200L
-    const val MIN_TRAVEL_MILLIS = 150L
+    const val MIN_TRAVEL_MILLIS = 50L
     const val MAX_TRAVEL_MILLIS = 2000L
     const val MAX_VISIBLE_MILLIS = 2500L
     const val HIDE_TIMEOUT_MILLIS = 250L
@@ -109,14 +109,15 @@ internal object OverlayVisuals {
         return value.coerceIn(0f, (size - 1).toFloat())
     }
 
-    /** 手势视觉复用真实 `duration_ms`，只做可见性下限和上限约束。 */
+    /** 手势视觉复用真实 `duration_ms`（输入层已校验 50–2000ms），尾段单独另算。 */
     fun gestureTravelMillis(durationMillis: Long): Long =
         durationMillis.coerceIn(MIN_TRAVEL_MILLIS, MAX_TRAVEL_MILLIS)
 
     /**
-     * 截图前密码窗口遍历的过滤规则：只跳过本服务自己的 accessibility overlay 窗口。
-     * 其他服务或应用的窗口即使也是 accessibility overlay 也继续参与遮挡，
-     * 不能因为无法区分就屏蔽其他窗口。
+     * 截图前密码窗口遍历的过滤规则：只跳过能可靠确认属于本服务自己的
+     * accessibility overlay 窗口（root 存在且 root 包名等于自身包）。
+     * 其他服务或应用的窗口，以及 root 包名不可读的窗口，都继续参与遮挡；
+     * 不能因为无法区分就屏蔽其他窗口，也不把未知身份当作自身窗口。
      */
     fun isOwnOverlayWindow(
         isAccessibilityOverlay: Boolean,
@@ -124,8 +125,67 @@ internal object OverlayVisuals {
         ownPackageName: String?,
     ): Boolean {
         if (!isAccessibilityOverlay) return false
-        if (rootPackageName == null) return true
-        return ownPackageName != null && rootPackageName == ownPackageName
+        if (rootPackageName == null || ownPackageName == null) return false
+        return rootPackageName == ownPackageName
+    }
+}
+
+/**
+ * 入队事件的清理代次。事件在主线程真正绘制前用入队时捕获的代次和调用方的
+ * `isActive` 再校验一次，覆盖 clear/release/旋转/切窗先于 show 的时序。
+ */
+internal class OverlayShowGate {
+    @Volatile
+    private var generation = 0L
+
+    fun bumpGeneration() {
+        generation++
+    }
+
+    fun capture(): Long = generation
+
+    fun shouldShow(capturedGeneration: Long, isActive: Boolean): Boolean =
+        capturedGeneration == generation && isActive
+}
+
+/**
+ * 叠加层窗口的附着状态。移除失败或状态未知时不允许截图静默继续，
+ * 也不允许再添加新窗口，直到一次成功移除把状态恢复为 detached。
+ */
+internal class OverlayAttachmentTracker {    private var attached = false
+    private var unknown = false
+
+    fun onAddSucceeded() {
+        attached = true
+        unknown = false
+    }
+
+    fun onAddFailed() {
+        attached = false
+        unknown = false
+    }
+
+    fun onRemoveSucceeded() {
+        attached = false
+        unknown = false
+    }
+
+    fun onRemoveFailed() {
+        unknown = true
+    }
+
+    fun isAttached(): Boolean = attached
+
+    fun isUnknown(): Boolean = unknown
+
+    /** 未知附着状态不能继续添加窗口，避免叠加层失控。 */
+    fun canAdd(): Boolean = !unknown
+
+    /** 截图前隐藏窗口的预期结果：未附着时无需等待，未知时 fail closed。 */
+    fun hideResult(): OverlayHideResult = when {
+        unknown -> OverlayHideResult.FAILED
+        attached -> OverlayHideResult.HIDDEN
+        else -> OverlayHideResult.NONE
     }
 }
 

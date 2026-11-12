@@ -203,44 +203,42 @@ void main() {
     await _pumpHarness(tester);
     await _ensureAppForeground(service);
 
-    // 截图成功后叠加层会显示约 500ms 的完成脉冲；紧接着注入真实滑动，
-    // 若叠加层可触摸就会吞掉手势，通知栏不会打开。
-    _expectScreenshotOk(await _screenshot(service), '触摸穿透前截图');
-    final swipe = _payload(
-      await _input(service, <String, dynamic>{
-        'action': 'swipe',
-        'x': 0.5,
-        'y': 0.01,
-        'end_x': 0.5,
-        'end_y': 0.6,
-        'duration_ms': 300,
-      }),
+    // 宿主用 adb 注入独立真实触摸（不是 phone_agent_input）；测试只负责在
+    // 叠加层可见期间轮询前台包名。先截图让叠加层出现完成脉冲，后续读树会
+    // 继续显示约 700ms 的观察脉冲。
+    _expectScreenshotOk(await _screenshot(service), '宿主触摸前截图');
+    _hostStep(
+      'PHONE_AGENT_OVERLAY_HOST_TOUCH',
+      '在接下来约 10 秒内，宿主必须用 adb 注入真实触摸（不是 phone_agent_input）：'
+          'adb shell input swipe 540 5 540 1200 300；可重复多次。'
+          '测试会在每次读树时显示约 700ms 的观察叠加层。',
     );
-    _expectOk(swipe, '触摸穿透滑动');
-    expect(
-      (swipe['result'] as Map)['success'],
-      isTrue,
-      reason: '触摸穿透滑动未被原生接受。',
-    );
-    final foreground = await _waitForTreeWhere(service, (tree) {
-      final packageName = tree['package_name'];
-      return packageName is String &&
+    Map<String, dynamic>? foreground;
+    for (var i = 0; i < 8 && foreground == null; i++) {
+      // 读树会显示观察脉冲，宿主的真实触摸应落在叠加层可见期间。
+      final tree = await _tryTree(service);
+      final packageName = tree?['package_name'];
+      if (packageName is String &&
           packageName.isNotEmpty &&
-          packageName != _appPackage;
-    }, timeout: const Duration(seconds: 15));
-    expect(foreground, isNotNull, reason: '叠加层可见时的滑动没有到达系统（通知栏未打开），不能证明触摸穿透。');
+          packageName != _appPackage) {
+        foreground = tree;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+    }
+    expect(foreground, isNotNull, reason: '宿主 adb 真实触摸没有打开通知栏，不能证明叠加层不拦截宿主触摸。');
     debugPrint(
-      'PHONE_AGENT_OVERLAY_TOUCH: package=${foreground!['package_name']}',
+      'PHONE_AGENT_OVERLAY_HOST_TOUCH_RESULT: '
+      'package=${foreground!['package_name']}',
     );
 
     _hostStep(
-      'PHONE_AGENT_OVERLAY_TOUCH_RECOVER',
+      'PHONE_AGENT_OVERLAY_HOST_TOUCH_RECOVER',
       'adb shell input keyevent 4 关闭通知栏，然后执行 '
           'adb shell am start -n $_appPackage/com.psyche.kelivo.MainActivity',
     );
     await _waitForTreeText(
       service,
-      marker: 'PHONE_AGENT_OVERLAY_TOUCH_RETURN',
+      marker: 'PHONE_AGENT_OVERLAY_HOST_TOUCH_RETURN',
       instruction:
           'adb shell am start -n $_appPackage/com.psyche.kelivo.MainActivity',
       text: _tapTarget,
@@ -638,9 +636,12 @@ Future<void> _pumpHarness(WidgetTester tester) async {
 }
 
 Future<void> _waitForService(PhoneAgentService service) async {
+  // 安装测试包会撤销无障碍授权。先给宿主留出通过系统界面重新启用的时间，
+  // 避免在服务未启用时立即轮询状态（慢速模拟器上可能拖住主线程）。
+  debugPrint('PHONE_AGENT_WAITING_FOR_SERVICE');
+  await Future<void>.delayed(const Duration(seconds: 20));
   var status = await service.status();
   if (!status.ready) {
-    debugPrint('PHONE_AGENT_WAITING_FOR_SERVICE');
     for (var i = 0; i < 600 && !status.ready; i++) {
       await Future<void>.delayed(const Duration(milliseconds: 500));
       status = await service.status();

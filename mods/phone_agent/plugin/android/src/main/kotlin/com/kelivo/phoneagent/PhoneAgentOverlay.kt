@@ -34,6 +34,7 @@ internal class PhoneAgentOverlay(
     private val windowManager = service.getSystemService(WindowManager::class.java)
     private val state = OverlayState(now = { SystemClock.uptimeMillis() })
     private val scheduler = MainThreadScheduler(handler)
+    private val attachment = OverlayAttachmentTracker()
     private val gate = OverlayCaptureGate(scheduler, ::hideNow)
 
     private var view: OverlayView? = null
@@ -44,9 +45,17 @@ internal class PhoneAgentOverlay(
     @Volatile
     private var closed = false
 
-    fun observe() = show(OverlayEvent.Observing)
+    /** 清理代次：clear/release/hide 后，之前入队的旧事件全部失效。 */
+    private val showGate = OverlayShowGate()
 
-    fun node(bounds: Bounds, action: NodeAction) = show(OverlayEvent.Node(bounds, action))
+    fun observe(isActive: () -> Boolean = { true }) =
+        show(OverlayEvent.Observing, isActive)
+
+    fun node(
+        bounds: Bounds,
+        action: NodeAction,
+        isActive: () -> Boolean = { true },
+    ) = show(OverlayEvent.Node(bounds, action), isActive)
 
     fun gesture(
         action: GestureAction,
@@ -55,15 +64,22 @@ internal class PhoneAgentOverlay(
         endX: Float,
         endY: Float,
         durationMillis: Long,
-    ) = show(OverlayEvent.Gesture(action, startX, startY, endX, endY, durationMillis))
+        isActive: () -> Boolean = { true },
+    ) = show(
+        OverlayEvent.Gesture(action, startX, startY, endX, endY, durationMillis),
+        isActive,
+    )
 
-    fun system(action: SystemAction) = show(OverlayEvent.System(action))
+    fun system(action: SystemAction, isActive: () -> Boolean = { true }) =
+        show(OverlayEvent.System(action), isActive)
 
-    fun captured() = show(OverlayEvent.Captured)
+    fun captured(isActive: () -> Boolean = { true }) =
+        show(OverlayEvent.Captured, isActive)
 
     /** 只清理当前视觉，不影响进行中的截图隐藏握手。 */
     fun clear() {
         post {
+            bumpGeneration()
             state.clear()
             removeView()
         }
@@ -72,6 +88,7 @@ internal class PhoneAgentOverlay(
     /** 服务中断、断连或旋转后清理；不永久禁用可视化。 */
     fun release() {
         post {
+            bumpGeneration()
             gate.resumeAfterCapture()
             state.resume()
             removeView()
@@ -85,10 +102,6 @@ internal class PhoneAgentOverlay(
     }
 
     override fun hideForCapture(proceed: () -> Unit, onFailure: () -> Unit) {
-        if (closed) {
-            proceed()
-            return
-        }
         post { gate.hideForCapture(proceed, onFailure) }
     }
 
@@ -99,9 +112,15 @@ internal class PhoneAgentOverlay(
         }
     }
 
-    fun show(event: OverlayEvent) {
+    /**
+     * 事件在主线程真正绘制前再次校验：清理代次必须未变（clear/release/hide 先于 show），
+     * 且调用方的 `isActive` 仍为 true（手势未取消、服务代次未变）。
+     */
+    fun show(event: OverlayEvent, isActive: () -> Boolean = { true }) {
+        val requestGeneration = showGate.capture()
         post {
             if (disabled || closed) return@post
+            if (!showGate.shouldShow(requestGeneration, isActive())) return@post
             val (width, height) = screenSize()
             val plan = OverlayVisuals.plan(event, width, height) ?: return@post
             if (!state.begin(plan)) return@post
@@ -110,13 +129,21 @@ internal class PhoneAgentOverlay(
     }
 
     private fun render(plan: OverlayPlan) {
-        removeView()
+        if (!attachment.canAdd()) {
+            // 上一次移除结果未知，不能再叠加新窗口；截图会由 gate fail closed。
+            state.clear()
+            return
+        }
+        if (!removeView()) {
+            state.clear()
+            return
+        }
         val (width, height) = screenSize()
         if (width <= 0 || height <= 0) {
             state.clear()
             return
         }
-        val overlay = OverlayView(service, plan) { finish(plan) }
+        val overlay = OverlayView(service, plan) { finishedView -> finish(plan, finishedView) }
         val layoutParams = WindowManager.LayoutParams(
             width,
             height,
@@ -136,44 +163,52 @@ internal class PhoneAgentOverlay(
         try {
             windowManager.addView(overlay, layoutParams)
             view = overlay
+            attachment.onAddSucceeded()
         } catch (error: Exception) {
             disabled = true
             state.clear()
+            attachment.onAddFailed()
             Log.w(TAG, "overlay_add_failed")
         }
     }
 
-    private fun finish(plan: OverlayPlan) {
-        if (state.plan() !== plan) return
-        state.clear()
+    /**
+     * 动画结束回调按具体 View 清理，不依赖当前 plan：即使 resume 已清空 plan，
+     * 仍会尝试移除该 View；移除失败则进入未知附着状态，后续截图 fail closed。
+     */
+    private fun finish(plan: OverlayPlan, finishedView: OverlayView) {
+        if (state.plan() === plan) state.clear()
         // 动画在 onDraw 内结束，延后一帧再移除窗口，避免在绘制过程中 detach。
-        val current = view
         handler.post {
-            if (view === current) removeView()
+            if (view === finishedView) removeView()
         }
     }
 
     /** 主线程：移除窗口并抑制新视觉，供截图隐藏握手使用。 */
     private fun hideNow(): OverlayHideResult {
         state.suppress()
-        val current = view ?: return OverlayHideResult.NONE
+        bumpGeneration()
+        if (view == null && !attachment.isUnknown()) return OverlayHideResult.NONE
+        return if (removeView()) OverlayHideResult.HIDDEN else OverlayHideResult.FAILED
+    }
+
+    /** 只有成功移除才清空引用；失败或状态未知时保留，后续截图不能静默继续。 */
+    private fun removeView(): Boolean {
+        val current = view
+        if (current == null) return !attachment.isUnknown()
         return try {
             windowManager.removeViewImmediate(current)
             view = null
-            OverlayHideResult.HIDDEN
+            attachment.onRemoveSucceeded()
+            true
         } catch (error: Exception) {
-            OverlayHideResult.FAILED
+            attachment.onRemoveFailed()
+            false
         }
     }
 
-    private fun removeView() {
-        val current = view ?: return
-        view = null
-        try {
-            windowManager.removeViewImmediate(current)
-        } catch (error: Exception) {
-            // 窗口已不可用；服务断连时系统会一起销毁。
-        }
+    private fun bumpGeneration() {
+        showGate.bumpGeneration()
     }
 
     private fun post(block: () -> Unit) {
@@ -224,7 +259,7 @@ internal class PhoneAgentOverlay(
     private class OverlayView(
         context: Context,
         private val plan: OverlayPlan,
-        private val onFinished: () -> Unit,
+        private val onFinished: (OverlayView) -> Unit,
     ) : View(context) {
         private val startedAt = SystemClock.uptimeMillis()
         private val density = resources.displayMetrics.density
@@ -260,7 +295,7 @@ internal class PhoneAgentOverlay(
         private fun finish() {
             if (finished) return
             finished = true
-            onFinished()
+            onFinished(this)
         }
 
         private fun dp(value: Float): Float = value * density

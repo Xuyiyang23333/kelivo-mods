@@ -4,12 +4,14 @@
 
 - 本轮目标：按 M18 只读设计实现首版前台可视化叠加层（V1 原生核心），不新增设置开关、`status` 字段、ARB 文案或插件通道方法；不改 schema、白名单、上游宿主和 `mod.json`。
 - 契约：独立 `PhoneAgentOverlay` 使用 `TYPE_ACCESSIBILITY_OVERLAY` + `FLAG_NOT_TOUCHABLE | FLAG_NOT_FOCUSABLE`，不申请普通悬浮窗权限，不复用上游 `BackgroundRuntime`/`BackgroundOverlay`。只在真实工具观察（读树、截图完成后）和允许包内已接受的动作（`perform`/`dispatchGesture`/`performGlobalAction` 返回 true）时短暂显示；拒绝路径不产生动画；动画不代表业务成功、任务进度、模型思考或用户审批。
-- 隐私：只用无文本图形，不显示输入文字、密码、截图字节或缩略图、节点文本、包名和坐标数值。截图前移除自身窗口并等待两帧，隐藏失败返回 `screenshot_failed` 且不发图；读树不隐藏叠加层。密码窗口遍历只跳过自身 accessibility overlay 窗口，不屏蔽其他服务或应用窗口。
-- 代码：新增 `OverlayVisuals.kt`（纯 JVM 事件、几何、状态机、截图隐藏握手）和 `PhoneAgentOverlay.kt`（窗口、无文本图形、主线程生命周期）；接入 `PhoneAgentService`、`NodeActionExecutor`、`ScreenshotCapture`；新增 `OverlayVisualsTest.kt` 并扩展 `NodeActionExecutorTest.kt`。
+- 隐私：只用无文本图形，不显示输入文字、密码、截图字节或缩略图、节点文本、包名和坐标数值。截图前移除自身窗口并等待两帧加 48ms 合成周期，隐藏失败或附着状态未知返回 `screenshot_failed` 且不发图；读树不隐藏叠加层。密码窗口遍历只跳过能可靠确认属于本服务的 accessibility overlay（root 存在且 root 包名等于自身包）；root 包名未知或其他包名继续参与遮挡。
+- 代码：新增 `OverlayVisuals.kt`（纯 JVM 事件、几何、状态机、截图隐藏握手、`OverlayShowGate`、`OverlayAttachmentTracker`）和 `PhoneAgentOverlay.kt`（窗口、无文本图形、主线程生命周期、按 View 清理）；接入 `PhoneAgentService`、`NodeActionExecutor`、`ScreenshotCapture`；新增 `OverlayVisualsTest.kt` 并扩展 `NodeActionExecutorTest.kt`。
+- 返工（reviewer round 1，6 项 findings）：密码遮挡未知包名不再排除；show 在主线程绘制前校验清理代次和 `isActive`（手势 finished、服务 epoch）；移除失败/未知附着 fail closed 且按具体 View 清理；手势 travel 复用真实 50–2000ms；触摸穿透改为宿主 adb 独立触摸；迟到帧测试保存 resume 前回调并显式执行。
 - 已知限制：上游可触摸后台胶囊无法被 Mod 隐藏，开启胶囊时截图可能含胶囊、坐标手势可能被拦截；`addView` 在部分厂商 ROM 上可能失败，失败时只禁用本会话可视化；截图隐藏握手增加约两帧加 48ms 合成等待和极少量 `screenshot_failed` 风险。
-- API35 结果（2026-11-12）：官方 `phone_agent_test.dart` `+2`、EXIT=0；完整异常套件 `+7 -1`、EXIT=1，唯一失败是「服务禁用中断与重新启用恢复」的宿主操作时序（30 秒内没有等到宿主打开无障碍设置页），该用例单独重跑 `+1`、EXIT=0，`PHONE_AGENT_SERVICE_PENDING_BATCH: size=1000 elapsed=1191ms codes=interrupted,ok`。新增「叠加层不污染产品截图」和「叠加层可见时真实触摸不被拦截」均通过；仅等两帧时截图仍会抓到旧帧，因此握手增加 48ms 合成等待。
-- MIUI 结果（2026-11-12，`1960cd68`）：官方 `phone_agent_test.dart` `+2`、EXIT=0；「叠加层不污染产品截图」`+1`、EXIT=0；「叠加层可见时真实触摸不被拦截」`+1`、EXIT=0（`PHONE_AGENT_OVERLAY_TOUCH: package=com.android.systemui`）。logcat 出现 `PhoneAgentOverlay` 窗口创建/释放且无 `overlay_add_failed`，说明 MIUI 上 `addView` 成功；服务停用后 `dumpsys window windows` 中叠加层窗口数为 0。原始无障碍值 `null`/`0` 已恢复，`svc power stayon` 已还原为 false。
-- 未验证：叠加层在 MIUI 上的 keyguard 遮挡行为未单独验证；上游可触摸胶囊开启时的干扰只记录、不宣称兼容；API29 不在线未运行。
+- API35 结果（返工后，2026-11-12）：官方 `phone_agent_test.dart` `+2`、EXIT=0（返工树）。完整异常套件多次整轮运行的真实退出码均为 1，未得到绿色整轮：一次 `+6 -2`（锁屏/服务禁用失败，期间模拟器 system_server 重启），一次 `+7 -1`（权限窗口后的宿主恢复时序），最后一次有界整轮在 `setUpAll` 失败。`dumpsys activity lastanr` 为 `Input dispatching timed out (Application does not have a focused window)`，ANR 发生在任何工具调用之前、应用进程存活、无障碍连接为 DEAD，属宿主/模拟器窗口焦点与输入分发问题，不是 overlay 主线程死锁；ANR 弹窗阻塞宿主通过系统 UI 启用服务。返工树未生成产品 APK。
+- MIUI 结果（返工树，2026-11-12，`1960cd68`）：官方 `phone_agent_test.dart` `+2`、EXIT=0；「叠加层不污染产品截图」`+1`、EXIT=0；「叠加层可见时真实触摸不被拦截」`+1`、EXIT=0（`PHONE_AGENT_OVERLAY_HOST_TOUCH_RESULT: package=com.android.systemui`，宿主 `adb shell input swipe` 独立注入）。服务停用后 `dumpsys window windows` 中叠加层窗口数为 0；已恢复 `enabled_accessibility_services=null`、`accessibility_enabled=0`、`stay_on_while_plugged_in=0`。
+- 交付树：设备运行树 `V:/coding/kelivo-private/.tower/worktrees/wt-23/.build/worktrees/099843dfe7f6d0b6`（`modsetHash` `099843dfe7f6d0b6adc74da94bbff2d26c005529cef9fd1b8a985efa55bf65fe`）；最终源码树 `V:/coding/kelivo-private/.tower/worktrees/wt-23/.build/worktrees/e6de1e9d3056bcce`（`modsetHash` `e6de1e9d3056bccee1b073852278a67ea2c224288a2095cc23c6b0da4323cb5d`），两树仅异常测试文件换行格式不同，代码/测试语义一致；`verify`、format、Kotlin 93 项和静态分析通过。返工树未生成产品 APK。
+- 未验证：API35 绿色整轮与返工树产品 APK/hash、API29、签名 release、MIUI keyguard 遮挡、上游胶囊开启兼容。
 
 ### M22 历史状态（2026-11-12）
 

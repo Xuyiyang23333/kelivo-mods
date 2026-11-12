@@ -119,7 +119,7 @@ internal class NodeActionExecutor(
     private val budget: ActionBudget = ActionBudget(now = { SystemClock.elapsedRealtime() }),
     private val handler: Handler = Handler(Looper.getMainLooper()),
     private val beforeAction: () -> Unit = {},
-    private val visual: (OverlayEvent) -> Unit = {},
+    private val visual: (OverlayEvent, () -> Boolean) -> Unit = { _, _ -> },
     private val clearVisual: () -> Unit = {},
 ) {
     @Volatile
@@ -238,7 +238,7 @@ internal class NodeActionExecutor(
             throw PhoneAgentError("invalid_argument", "long_press requires at least 500 ms.")
         }
         registry.clearScreenshot()
-        dispatchGesture(request.action, path, duration, complete) {
+        dispatchGesture(request.action, path, duration, complete) { isActive ->
             showVisual(
                 OverlayEvent.Gesture(
                     action = request.action,
@@ -248,6 +248,7 @@ internal class NodeActionExecutor(
                     endY = endY ?: startY,
                     durationMillis = duration,
                 ),
+                isActive,
             )
         }
     }
@@ -285,7 +286,7 @@ internal class NodeActionExecutor(
         path: Path,
         duration: Long,
         complete: (InputOutcome) -> Unit,
-        visual: () -> Unit,
+        visual: (() -> Boolean) -> Unit,
     ) {
         val finished = AtomicBoolean(false)
         var visualShown = false
@@ -345,7 +346,7 @@ internal class NodeActionExecutor(
             )
             if (accepted) {
                 visualShown = true
-                runCatching { visual() }
+                runCatching { visual { !finished.get() } }
             } else {
                 finish(
                     InputOutcome.Failure(
@@ -370,8 +371,8 @@ internal class NodeActionExecutor(
         }
     }
 
-    private fun showVisual(event: OverlayEvent) {
-        runCatching { visual(event) }
+    private fun showVisual(event: OverlayEvent, isActive: () -> Boolean = { true }) {
+        runCatching { visual(event, isActive) }
     }
 
     private fun clearVisualSafely() {

@@ -113,7 +113,10 @@ class PhoneAgentService : AccessibilityService() {
                 ensureUnlocked()
                 ensureActive()
             },
-            visual = { event -> overlay.show(event) },
+            visual = { event, isActive ->
+                val guard = visualGuard()
+                overlay.show(event) { guard() && isActive() }
+            },
             clearVisual = { overlay.clear() },
         )
         screenshots = ScreenshotCapture(
@@ -292,7 +295,7 @@ class PhoneAgentService : AccessibilityService() {
                     "Too many tree reads in the last minute. Wait before continuing.",
                 )
             }
-            overlay.observe()
+            overlay.observe(visualGuard())
             val observation = NodeTreeReader().read(
                 root = AndroidPhoneNode(root),
                 windowId = current.windowId,
@@ -354,7 +357,7 @@ class PhoneAgentService : AccessibilityService() {
                             ),
                         )
                         reply(PhoneAgentResult.screenshot(shot), null)
-                        overlay.captured()
+                        overlay.captured(visualGuard())
                     }
                     is ScreenshotOutcome.Failure -> reply(null, outcome.error)
                 }
@@ -440,8 +443,8 @@ class PhoneAgentService : AccessibilityService() {
 
     /**
      * 收集整屏所有可访问窗口 root 的密码 bounds。任一窗口无法读取时让截图失败，
-     * 避免在漏遮挡的情况下发出截图。只跳过本服务自己的 accessibility overlay 窗口，
-     * 其他服务或应用的窗口继续参与遮挡。
+     * 避免在漏遮挡的情况下发出截图。只有能可靠确认属于本服务自己的 accessibility
+     * overlay 窗口才跳过；root 包名未知或其他包名的窗口继续参与遮挡。
      */
     private fun collectPasswordBounds(current: WindowState): List<Bounds> {
         val windowList = try {
@@ -548,6 +551,15 @@ class PhoneAgentService : AccessibilityService() {
         if (destroyed || currentEpoch != generation.get()) {
             throw interrupted()
         }
+    }
+
+    /**
+     * 可视化事件在主线程绘制前使用的服务代次守卫。捕获事件发生时的 epoch，
+     * 服务中断/断连后旧事件即使已入队也不会重新出现。
+     */
+    private fun visualGuard(): () -> Boolean {
+        val epoch = currentEpoch
+        return { !destroyed && epoch == generation.get() }
     }
 
     private fun interruptPending() {

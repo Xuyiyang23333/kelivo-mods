@@ -121,23 +121,25 @@ class OverlayVisualsTest {
     }
 
     @Test
-    fun `gesture travel keeps short and long durations visible but bounded`() {
-        assertEquals(
-            OverlayVisuals.MIN_TRAVEL_MILLIS,
-            OverlayVisuals.gestureTravelMillis(50),
-        )
-        assertEquals(
-            OverlayVisuals.MAX_TRAVEL_MILLIS,
-            OverlayVisuals.gestureTravelMillis(2000),
-        )
+    fun `gesture travel reuses the real duration and only bounds it defensively`() {
+        assertEquals(50L, OverlayVisuals.gestureTravelMillis(50))
+        assertEquals(80L, OverlayVisuals.gestureTravelMillis(80))
+        assertEquals(2000L, OverlayVisuals.gestureTravelMillis(2000))
         val plan = OverlayVisuals.plan(
-            OverlayEvent.Gesture(GestureAction.TAP, 1f, 1f, 1f, 1f, 2000),
+            OverlayEvent.Gesture(GestureAction.TAP, 1f, 1f, 1f, 1f, 80),
+            100,
+            100,
+        )
+        assertEquals(80L, plan?.travelMillis)
+        assertEquals(80L + OverlayVisuals.GESTURE_TAIL_MILLIS, plan?.durationMillis)
+        val longPlan = OverlayVisuals.plan(
+            OverlayEvent.Gesture(GestureAction.SWIPE, 1f, 1f, 1f, 1f, 2000),
             100,
             100,
         )
         assertEquals(
             OverlayVisuals.MAX_TRAVEL_MILLIS + OverlayVisuals.GESTURE_TAIL_MILLIS,
-            plan?.durationMillis,
+            longPlan?.durationMillis,
         )
     }
 
@@ -239,11 +241,56 @@ class OverlayVisualsTest {
         var failed = 0
 
         gate.hideForCapture({ proceeded++ }, { failed++ })
+        val lateFirstFrame = scheduler.frames.removeFirst()
         gate.resumeAfterCapture()
-        scheduler.frames.toList().forEach { it() }
+        lateFirstFrame()
         assertEquals(0, proceeded)
         assertEquals(0, failed)
+        assertTrue(scheduler.frames.isEmpty())
+    }
+
+    @Test
+    fun `late settle callback after resume cannot proceed or affect the next request`() {
+        val scheduler = FakeScheduler()
+        val gate = OverlayCaptureGate(scheduler, { OverlayHideResult.HIDDEN })
+        var firstProceeded = 0
+        var secondProceeded = 0
+
+        gate.hideForCapture({ firstProceeded++ }, {})
+        scheduler.runFrame()
+        scheduler.runFrame()
+        val lateSettle = scheduler.delayed.last().second
         gate.resumeAfterCapture()
+        lateSettle()
+        assertEquals(0, firstProceeded)
+
+        gate.hideForCapture({ secondProceeded++ }, {})
+        scheduler.runFrame()
+        scheduler.runFrame()
+        scheduler.runSettle()
+        assertEquals(1, secondProceeded)
+        assertEquals(0, firstProceeded)
+    }
+
+    @Test
+    fun `late timeout callback after resume cannot fail the next request`() {
+        val scheduler = FakeScheduler()
+        val gate = OverlayCaptureGate(scheduler, { OverlayHideResult.HIDDEN })
+        var failed = 0
+        var proceeded = 0
+
+        gate.hideForCapture({}, { failed++ })
+        val lateTimeout = scheduler.delayed.first().second
+        gate.resumeAfterCapture()
+        lateTimeout()
+        assertEquals(0, failed)
+
+        gate.hideForCapture({ proceeded++ }, { failed++ })
+        scheduler.runFrame()
+        scheduler.runFrame()
+        scheduler.runSettle()
+        assertEquals(1, proceeded)
+        assertEquals(0, failed)
     }
 
     @Test
@@ -263,11 +310,87 @@ class OverlayVisualsTest {
     }
 
     @Test
-    fun `own overlay filter only skips this service window`() {
-        assertTrue(OverlayVisuals.isOwnOverlayWindow(true, "com.psyche.kelivo.phoneagent", "com.psyche.kelivo.phoneagent"))
-        assertTrue(OverlayVisuals.isOwnOverlayWindow(true, null, "com.psyche.kelivo.phoneagent"))
-        assertFalse(OverlayVisuals.isOwnOverlayWindow(true, "com.other.app", "com.psyche.kelivo.phoneagent"))
-        assertFalse(OverlayVisuals.isOwnOverlayWindow(false, "com.psyche.kelivo.phoneagent", "com.psyche.kelivo.phoneagent"))
+    fun `own overlay filter only skips reliably identified service windows`() {
+        assertTrue(
+            OverlayVisuals.isOwnOverlayWindow(
+                true,
+                "com.psyche.kelivo.phoneagent",
+                "com.psyche.kelivo.phoneagent",
+            ),
+        )
+        // root 包名未知时不能当作自身窗口，必须继续参与密码遮挡。
+        assertFalse(OverlayVisuals.isOwnOverlayWindow(true, null, "com.psyche.kelivo.phoneagent"))
+        assertFalse(
+            OverlayVisuals.isOwnOverlayWindow(
+                true,
+                "com.other.app",
+                "com.psyche.kelivo.phoneagent",
+            ),
+        )
+        assertFalse(
+            OverlayVisuals.isOwnOverlayWindow(
+                false,
+                "com.psyche.kelivo.phoneagent",
+                "com.psyche.kelivo.phoneagent",
+            ),
+        )
         assertFalse(OverlayVisuals.isOwnOverlayWindow(false, null, "com.psyche.kelivo.phoneagent"))
+        assertFalse(OverlayVisuals.isOwnOverlayWindow(true, "com.other.app", null))
+    }
+
+    @Test
+    fun `show gate invalidates events queued before a clear or release`() {
+        val gate = OverlayShowGate()
+        val token = gate.capture()
+        assertTrue(gate.shouldShow(token, true))
+
+        // clear/release/旋转/切窗都会 bump 代次，旧事件不能再绘制。
+        gate.bumpGeneration()
+        assertFalse(gate.shouldShow(token, true))
+
+        // 新事件使用新代次，可以正常显示。
+        val next = gate.capture()
+        assertTrue(gate.shouldShow(next, true))
+    }
+
+    @Test
+    fun `show gate drops a cancelled gesture even when the generation matches`() {
+        val gate = OverlayShowGate()
+        val token = gate.capture()
+        assertFalse(gate.shouldShow(token, false))
+        assertTrue(gate.shouldShow(token, true))
+    }
+
+    @Test
+    fun `attachment tracker fails closed after a failed removal`() {
+        val tracker = OverlayAttachmentTracker()
+        assertEquals(OverlayHideResult.NONE, tracker.hideResult())
+
+        tracker.onAddSucceeded()
+        assertTrue(tracker.isAttached())
+        assertEquals(OverlayHideResult.HIDDEN, tracker.hideResult())
+
+        tracker.onRemoveFailed()
+        assertTrue(tracker.isUnknown())
+        assertEquals(OverlayHideResult.FAILED, tracker.hideResult())
+        assertFalse(tracker.canAdd())
+
+        // 未知状态不能通过 resume 或再次截图变成 NONE。
+        assertEquals(OverlayHideResult.FAILED, tracker.hideResult())
+
+        tracker.onRemoveSucceeded()
+        assertFalse(tracker.isUnknown())
+        assertEquals(OverlayHideResult.NONE, tracker.hideResult())
+        assertTrue(tracker.canAdd())
+    }
+
+    @Test
+    fun `attachment tracker treats add failure as detached`() {
+        val tracker = OverlayAttachmentTracker()
+        tracker.onAddFailed()
+        assertFalse(tracker.isAttached())
+        assertFalse(tracker.isUnknown())
+        assertEquals(OverlayHideResult.NONE, tracker.hideResult())
+        assertTrue(tracker.canAdd())
     }
 }

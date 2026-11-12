@@ -90,7 +90,10 @@
 - 前台可视化使用独立 `PhoneAgentOverlay`：`TYPE_ACCESSIBILITY_OVERLAY` + `FLAG_NOT_TOUCHABLE | FLAG_NOT_FOCUSABLE`，不申请也不需要 `SYSTEM_ALERT_WINDOW`/`Settings.canDrawOverlays`，不复用或修改上游 `BackgroundOverlay`/`BackgroundRuntime`，服务断连即随连接销毁。首版默认随工具调用显示，不新增设置开关、`status` 字段或 ARB 文案。
 - 可视化只在真实工具观察（读树、截图完成后）和允许包内已接受的动作上短暂显示：节点动作要求前置校验通过且 `perform` 返回 true，坐标手势要求 `dispatchGesture` 返回 true，系统动作要求 `performGlobalAction` 返回 true；`perform=false`/`dispatch=false`、被拒绝或前置校验失败的动作不产生任何动画。动画只表示系统接受或完成动作，不代表业务成功、任务进度、模型思考或用户审批，也不是安全护栏。
 - 叠加层只用无文本图形，不显示输入文字、密码、截图字节或缩略图、节点文本、包名和坐标数值，不写敏感日志。截图前必须移除自身窗口并至少等待两帧（API35 实测还需约 48ms 合成周期）再调用 `takeScreenshot`；隐藏失败或 250ms 有界等待超时返回 `screenshot_failed` 且不发图片或图片 metadata，不得跳过隐藏让截图成功。读树不需要隐藏叠加层（`FLAG_NOT_FOCUSABLE` 保证它不会成为活动窗口）。
-- 截图前的密码窗口遍历只排除自身 `TYPE_ACCESSIBILITY_OVERLAY` 窗口（root 包名为自身包，或 root 为 null），不得屏蔽其他服务或应用的窗口。上游可触摸后台胶囊仍是已知兼容限制：Mod 无法隐藏它，开启胶囊时截图可能包含胶囊、坐标手势可能被拦截，只能记录和提示，不宣称兼容。
+- 截图前的密码窗口遍历只排除能可靠确认属于本服务自己的 accessibility overlay 窗口（root 存在且 root 包名等于自身包）；root 包名未知或其他包名的窗口继续参与遮挡，不能把未知身份当作自身窗口，也不得屏蔽其他服务或应用的窗口。
+- 叠加层事件在主线程真正绘制前再次校验清理代次和调用方的 `isActive`（手势 finished、服务代次）；clear/release/旋转/切窗先于 show 时旧事件不得重新出现。窗口移除失败或附着状态未知时不得再添加新窗口，截图必须 fail closed；动画结束回调按具体 View 清理，不能因 plan 已被清空而永久遗留窗口。
+- 手势视觉复用真实 `duration_ms`（输入层已校验 50–2000ms）；尾段可以额外存在，但不得把真实时长改成更慢的视觉 travel 时长。
+- 上游可触摸后台胶囊仍是已知兼容限制：Mod 无法隐藏其他 owner 的窗口，开启胶囊时截图可能包含胶囊、坐标手势可能被拦截，只能记录和提示，不宣称兼容。
 - 叠加层在旋转、锁屏、`onInterrupt`/`onUnbind`/`onDestroy`、服务中断和前台窗口切换到其他包时清理；截图隐藏握手有界（约 250ms）且可被服务中断解除，迟到的帧回调不得触发第二次截图或恢复旧动画。几何、状态机和握手用纯 JVM 测试覆盖，不引入 Robolectric 或新依赖。
 - 真实 `FLAG_SECURE`、权限弹窗和异常路径使用插件 `android/src/debug` 的 `SecureWindowFixtureActivity` 测试夹具：只新增 debug 源码和 manifest，不修改上游 `MainActivity`、`KelivoApplication`、`PhoneControlService`，不新增上游补丁或 `touches`，release 不编译、不合并。夹具只请求上游已声明的权限用于拉起系统窗口，不授予、不录音、不使用其他敏感能力。
 - 异常集成测试的夹具启动、secure 切换、权限弹窗、锁屏和服务开关由宿主/CU 在打印标记后操作；测试只轮询并断言结果。禁止用 `settings put secure enabled_accessibility_services` 写授权；服务开关只走系统界面。
