@@ -262,10 +262,7 @@ class PhoneAgentService : AccessibilityService() {
         val offset = PhoneAgentArgs.int(args, "offset", 0, 0, 1_000_000)
         val maxNodes = PhoneAgentArgs.int(args, "max_nodes", 120, 1, 200)
         val interactiveOnly = PhoneAgentArgs.bool(args, "interactive_only", false)
-        val root = rootInActiveWindow ?: throw PhoneAgentError(
-            "no_window",
-            "No accessible window is available. Ask the user to open the test app, then retry.",
-        )
+        val root = rootInActiveWindow ?: throw noAccessibleWindowError()
         val current = windowState(root)
         if (offset == 0) {
             if (!treeBudget.tryConsume()) {
@@ -309,10 +306,7 @@ class PhoneAgentService : AccessibilityService() {
             )
             return
         }
-        val root = rootInActiveWindow ?: throw PhoneAgentError(
-            "no_window",
-            "No accessible window is available. Ask the user to open the test app, then retry.",
-        )
+        val root = rootInActiveWindow ?: throw noAccessibleWindowError()
         val current = try {
             windowState(root)
         } finally {
@@ -392,10 +386,7 @@ class PhoneAgentService : AccessibilityService() {
                 "Unknown input action: $action. Use tap, long_press, set_text, scroll, swipe, back, home or recents.",
             )
         }
-        val current = currentWindow() ?: throw PhoneAgentError(
-            "no_window",
-            "No accessible window is available. Ask the user to open the test app, then retry.",
-        )
+        val current = currentWindow() ?: throw noAccessibleWindowError()
         executor.execute(request, current) { outcome ->
             when (outcome) {
                 is InputOutcome.Success -> reply(
@@ -415,6 +406,15 @@ class PhoneAgentService : AccessibilityService() {
             root.recycle()
         }
     }
+
+    /**
+     * 无可访问窗口时的统一错误。API35 权限弹窗实测活动/聚焦窗口没有可访问 root，
+     * 无法取得包名，因此这里只做条件式人工提示，不声称识别具体权限弹窗。
+     */
+    private fun noAccessibleWindowError(): PhoneAgentError = PhoneAgentError(
+        "no_window",
+        "No accessible window is available. If a system permission dialog is visible, ask the user to handle or cancel it, then return to the test app and retry.",
+    )
 
     /**
      * 收集整屏所有可访问窗口 root 的密码 bounds。任一窗口无法读取时让截图失败，

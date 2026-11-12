@@ -11,9 +11,11 @@
 - 助手级工具 ID：`phone_agent`
 - Mod 版本：`0.2.0`
 
-> 本轮 M19（权限窗口真实验证，API35 模拟器）：只改中文文档与 debug 异常测试，不改产品代码、schema、白名单或上游。真实 `com.google.android.permissioncontroller` 弹窗已出现；上一轮 90 秒未出现的原因是设备息屏时 `am start` 不获前台焦点，唤醒后立即出现。弹窗期间服务 `rootInActiveWindow` 为 null，读树实测返回 `no_window`，输入按 `currentWindow` 前置 guard 推导为 `no_window`（本套件未执行 tap/back），`system_window_denied` 未产生，输入仍被拒绝、权限未授予；该场景按契约记为未验证，最小修复另开 M20。完整异常套件 `+5 ~1`、`All tests passed!`、EXIT=0。记录见 `docs/phone-agent-plan.md` 9.3.3。
+> 本轮 M22（权限弹窗保守收尾，API35 模拟器）：按用户同意，不可识别权限弹窗仍返回 `no_window`，错误消息只做条件式人工提示（“如果看到系统权限弹窗，请人工处理/取消，再返回测试应用”），不声称识别具体权限弹窗；可取得系统包名的窗口仍返回 `system_window_denied`，错误优先级、读树/截图密码遮挡、输入边界和白名单不变。M20（窗口 root 补全）与 M21（事件来源包名）均已在 API35 设备上证伪并 abandoned，未合并生产代码。异常测试改为宿主 `dumpsys` 独立确认真实 `GrantPermissionsActivity` 后直接 tap/back/截图断言 `no_window` + 提示，不再因 `root=null` skip，也不把任意 `no_window` 当通过。记录见 `docs/phone-agent-plan.md` 9.3.4/9.3.5/9.3.6。
 >
-> 本轮物理 MIUI API31 验收（`llama-cpp/llama-cpp` 与 magpie `mistral/deepseek-v4-1-flash-1017`）：真实截图/读树/节点输入/滚动、物理 `FLAG_SECURE`（成功黑图，清除后恢复）、旋转失效均通过；`llama-cpp/llama-cpp` 用归一化坐标 tap 打开抽屉/Settings/Search，1017 用归一化坐标 swipe 让 Sponsor 从不可见变为可见，并完成图片请求与像素专属视觉确认；官方测试一次 `+1 -1`、EXIT=1（聚焦后 `set_text` `stale_handle`），一次 `+2`、EXIT=0，属间歇性、根因未确认；`llama-cpp/llama-cpp` 的完整坐标 swipe 仍未验证。当前交付的合成树、`modsetHash`、APK 大小/SHA-256 和 manifest 检查记录在 `docs/phone-agent-plan.md` 9.3.2/9.4.2 与 `docs/next-session-handoff.md`。本 README 不参与 Mod treeHash（`tool/src/config.dart` 只散列 `mod.json`、声明的 patches 和 copy 源，根 README 不在 copy 列表），参与的是 `plugin/README.md`（`copy[7]/README.md`）；因此本文件不写当前数字只为避免与 docs 重复，而改动 plugin README 会改变交付哈希。
+> 上一轮 M19（权限窗口真实验证，API35 模拟器）：真实 `com.google.android.permissioncontroller` 弹窗已出现；上一轮 90 秒未出现的原因是设备息屏时 `am start` 不获前台焦点，唤醒后立即出现。弹窗期间服务 `rootInActiveWindow` 为 null，读树实测返回 `no_window`，输入按 `currentWindow` 前置 guard 推导为 `no_window`（M19 未执行 tap/back），`system_window_denied` 未产生，输入仍被拒绝、权限未授予；历史记录见 `docs/phone-agent-plan.md` 9.3.3。
+>
+> 本轮物理 MIUI API31 验收（`llama-cpp/llama-cpp` 与 magpie `mistral/deepseek-v4-1-flash-1017`）：真实截图/读树/节点输入/滚动、物理 `FLAG_SECURE`（成功黑图，清除后恢复）、旋转失效均通过；`llama-cpp/llama-cpp` 用归一化坐标 tap 打开抽屉/Settings/Search，1017 用归一化坐标 swipe 让 Sponsor 从不可见变为可见，并完成图片请求与像素专属视觉确认；官方测试一次 `+1 -1`、EXIT=1（聚焦后 `set_text` `stale_handle`），一次 `+2`、EXIT=0，属间歇性、根因未确认；`llama-cpp/llama-cpp` 的完整坐标 swipe 仍未验证。M22 当前交付的合成树、`modsetHash`、APK 大小/SHA-256 和 manifest 检查记录在 `docs/phone-agent-plan.md` 9.3.6 与 `docs/next-session-handoff.md`；本段物理 MIUI 验收历史见 9.3.2/9.4.2。本 README 不参与 Mod treeHash（`tool/src/config.dart` 只散列 `mod.json`、声明的 patches 和 copy 源，根 README 不在 copy 列表），参与的是 `plugin/README.md`（`copy[7]/README.md`）；因此本文件不写当前数字只为避免与 docs 重复，而改动 plugin README 会改变交付哈希。
 >
 > 上一轮 M10（API35 FLAG_SECURE/异常路径）：完整异常套件 `+5 ~1`、EXIT=0；权限窗口未验证。整屏 `takeScreenshot` 不保证对 `FLAG_SECURE` 报错，可能返回成功黑图或内容图；不保证检测、不承诺不发送黑图。记录见 `docs/phone-agent-plan.md` 9.3.1。
 >
@@ -230,6 +232,8 @@ dart tool/mod_loader.dart clean --modset <完整哈希或 16 位前缀>
 
 输入错误码优先级固定为：空包名 `no_window` → 系统包 `system_window_denied` → 非白名单包 `package_not_allowed` → 白名单内句柄/截图校验（`stale_handle` / `stale_observation`）。因此系统窗口或非白名单应用在前台时，即使句柄已失效，也先返回包名策略错误。`home`/`recents` 执行后前台会离开白名单，后续输入（包括 `back`）会被拒绝，模型无法自行回到测试应用，需要用户或宿主把应用切回前台。
 
+权限弹窗在 API35 实测没有可访问 root：活动/聚焦弹窗窗口 `hasRoot=false`、`pkg=null`，`AccessibilityWindowInfo` 没有包名字段，服务也收不到 `permissioncontroller` 的 `TYPE_WINDOW_STATE_CHANGED`（M20/M21 已证伪窗口 root 与事件来源包名两种识别机制）。因此该场景读树、截图和输入保持 `no_window`，错误消息只做条件式人工提示（“如果看到系统权限弹窗，请人工处理/取消，再返回测试应用”），不声称识别具体权限弹窗；可取得系统包名的窗口仍返回 `system_window_denied`。该保守收尾不改变错误优先级、读树/截图密码遮挡或输入边界。
+
 插件把原生结构化错误映射为 `PhoneAgentException(code, message)`。`phone_control_disabled` 已不再使用，统一改为 `phone_agent_disabled`。首版文档明确使用的错误码包括 `phone_agent_disabled`、`screenshot_required`、`stale_observation`、`stale_handle`、`rate_limited`、`screenshot_blocked`、`image_input_unsupported`、`unsupported_platform`、`timeout`、`plugin_unavailable`、`package_not_allowed`、`system_window_denied`、`device_locked` 和 `budget_exceeded`。其余错误码以适配层和插件返回为准。错误信息应给出可执行的下一步，例如重新截图、重新读树、在 Mods 页重新选择工具或请用户检查无障碍服务。
 
 ## 测试包白名单
@@ -237,7 +241,7 @@ dart tool/mod_loader.dart clean --modset <完整哈希或 16 位前缀>
 首版只在显式配置的测试包名中开放输入，默认白名单只有私有测试应用的 `com.psyche.kelivo.phoneagent`。该应用与上游正式包 `com.psyche.kelivo` 并存，启动名称为 `Kelivo Agent`，不会覆盖设备上已安装的 Kelivo。白名单位于私有 Mod 的插件 Kotlin 实现中，开发者只能在本仓库修改，不通过设置页或运行时参数开放。
 
 - 非白名单包名下的输入请求返回 `package_not_allowed`，不执行手势或文本输入。
-- 系统窗口和权限弹窗下的输入请求返回 `system_window_denied`；锁屏/息屏时读树、截图和输入都返回 `device_locked`。
+- 可取得系统包名的系统窗口和权限弹窗下的输入请求返回 `system_window_denied`；无可访问 root 的权限弹窗读树、截图和输入保持 `no_window`，消息只做条件式人工提示；锁屏/息屏时读树、截图和输入都返回 `device_locked`。
 - 白名单和系统窗口拒绝只约束输入；读树和截图仍可观察当前前台窗口，这是 VLM 需要的行为，不能写成“系统窗口不可读、不可截图”。
 - 白名单只限制输入目标，不代表应用内部操作安全；它不能识别“发送、购买、删除”等业务语义。
 
@@ -305,10 +309,10 @@ flutter gen-l10n
 - 整屏 `takeScreenshot` 不保证对 `FLAG_SECURE` 报错；secure 内容可能以黑色区域出现在成功截图中。不根据像素猜 secure，不承诺不发送黑图，正常黑色页面保留。
 - 平台明确报错时不得把图片或 metadata 交给模型；成功黑图只作为普通截图，模型应优先读树、不凭黑图猜坐标。
 - `FLAG_SECURE` 不阻止读树和输入；API35 夹具树可读，但不是绝对保证；密码字段、自定义 View、窗口变化仍会影响树；非白名单输入仍被拒绝。
-- `system_window_denied` / `package_not_allowed` 只约束输入；读树和截图仍可观察系统窗口、权限弹窗和其他应用。
+- `system_window_denied` / `package_not_allowed` 只约束输入；读树和截图仍可观察系统窗口、权限弹窗和其他应用。无可访问 root 的权限弹窗读树/截图/输入均为 `no_window` 并带条件式人工提示；`system_window_denied` 仍用于可取得系统包名的窗口。
 - `home`/`recents` 后前台离开白名单，后续输入（包括 `back`）被拒绝，模型无法自行恢复，需要用户或宿主切回测试应用。
 - `SecureWindowFixtureActivity` 只是 debug 测试夹具，不是产品能力；release 不包含该 Activity。
-- API35 模拟器已验证旋转、home/recents、锁屏、服务禁用/重启；物理 MIUI API31 真机已验证旋转和物理 `FLAG_SECURE`，但锁屏、home/recents、服务禁用/重启未在物理设备运行，不能从模拟器结果推断；原生超时仍无法在设备上确定性触发。
+- API35 模拟器已验证旋转、home/recents、锁屏、服务禁用/重启和权限弹窗保守拒绝（读树/截图/输入均 `no_window` + 条件式人工提示，未执行手势/系统导航）；物理 MIUI API31 真机已验证旋转和物理 `FLAG_SECURE`，但锁屏、home/recents、服务禁用/重启和权限弹窗未在物理设备运行，不能从模拟器结果推断；原生超时仍无法在设备上确定性触发。
 - VLM 图片链路、Kelivo 应用内固定任务和跨新用户轮次历史图片回放已在 API 35 模拟器用 magpie `llama-cpp/llama-cpp` 验证；物理 MIUI API31 真机由 `llama-cpp/llama-cpp` 验证归一化坐标 tap（打开抽屉/Settings/Search），由 magpie `mistral/deepseek-v4-1-flash-1017` 验证真实图片请求、归一化坐标 swipe 的 UI 效果和像素专属视觉确认；`llama-cpp/llama-cpp` 的物理完整坐标 swipe 未验证；只验证这些模型与设备，不承诺任意模型或设备。
 - 物理设备官方测试在 M16 出现一次间歇性 `set_text` `stale_handle`（`The target node changed`，refresh/可见/可用前置分支），另一次全通过；M17 用同一官方测试连续 4 轮均为 `+2`、EXIT=0，未复现，也未触发 `refresh_failed`/`not_visible`/`not_enabled`。根因未确认、未修复，不写成稳定通过或根因修复。
 - magpie 的模型能力标注可能变化，图片与工具能力需每次实测；Kelivo 手动勾选图片只是测试配置，不构成模型能力保证。
@@ -419,7 +423,7 @@ flutter test integration_test/phone_agent_exception_test.dart -d <android-device
 
 ### 本轮物理 MIUI API31 验收（magpie `mistral/deepseek-v4-1-flash-1017`）
 
-本轮在用户提供的物理设备上完成 Phone Agent 的物理验收。当前交付的合成树、`modsetHash`、APK 大小/SHA-256 和 manifest 隔离记录在 `docs/phone-agent-plan.md` 9.3.2/9.4.2 与 `docs/next-session-handoff.md`。本 README 不参与 Mod treeHash（`tool/src/config.dart` 只散列 `mod.json`、声明的 patches 和 copy 源，根 README 不在 copy 列表）；参与的是 `plugin/README.md`（`copy[7]/README.md`），改动它会改变交付哈希。
+本轮在用户提供的物理设备上完成 Phone Agent 的物理验收。M22 当前交付的合成树、`modsetHash`、APK 大小/SHA-256 和 manifest 隔离记录在 `docs/phone-agent-plan.md` 9.3.6 与 `docs/next-session-handoff.md`；本段物理 MIUI 验收历史见 9.3.2/9.4.2。本 README 不参与 Mod treeHash（`tool/src/config.dart` 只散列 `mod.json`、声明的 patches 和 copy 源，根 README 不在 copy 列表）；参与的是 `plugin/README.md`（`copy[7]/README.md`），改动它会改变交付哈希。
 
 - 设备：Redmi K30 5G（`1960cd68`，picasso），Android 12 / API 31，1080x2400，density 440，MIUI V13.0.3.0.SGICNXM。用户提供该测试设备并授权安装应用、操作界面。
 - 授权边界：用户明确授权仅在该测试设备上用 `settings put secure` 预配置 Phone Agent 服务；M16 历史轮原始 `enabled_accessibility_services` 为空串、`accessibility_enabled=0`，M17 轮原始值为 Phone Agent 组件 + `accessibility_enabled=1`。每轮必须记录并恢复当轮真实原值，不能按历史空串+0 强制关闭。该例外只适用于本设备与 Phone Agent，不改变产品自动授权边界，其他设备默认仍禁止自动写系统授权。

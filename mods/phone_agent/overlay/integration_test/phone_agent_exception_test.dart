@@ -18,8 +18,10 @@ import 'package:Kelivo/utils/mcp_structured_image.dart';
 // - Android API 30+ 设备已解锁并保持唤醒，系统无障碍设置中已启用 Kelivo Phone Agent；
 // - Mods 页已为测试助手选择 Phone Agent；
 // - 测试会打印 PHONE_AGENT_* 标记，宿主/CU 在标记后执行对应 adb 或系统 UI 操作；
-// - 权限窗口场景要求设备唤醒：息屏时权限弹窗不会获得前台焦点；
-// - 禁止用 settings put secure 写无障碍授权。
+// - 权限窗口场景要求设备唤醒：息屏时权限弹窗不会获得前台焦点；宿主必须先用
+//   dumpsys 独立确认真实 GrantPermissionsActivity，再让测试断言 no_window 与
+//   条件式人工提示；宿主确认是测试前提，不是产品检测能力；
+// - 禁止用 settings put secure 写无障碍授权，禁止 grant/revoke/clear 权限或数据。
 //
 // flutter test integration_test/phone_agent_exception_test.dart -d <android-device-id>
 const String _appPackage = 'com.psyche.kelivo.phoneagent';
@@ -299,75 +301,102 @@ void main() {
     final tapNode = _nodeForText(before, _tapTarget);
     expect(tapNode, isNotNull, reason: '权限测试前读树没有找到点击目标。');
 
+    // 宿主确认是本场景的测试前提：测试自身无法读取 dumpsys，也不能把任意
+    // no_window 当作真实权限弹窗。宿主必须先确认真实 GrantPermissionsActivity，
+    // 再让测试断言拒绝结果。
     _hostStep(
       'PHONE_AGENT_PERMISSION_WINDOW',
-      '确保设备已唤醒并解锁，然后执行：'
-          'adb shell am start -n $_fixtureActivity --ez requestPermission true',
+      '确保设备已唤醒并解锁，执行：'
+          'adb shell am start -n $_fixtureActivity --ez requestPermission true；'
+          '然后用 adb shell dumpsys window 确认 mCurrentFocus 为 '
+          'com.google.android.permissioncontroller/...GrantPermissionsActivity。'
+          '只有确认真实弹窗后才继续；权限必须保持未授予。',
     );
-    var permissionTree = await _waitForTreeWhere(
+    var permissionState = await _waitForNoWindowState(
       service,
-      (tree) => _systemPackages.contains(tree['package_name']),
       timeout: const Duration(seconds: 45),
     );
-    if (permissionTree == null) {
+    if (permissionState == null) {
       // API35 实测：设备息屏时 am start 不会让权限弹窗获得前台焦点
-      // （mCurrentFocus=null），唤醒后弹窗立即出现。这里给宿主一次唤醒重试，
-      // 仍然没有可访问的系统窗口才记录为未验证。
+      // （mCurrentFocus=null），唤醒后弹窗立即出现。这里给宿主一次唤醒重试；
+      // 仍然没有进入无窗口状态就失败，不因 root=null 跳过。
       _hostStep(
         'PHONE_AGENT_PERMISSION_WINDOW_RETRY',
         'adb shell input keyevent KEYCODE_WAKEUP && '
             'adb shell wm dismiss-keyguard && '
             'adb shell am start -n $_fixtureActivity --ez requestPermission true',
       );
-      permissionTree = await _waitForTreeWhere(
+      permissionState = await _waitForNoWindowState(
         service,
-        (tree) => _systemPackages.contains(tree['package_name']),
         timeout: const Duration(seconds: 60),
       );
     }
-    if (permissionTree == null) {
-      // 诊断：记录弹窗期间读树实际返回的包名或错误码。只打印固定字段，
-      // 不打印节点文本；不据此断言系统弹窗不存在。
-      final probe = await _tryTreePayload(service);
-      debugPrint(
-        'PHONE_AGENT_PERMISSION_TREE: package=${probe?['package_name']} '
-        'type=${probe?['type']} error=${probe?['error']}',
-      );
-      _hostStep(
-        'PHONE_AGENT_PERMISSION_WINDOW_UNVERIFIED',
-        '服务未检测到可访问的权限窗口（读树返回 no_window）；'
-            '本场景记录为未验证，不写成通过。',
-      );
-      _hostStep('PHONE_AGENT_DISMISS_PERMISSION', 'adb shell input keyevent 4');
-      await _returnToApp(service);
-      markTestSkipped(
-        '服务未检测到可访问的权限窗口（读树返回 no_window），'
-        '权限窗口场景未验证。',
-      );
-      return;
-    }
-    final permissionPackage = permissionTree['package_name'] as String?;
     expect(
-      <String>{
-        'com.android.permissioncontroller',
-        'com.google.android.permissioncontroller',
-      },
-      contains(permissionPackage),
-      reason: '权限窗口前台包名不在预期集合：$permissionPackage',
+      permissionState,
+      isNotNull,
+      reason:
+          '未观察到权限弹窗期间的无窗口状态。宿主需先用 dumpsys 确认真实 '
+          'GrantPermissionsActivity，并确认 POST_NOTIFICATIONS 未授予；'
+          '不能把任意 no_window 当作本场景通过，也不因 root=null 跳过。',
     );
+    debugPrint(
+      'PHONE_AGENT_PERMISSION_TREE: package=${permissionState?['package_name']} '
+      'type=${permissionState?['type']} error=${permissionState?['error']}',
+    );
+    _expectManualPermissionHint(permissionState!, step: '权限窗口读树');
 
     final denied = await _input(service, <String, dynamic>{
       'action': 'tap',
       'node_id': tapNode!['node_id'],
     });
-    _expectToolError(denied, 'system_window_denied', step: '权限窗口节点输入');
+    _expectToolError(
+      denied,
+      'no_window',
+      messageContains: 'system permission dialog',
+      step: '权限窗口节点输入',
+    );
+    _expectManualPermissionHint(_payload(denied), step: '权限窗口节点输入');
+
+    final deniedScreenshot = await _screenshot(service);
+    _expectToolError(
+      deniedScreenshot,
+      'no_window',
+      messageContains: 'system permission dialog',
+      step: '权限窗口截图',
+    );
+    _expectManualPermissionHint(_payload(deniedScreenshot), step: '权限窗口截图');
+
     final backDenied = await _input(service, <String, dynamic>{
       'action': 'back',
     });
-    _expectToolError(backDenied, 'system_window_denied', step: '权限窗口 back');
+    _expectToolError(
+      backDenied,
+      'no_window',
+      messageContains: 'system permission dialog',
+      step: '权限窗口 back',
+    );
+    _expectManualPermissionHint(_payload(backDenied), step: '权限窗口 back');
 
-    _hostStep('PHONE_AGENT_DISMISS_PERMISSION', 'adb shell input keyevent 4');
+    // back 若被系统执行会关闭弹窗并让窗口重新可访问；这里再读一次树，
+    // 仍为 no_window 才说明系统导航没有执行。
+    final afterBack = await _tryTreePayload(service);
+    expect(
+      afterBack?['error'],
+      'no_window',
+      reason: 'back 后窗口重新可访问，说明系统导航被执行；权限窗口场景失败。',
+    );
+    _expectManualPermissionHint(afterBack!, step: '权限窗口 back 后读树');
+
+    _hostStep(
+      'PHONE_AGENT_DISMISS_PERMISSION',
+      'adb shell input keyevent 4；随后执行 '
+          'adb shell dumpsys package $_appPackage 并确认 POST_NOTIFICATIONS '
+          '仍为 granted=false（不得 grant/revoke/clear）。',
+    );
     await _returnToApp(service);
+    final restored = await _tree(service);
+    expect(restored['package_name'], _appPackage);
+    expect(_nodeForText(restored, _tapTarget), isNotNull);
   });
 
   testWidgets('锁屏 device_locked 与解锁恢复', (tester) async {
@@ -737,6 +766,26 @@ void _expectToolError(
   expect(result.content.contains('data:image'), isFalse);
 }
 
+/// 断言无可访问窗口时的条件式人工提示：只建议检查/处理权限弹窗，
+/// 不声称识别具体权限弹窗。
+void _expectManualPermissionHint(
+  Map<String, dynamic> payload, {
+  required String step,
+}) {
+  final message = (payload['message'] as String? ?? '').toLowerCase();
+  expect(
+    message,
+    contains('system permission dialog'),
+    reason: '$step 提示缺少条件式权限弹窗说明。',
+  );
+  expect(message, contains('handle or cancel'), reason: '$step 提示缺少人工处理/取消指引。');
+  expect(
+    message,
+    contains('return to the test app'),
+    reason: '$step 提示缺少返回测试应用指引。',
+  );
+}
+
 Future<Map<String, dynamic>> _waitForTreeText(
   PhoneAgentService service, {
   required String marker,
@@ -770,6 +819,21 @@ Future<Map<String, dynamic>?> _waitForTreeWhere(
   while (DateTime.now().isBefore(deadline)) {
     final tree = await _tryTree(service);
     if (tree != null && predicate(tree)) return tree;
+    await Future<void>.delayed(_pollInterval);
+  }
+  return null;
+}
+
+/// 轮询读树直到返回 no_window（权限弹窗期间没有可访问 root），超时返回 null。
+/// 调用方必须由宿主独立确认弹窗真实存在，不能把任意 no_window 当作通过。
+Future<Map<String, dynamic>?> _waitForNoWindowState(
+  PhoneAgentService service, {
+  required Duration timeout,
+}) async {
+  final deadline = DateTime.now().add(timeout);
+  while (DateTime.now().isBefore(deadline)) {
+    final payload = await _tryTreePayload(service);
+    if (payload?['error'] == 'no_window') return payload;
     await Future<void>.delayed(_pollInterval);
   }
   return null;
