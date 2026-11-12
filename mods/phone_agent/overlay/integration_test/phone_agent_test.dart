@@ -196,6 +196,12 @@ void main() {
     expect(firstTree['height'], greaterThan(0));
     final tapNode = _nodeForText(firstTree, 'PHONE_AGENT_TAP_TARGET');
     expect(tapNode, isNotNull, reason: '读树结果中没有找到点击目标节点。');
+    // 宿主标记：读树观察脉冲和节点点击圆环是叠加层证据，可用 adb exec-out screencap
+    // 观察叠加层本身；产品截图链路不依赖宿主截图。
+    debugPrint(
+      'PHONE_AGENT_OVERLAY_NODE_TAP: 节点点击后约 600ms 内可在设备上观察叠加层圆环；'
+      'adb 截图只作宿主证据，不是产品能力。',
+    );
     _expectInputOk(
       _payload(
         await handler(PhoneAgentToolNames.input, <String, dynamic>{

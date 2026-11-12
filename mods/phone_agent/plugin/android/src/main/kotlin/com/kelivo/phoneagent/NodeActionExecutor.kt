@@ -119,6 +119,8 @@ internal class NodeActionExecutor(
     private val budget: ActionBudget = ActionBudget(now = { SystemClock.elapsedRealtime() }),
     private val handler: Handler = Handler(Looper.getMainLooper()),
     private val beforeAction: () -> Unit = {},
+    private val visual: (OverlayEvent) -> Unit = {},
+    private val clearVisual: () -> Unit = {},
 ) {
     @Volatile
     private var pendingGesture: ((InputOutcome) -> Unit)? = null
@@ -165,7 +167,13 @@ internal class NodeActionExecutor(
     ) {
         policy.requireInputAllowed(current.packageName)
         val handle = registry.handle(request.nodeId, current)
-        val accepted = performNodeAction(handle, request.action, request.text, beforeAction)
+        val accepted = performNodeAction(
+            handle = handle,
+            action = request.action,
+            text = request.text,
+            beforeAction = beforeAction,
+            visual = { bounds, action -> showVisual(OverlayEvent.Node(bounds, action)) },
+        )
         registry.clearScreenshot()
         if (!accepted) {
             throw PhoneAgentError(
@@ -197,8 +205,10 @@ internal class NodeActionExecutor(
         val startX = CoordinateMapper.toPixel(request.x, observation.screenWidth, "x")
         val startY = CoordinateMapper.toPixel(request.y, observation.screenHeight, "y")
         val path = Path().apply { moveTo(startX, startY) }
+        var endX: Float? = null
+        var endY: Float? = null
         if (request.action == GestureAction.SWIPE) {
-            val endX = CoordinateMapper.toPixel(
+            endX = CoordinateMapper.toPixel(
                 request.endX ?: throw PhoneAgentError(
                     "invalid_argument",
                     "end_x is required for swipe.",
@@ -206,7 +216,7 @@ internal class NodeActionExecutor(
                 observation.screenWidth,
                 "end_x",
             )
-            val endY = CoordinateMapper.toPixel(
+            endY = CoordinateMapper.toPixel(
                 request.endY ?: throw PhoneAgentError(
                     "invalid_argument",
                     "end_y is required for swipe.",
@@ -228,7 +238,18 @@ internal class NodeActionExecutor(
             throw PhoneAgentError("invalid_argument", "long_press requires at least 500 ms.")
         }
         registry.clearScreenshot()
-        dispatchGesture(request.action, path, duration, complete)
+        dispatchGesture(request.action, path, duration, complete) {
+            showVisual(
+                OverlayEvent.Gesture(
+                    action = request.action,
+                    startX = startX,
+                    startY = startY,
+                    endX = endX ?: startX,
+                    endY = endY ?: startY,
+                    durationMillis = duration,
+                ),
+            )
+        }
     }
 
     private fun executeSystem(
@@ -250,6 +271,7 @@ internal class NodeActionExecutor(
                 "Android rejected the system action. Read the tree or take a screenshot before retrying.",
             )
         }
+        showVisual(OverlayEvent.System(request.action))
         complete(
             InputOutcome.Success(
                 request.action.wireName,
@@ -263,8 +285,10 @@ internal class NodeActionExecutor(
         path: Path,
         duration: Long,
         complete: (InputOutcome) -> Unit,
+        visual: () -> Unit,
     ) {
         val finished = AtomicBoolean(false)
+        var visualShown = false
         lateinit var finish: (InputOutcome) -> Unit
         val timeout = Runnable {
             finish(
@@ -280,6 +304,7 @@ internal class NodeActionExecutor(
             if (finished.compareAndSet(false, true)) {
                 handler.removeCallbacks(timeout)
                 pendingGesture = null
+                if (outcome is InputOutcome.Failure && visualShown) clearVisualSafely()
                 complete(outcome)
             }
         }
@@ -318,7 +343,10 @@ internal class NodeActionExecutor(
                 },
                 handler,
             )
-            if (!accepted) {
+            if (accepted) {
+                visualShown = true
+                runCatching { visual() }
+            } else {
                 finish(
                     InputOutcome.Failure(
                         PhoneAgentError(
@@ -342,6 +370,14 @@ internal class NodeActionExecutor(
         }
     }
 
+    private fun showVisual(event: OverlayEvent) {
+        runCatching { visual(event) }
+    }
+
+    private fun clearVisualSafely() {
+        runCatching { clearVisual() }
+    }
+
     private fun NodeAction.wireName(): String = when (this) {
         NodeAction.CLICK -> "tap"
         NodeAction.LONG_CLICK -> "long_press"
@@ -358,13 +394,15 @@ internal class NodeActionExecutor(
 
 /**
  * 节点动作的纯 JVM 前置校验与执行。调用方必须在 `registry.handle()` 刷新后调用，
- * 动作可用性按当前节点重新校验；校验失败时不会执行 `beforeAction` 或 `perform`。
+ * 动作可用性按当前节点重新校验；校验失败时不会执行 `beforeAction`、`perform` 或可视化。
+ * `visual` 只在系统接受动作后收到刷新后的 bounds；它抛异常不改变返回值。
  */
 internal fun performNodeAction(
     handle: SavedHandle,
     action: NodeAction,
     text: String?,
     beforeAction: () -> Unit = {},
+    visual: (Bounds, NodeAction) -> Unit = { _, _ -> },
 ): Boolean {
     if (handle.record.password) {
         throw PhoneAgentError(
@@ -391,6 +429,11 @@ internal fun performNodeAction(
     if (action == NodeAction.SET_TEXT && text == null) {
         throw PhoneAgentError("invalid_argument", "text is required for set_text.")
     }
+    val bounds = handle.node.bounds
     beforeAction()
-    return handle.node.perform(action, text)
+    val accepted = handle.node.perform(action, text)
+    if (accepted) {
+        runCatching { visual(bounds, action) }
+    }
+    return accepted
 }

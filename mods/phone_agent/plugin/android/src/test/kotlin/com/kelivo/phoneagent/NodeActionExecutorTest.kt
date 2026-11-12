@@ -35,7 +35,12 @@ class NodeActionExecutorTest {
         var beforeCalled = false
 
         val error = assertThrows(PhoneAgentError::class.java) {
-            performNodeAction(saved, NodeAction.CLICK, null) { beforeCalled = true }
+            performNodeAction(
+                handle = saved,
+                action = NodeAction.CLICK,
+                text = null,
+                beforeAction = { beforeCalled = true },
+            )
         }
 
         assertEquals("action_unavailable", error.code)
@@ -48,7 +53,12 @@ class NodeActionExecutorTest {
         val (saved, child) = handle(setOf(NodeAction.CLICK))
         var beforeCalled = false
 
-        val accepted = performNodeAction(saved, NodeAction.CLICK, null) { beforeCalled = true }
+        val accepted = performNodeAction(
+            handle = saved,
+            action = NodeAction.CLICK,
+            text = null,
+            beforeAction = { beforeCalled = true },
+        )
 
         assertTrue(accepted)
         assertTrue(beforeCalled)
@@ -61,11 +71,83 @@ class NodeActionExecutorTest {
         var beforeCalled = false
 
         val error = assertThrows(PhoneAgentError::class.java) {
-            performNodeAction(saved, NodeAction.SET_TEXT, "x") { beforeCalled = true }
+            performNodeAction(
+                handle = saved,
+                action = NodeAction.SET_TEXT,
+                text = "x",
+                beforeAction = { beforeCalled = true },
+            )
         }
 
         assertEquals("action_unavailable", error.code)
         assertFalse(beforeCalled)
         assertTrue(child.performed.isEmpty())
+    }
+
+    @Test
+    fun `rejected action produces no visual`() {
+        val (saved, child) = handle(setOf(NodeAction.CLICK))
+        child.actions = emptySet()
+        val visuals = mutableListOf<Pair<Bounds, NodeAction>>()
+
+        assertThrows(PhoneAgentError::class.java) {
+            performNodeAction(
+                handle = saved,
+                action = NodeAction.CLICK,
+                text = null,
+                visual = { bounds, action -> visuals += bounds to action },
+            )
+        }
+
+        assertTrue(visuals.isEmpty())
+    }
+
+    @Test
+    fun `visual receives the refreshed bounds after the action is accepted`() {
+        val (saved, child) = handle(setOf(NodeAction.CLICK))
+        child.bounds = Bounds(10, 20, 110, 220)
+        val visuals = mutableListOf<Pair<Bounds, NodeAction>>()
+
+        val accepted = performNodeAction(
+            handle = saved,
+            action = NodeAction.CLICK,
+            text = null,
+            visual = { bounds, action -> visuals += bounds to action },
+        )
+
+        assertTrue(accepted)
+        assertEquals(listOf(Bounds(10, 20, 110, 220) to NodeAction.CLICK), visuals)
+    }
+
+    @Test
+    fun `perform rejection produces no visual`() {
+        val (saved, child) = handle(setOf(NodeAction.CLICK))
+        child.performResult = false
+        val visuals = mutableListOf<Pair<Bounds, NodeAction>>()
+
+        val accepted = performNodeAction(
+            handle = saved,
+            action = NodeAction.CLICK,
+            text = null,
+            visual = { bounds, action -> visuals += bounds to action },
+        )
+
+        assertFalse(accepted)
+        assertTrue(visuals.isEmpty())
+        assertEquals(listOf(NodeAction.CLICK), child.performed)
+    }
+
+    @Test
+    fun `visual failure does not change the accepted result`() {
+        val (saved, _) = handle(setOf(NodeAction.CLICK))
+
+        val accepted = performNodeAction(
+            handle = saved,
+            action = NodeAction.CLICK,
+            text = null,
+            visual = { _, _ -> throw IllegalStateException("overlay failed") },
+        )
+
+        assertTrue(accepted)
     }
 }

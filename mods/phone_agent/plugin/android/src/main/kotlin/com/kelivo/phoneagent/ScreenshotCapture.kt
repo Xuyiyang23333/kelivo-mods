@@ -107,6 +107,7 @@ internal class ScreenshotCapture(
     private val handler: Handler = Handler(Looper.getMainLooper()),
     private val maxLongEdge: Int = 1600,
     private val beforeCapture: () -> Unit = {},
+    private val gate: OverlayGate = OverlayGate.NONE,
 ) {
     @Volatile
     private var pending = false
@@ -176,6 +177,7 @@ internal class ScreenshotCapture(
                 pending = false
                 cancel = null
                 handler.removeCallbacks(timeout)
+                gate.resumeAfterCapture()
                 complete(outcome)
             }
         }
@@ -190,33 +192,48 @@ internal class ScreenshotCapture(
             )
         }
         handler.postDelayed(timeout, 10_000)
-        try {
-            beforeCapture()
-            service.takeScreenshot(
-                Display.DEFAULT_DISPLAY,
-                worker,
-                object : AccessibilityService.TakeScreenshotCallback {
-                    override fun onSuccess(result: AccessibilityService.ScreenshotResult) {
-                        finish(process(result, current, passwordBounds))
-                    }
+        val start = {
+            try {
+                beforeCapture()
+                service.takeScreenshot(
+                    Display.DEFAULT_DISPLAY,
+                    worker,
+                    object : AccessibilityService.TakeScreenshotCallback {
+                        override fun onSuccess(result: AccessibilityService.ScreenshotResult) {
+                            finish(process(result, current, passwordBounds))
+                        }
 
-                    override fun onFailure(errorCode: Int) {
-                        finish(ScreenshotOutcome.Failure(mapError(errorCode)))
-                    }
-                },
-            )
-        } catch (error: PhoneAgentError) {
-            finish(ScreenshotOutcome.Failure(error))
-        } catch (error: Exception) {
-            finish(
-                ScreenshotOutcome.Failure(
-                    PhoneAgentError(
-                        "screenshot_blocked",
-                        error.message ?: "The screenshot request failed. The window may be secure.",
+                        override fun onFailure(errorCode: Int) {
+                            finish(ScreenshotOutcome.Failure(mapError(errorCode)))
+                        }
+                    },
+                )
+            } catch (error: PhoneAgentError) {
+                finish(ScreenshotOutcome.Failure(error))
+            } catch (error: Exception) {
+                finish(
+                    ScreenshotOutcome.Failure(
+                        PhoneAgentError(
+                            "screenshot_blocked",
+                            error.message ?: "The screenshot request failed. The window may be secure.",
+                        ),
                     ),
-                ),
-            )
+                )
+            }
         }
+        gate.hideForCapture(
+            proceed = { if (!finished.get()) start() },
+            onFailure = {
+                finish(
+                    ScreenshotOutcome.Failure(
+                        PhoneAgentError(
+                            "screenshot_failed",
+                            "The visual indicator could not be hidden before the screenshot. Retry.",
+                        ),
+                    ),
+                )
+            },
+        )
     }
 
     private fun process(

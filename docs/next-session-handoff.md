@@ -1,6 +1,17 @@
-# 下一次会话交接：Phone Agent 权限弹窗保守收尾与可视化下一阶段
+# 下一次会话交接：Phone Agent 前台可视化叠加层
 
-## 0. M22 当前状态（2026-11-12）
+## 0. M23 当前状态（2026-11-12）
+
+- 本轮目标：按 M18 只读设计实现首版前台可视化叠加层（V1 原生核心），不新增设置开关、`status` 字段、ARB 文案或插件通道方法；不改 schema、白名单、上游宿主和 `mod.json`。
+- 契约：独立 `PhoneAgentOverlay` 使用 `TYPE_ACCESSIBILITY_OVERLAY` + `FLAG_NOT_TOUCHABLE | FLAG_NOT_FOCUSABLE`，不申请普通悬浮窗权限，不复用上游 `BackgroundRuntime`/`BackgroundOverlay`。只在真实工具观察（读树、截图完成后）和允许包内已接受的动作（`perform`/`dispatchGesture`/`performGlobalAction` 返回 true）时短暂显示；拒绝路径不产生动画；动画不代表业务成功、任务进度、模型思考或用户审批。
+- 隐私：只用无文本图形，不显示输入文字、密码、截图字节或缩略图、节点文本、包名和坐标数值。截图前移除自身窗口并等待两帧，隐藏失败返回 `screenshot_failed` 且不发图；读树不隐藏叠加层。密码窗口遍历只跳过自身 accessibility overlay 窗口，不屏蔽其他服务或应用窗口。
+- 代码：新增 `OverlayVisuals.kt`（纯 JVM 事件、几何、状态机、截图隐藏握手）和 `PhoneAgentOverlay.kt`（窗口、无文本图形、主线程生命周期）；接入 `PhoneAgentService`、`NodeActionExecutor`、`ScreenshotCapture`；新增 `OverlayVisualsTest.kt` 并扩展 `NodeActionExecutorTest.kt`。
+- 已知限制：上游可触摸后台胶囊无法被 Mod 隐藏，开启胶囊时截图可能含胶囊、坐标手势可能被拦截；`addView` 在部分厂商 ROM 上可能失败，失败时只禁用本会话可视化；截图隐藏握手增加约两帧加 48ms 合成等待和极少量 `screenshot_failed` 风险。
+- API35 结果（2026-11-12）：官方 `phone_agent_test.dart` `+2`、EXIT=0；完整异常套件 `+7 -1`、EXIT=1，唯一失败是「服务禁用中断与重新启用恢复」的宿主操作时序（30 秒内没有等到宿主打开无障碍设置页），该用例单独重跑 `+1`、EXIT=0，`PHONE_AGENT_SERVICE_PENDING_BATCH: size=1000 elapsed=1191ms codes=interrupted,ok`。新增「叠加层不污染产品截图」和「叠加层可见时真实触摸不被拦截」均通过；仅等两帧时截图仍会抓到旧帧，因此握手增加 48ms 合成等待。
+- MIUI 结果（2026-11-12，`1960cd68`）：官方 `phone_agent_test.dart` `+2`、EXIT=0；「叠加层不污染产品截图」`+1`、EXIT=0；「叠加层可见时真实触摸不被拦截」`+1`、EXIT=0（`PHONE_AGENT_OVERLAY_TOUCH: package=com.android.systemui`）。logcat 出现 `PhoneAgentOverlay` 窗口创建/释放且无 `overlay_add_failed`，说明 MIUI 上 `addView` 成功；服务停用后 `dumpsys window windows` 中叠加层窗口数为 0。原始无障碍值 `null`/`0` 已恢复，`svc power stayon` 已还原为 false。
+- 未验证：叠加层在 MIUI 上的 keyguard 遮挡行为未单独验证；上游可触摸胶囊开启时的干扰只记录、不宣称兼容；API29 不在线未运行。
+
+### M22 历史状态（2026-11-12）
 
 - 本轮目标：按用户同意做权限弹窗保守收尾，不追查新识别机制。只改中文文档、`PhoneAgentService` 无可访问窗口的英文提示和 debug 异常测试；不改 schema、白名单、上游、读树/截图密码遮挡或输入边界。
 - 契约：不可识别权限弹窗仍返回 `no_window`，读树/截图/输入共用条件式人工提示（“如果看到系统权限弹窗，请人工处理/取消，再返回测试应用”），不声称识别具体权限弹窗；可取得系统包名的窗口仍返回 `system_window_denied`；错误优先级和输入边界不变。宿主 `dumpsys` 确认是测试前提，不是产品检测能力。
@@ -55,9 +66,16 @@
 
 ## 2. 当前目标与阶段
 
-第一阶段 Mod Loader 已完成。第二阶段 Phone Agent 的主要功能已完成。M22 按用户同意完成权限弹窗保守收尾：不可识别权限弹窗仍返回 `no_window`，错误消息只做条件式人工提示；M20（窗口 root）与 M21（事件来源包名）均已在 API35 设备上证伪并 abandoned，未合并生产代码；可取得系统包名的窗口仍返回 `system_window_denied`。下一阶段是已批准的可视化叠加层，本 mission 不实现 overlay。
+第一阶段 Mod Loader 已完成。第二阶段 Phone Agent 的主要功能已完成。M22 按用户同意完成权限弹窗保守收尾：不可识别权限弹窗仍返回 `no_window`，错误消息只做条件式人工提示；M20（窗口 root）与 M21（事件来源包名）均已在 API35 设备上证伪并 abandoned，未合并生产代码；可取得系统包名的窗口仍返回 `system_window_denied`。M23 按 M18 设计实现首版前台可视化叠加层（独立 `TYPE_ACCESSIBILITY_OVERLAY`，无设置开关）。
 
-本轮（M22）已完成：
+本轮（M23）已完成：
+
+1. 先更新中文契约（`AGENTS.md`、`docs/phone-agent-plan.md`、本文件、两个 README），写入 2.6 节和 9.3.7 测试矩阵。
+2. 新增 `OverlayVisuals.kt`（纯 JVM：事件、几何、状态机、截图隐藏握手）和 `PhoneAgentOverlay.kt`（窗口、无文本图形、主线程生命周期）。
+3. 接入 `PhoneAgentService`（读树/截图观察、密码窗口过滤、生命周期清理）、`NodeActionExecutor`（只在系统接受动作后显示）、`ScreenshotCapture`（截图前隐藏并等两帧，失败关闭）。
+4. 新增 `OverlayVisualsTest.kt` 并扩展 `NodeActionExecutorTest.kt`；官方和异常集成测试增加叠加层宿主标记与截图纯净性断言。
+
+本轮（M22，历史）已完成：
 
 1. 先更新中文契约（`AGENTS.md`、`docs/phone-agent-plan.md`、本文件、两个 README），整合 M20/M21 的准确设备证据。
 2. `PhoneAgentService` 三处无可访问窗口改用同一 helper，错误码保持 `no_window`，消息改为条件式人工提示；未添加事件跟踪、包名识别、截屏绕过或运行时回退。
@@ -66,12 +84,13 @@
 
 当前剩余：
 
-1. 可视化叠加层：已批准，下一阶段实现；本 mission 不新增 overlay。
+1. 可视化叠加层的设备验收结果与产品 APK 记录见计划 9.3.7 和本文件第 3 节；未验证项不得写成通过。
 2. 物理设备未运行锁屏、home/recents、服务中断和权限弹窗；不能从 API35 模拟器结果推断。
 3. 原生截图/手势/通道/worker 排队超时未设备验证。
 4. 带合法签名配置的 release 构建。
 5. `stale_handle` 根因仍未确认；M17 4 轮未复现，新诊断标识未在设备触发，不能据此宣称修复。
 6. `llama-cpp/llama-cpp` 的物理完整坐标 swipe 未完成（网关故障）。
+7. 上游可触摸后台胶囊无法被 Mod 隐藏；开启胶囊时截图可能含胶囊、坐标手势可能被拦截，不宣称兼容。
 
 首版输入仍只开放给测试包名 `com.psyche.kelivo.phoneagent`。不要扩大白名单、引入自动无障碍授权，或把发送/购买/删除确认描述成原生硬护栏。
 
@@ -79,9 +98,9 @@
 
 - 上游基线：`73afa4ec77cfc9af2efea2487fee8bba1362639d`。
 - 当前 Mod 版本：`0.2.0`。
-- 当前 M22 最终合成树：`V:/coding/kelivo-private/.tower/worktrees/wt-22/.build/worktrees/b9989da92f35bac8`；设备测试在 `V:/coding/kelivo-private/.tower/worktrees/wt-22/.build/worktrees/d94f4165af9277d5` 运行，两树仅 `plugin/README.md` 文档副本不同，代码/测试一致，未为 R1 纯文案返工重跑设备。
-- 当前 M22 `modsetHash`：`b9989da92f35bac8703cb5ed803499222886ec6bae15d5e8045a8e45b6689725`（`plan`/`apply`/`verify` 通过；结果数字只写入不在 Mod 哈希内的文档）。
-- 当前产品 debug APK：`V:/coding/kelivo-private/.tower/worktrees/wt-22/.build/worktrees/b9989da92f35bac8/build/app/outputs/flutter-apk/app-debug.apk`，**181,370,434 字节**，SHA-256 `06b806e4ac80b998b2b3c114eacbd7971a34a5e16e8b1467b6450b5a2846a04a`；在最终树显式 `flutter build apk --debug` 生成（新建树，未在该树运行 integration_test），未把测试入口构建当产品。debug merged manifest 含 `SecureWindowFixtureActivity`（1 处），release merged manifest 不含该夹具（0 处，不宣称签名 release）。设备测试树 `d94f4165af9277d5` 的 clean APK 为 181,373,914 字节 / `5cc74cabf3fc02c9c0a7e79174ea5b9467523d25a72c760b65cb634daf69f0e3`，仅作设备证据；两树代码/测试一致，仅 `plugin/README.md` 文档副本不同。
+- 当前 M23 最终合成树：`V:/coding/kelivo-private/.tower/worktrees/wt-23/.build/worktrees/1cb055c3aa49c023`；设备测试在 `V:/coding/kelivo-private/.tower/worktrees/wt-23/.build/worktrees/bca9edfb383b74c0` 运行，两树仅 `plugin/README.md` 文档副本和异常测试文件换行格式不同，代码/测试语义一致，未为格式返工重跑设备。
+- 当前 M23 `modsetHash`：`1cb055c3aa49c023570730f9385b600db843ee6d16c777f8955b198db9401aed`（`plan`/`apply`/`verify` 通过；设备运行树 `bca9edfb383b74c00802ffb10d771639f628a1c8b6e1306d7fba889fd66e9b55`）。
+- 当前产品 debug APK：`V:/coding/kelivo-private/.tower/worktrees/wt-23/.build/worktrees/1cb055c3aa49c023/build/app/outputs/flutter-apk/app-debug.apk`，**181,392,762 字节**，SHA-256 `ea901e5472fb8b93ade9cea7fac5b8109948f19f54069fb93ab746961024afa6`；在最终树 `flutter clean` 后显式 `flutter build apk --debug` 生成（该树未运行 integration_test），未把测试入口构建当产品。debug merged manifest 含 `SecureWindowFixtureActivity`（1 处），release merged manifest 不含该夹具（0 处，不宣称签名 release）。
 - 三个工具：`phone_agent_screenshot`、`phone_agent_tree`、`phone_agent_input`。
 - 每助手独立 `localToolId='phone_agent'`；Mods 页提供关闭/原生手机控制/Phone Agent 三态单选，已有助手不自动迁移。
 - 观察按需发生，不强制每步重新读取完整树；工具 schema 不暴露 `snapshot_id`。

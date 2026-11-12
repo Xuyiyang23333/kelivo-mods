@@ -163,6 +163,90 @@ void main() {
     _expectScreenshotOk(await _screenshot(service), '返回应用截图');
   });
 
+  testWidgets('叠加层不污染产品截图', (tester) async {
+    await _pumpHarness(tester);
+    await _ensureAppForeground(service);
+
+    final fixtureTree = await _waitForTreeText(
+      service,
+      marker: 'PHONE_AGENT_OVERLAY_FIXTURE',
+      instruction: 'adb shell am start -n $_fixtureActivity --ez secure false',
+      text: _fixtureText,
+    );
+    expect(fixtureTree['package_name'], _appPackage);
+    final baseline = await _screenshot(service);
+    _expectScreenshotOk(baseline, '叠加层基线截图');
+    expect(_payload(baseline)['package_name'], _appPackage);
+
+    // 截图限频约 1 次/秒；等待后先触发一次坐标 tap 让叠加层出现，再立即截图。
+    await Future<void>.delayed(const Duration(milliseconds: 1100));
+    _hostStep(
+      'PHONE_AGENT_OVERLAY_ANIMATION',
+      '坐标 tap 后约 350ms 内可用 adb exec-out screencap 观察叠加层；'
+          '该截图只作宿主证据，产品截图由测试自身通过 Phone Agent 调用。',
+    );
+    final tap = await _input(service, <String, dynamic>{
+      'action': 'tap',
+      'x': 0.5,
+      'y': 0.5,
+    });
+    _expectOk(_payload(tap), '叠加层动作');
+    final during = await _screenshot(service);
+    _expectScreenshotOk(during, '叠加层期间截图');
+    await _expectOverlayFree(during, baseline);
+
+    final afterTree = await _tree(service);
+    expect(_nodeForText(afterTree, _fixtureText), isNotNull);
+  });
+
+  testWidgets('叠加层可见时真实触摸不被拦截', (tester) async {
+    await _pumpHarness(tester);
+    await _ensureAppForeground(service);
+
+    // 截图成功后叠加层会显示约 500ms 的完成脉冲；紧接着注入真实滑动，
+    // 若叠加层可触摸就会吞掉手势，通知栏不会打开。
+    _expectScreenshotOk(await _screenshot(service), '触摸穿透前截图');
+    final swipe = _payload(
+      await _input(service, <String, dynamic>{
+        'action': 'swipe',
+        'x': 0.5,
+        'y': 0.01,
+        'end_x': 0.5,
+        'end_y': 0.6,
+        'duration_ms': 300,
+      }),
+    );
+    _expectOk(swipe, '触摸穿透滑动');
+    expect(
+      (swipe['result'] as Map)['success'],
+      isTrue,
+      reason: '触摸穿透滑动未被原生接受。',
+    );
+    final foreground = await _waitForTreeWhere(service, (tree) {
+      final packageName = tree['package_name'];
+      return packageName is String &&
+          packageName.isNotEmpty &&
+          packageName != _appPackage;
+    }, timeout: const Duration(seconds: 15));
+    expect(foreground, isNotNull, reason: '叠加层可见时的滑动没有到达系统（通知栏未打开），不能证明触摸穿透。');
+    debugPrint(
+      'PHONE_AGENT_OVERLAY_TOUCH: package=${foreground!['package_name']}',
+    );
+
+    _hostStep(
+      'PHONE_AGENT_OVERLAY_TOUCH_RECOVER',
+      'adb shell input keyevent 4 关闭通知栏，然后执行 '
+          'adb shell am start -n $_appPackage/com.psyche.kelivo.MainActivity',
+    );
+    await _waitForTreeText(
+      service,
+      marker: 'PHONE_AGENT_OVERLAY_TOUCH_RETURN',
+      instruction:
+          'adb shell am start -n $_appPackage/com.psyche.kelivo.MainActivity',
+      text: _tapTarget,
+    );
+  });
+
   testWidgets('旋转后旧句柄与旧截图失效', (tester) async {
     addTearDown(
       () => SystemChrome.setPreferredOrientations(DeviceOrientation.values),
@@ -989,6 +1073,68 @@ Future<void> _expectFixturePixels(ClientToolResult result) async {
   expect(total, greaterThan(0));
   expect(nonBlack / total, greaterThan(0.5), reason: '恢复截图接近全黑，不能证明真实截图恢复。');
   expect(fixture / total, greaterThan(0.05), reason: '恢复截图中没有夹具纯色区域。');
+}
+
+/// 叠加层隐藏后截图必须与基线一致：中心 60% 逐像素相同，且整图不含强调色。
+Future<void> _expectOverlayFree(
+  ClientToolResult during,
+  ClientToolResult baseline,
+) async {
+  final after = await _readScreenshotImage(during);
+  final before = await _readScreenshotImage(baseline);
+  expect(after.width, before.width, reason: '叠加层截图宽度与基线不一致。');
+  expect(after.height, before.height, reason: '叠加层截图高度与基线不一致。');
+
+  final left = (before.width * 0.2).round();
+  final right = (before.width * 0.8).round();
+  final top = (before.height * 0.2).round();
+  final bottom = (before.height * 0.8).round();
+  var compared = 0;
+  var mismatches = 0;
+  for (var y = top; y < bottom; y++) {
+    for (var x = left; x < right; x++) {
+      final a = before.getPixel(x, y);
+      final b = after.getPixel(x, y);
+      compared++;
+      if (a.r != b.r || a.g != b.g || a.b != b.b) mismatches++;
+    }
+  }
+  expect(compared, greaterThan(0));
+  expect(
+    mismatches,
+    0,
+    reason: '叠加层可见期间截图中心 60% 与基线不一致（$mismatches/$compared）。',
+  );
+
+  var accent = 0;
+  for (var y = 0; y < after.height; y += 2) {
+    for (var x = 0; x < after.width; x += 2) {
+      final pixel = after.getPixel(x, y);
+      if ((pixel.r.toInt() - 0).abs() <= 12 &&
+          (pixel.g.toInt() - 137).abs() <= 12 &&
+          (pixel.b.toInt() - 153).abs() <= 12) {
+        accent++;
+      }
+    }
+  }
+  var baselineAccent = 0;
+  for (var y = 0; y < before.height; y += 2) {
+    for (var x = 0; x < before.width; x += 2) {
+      final pixel = before.getPixel(x, y);
+      if ((pixel.r.toInt() - 0).abs() <= 12 &&
+          (pixel.g.toInt() - 137).abs() <= 12 &&
+          (pixel.b.toInt() - 153).abs() <= 12) {
+        baselineAccent++;
+      }
+    }
+  }
+  // 状态栏的隐私/无障碍指示图标本身带强调色，因此与基线比较新增像素，
+  // 而不是要求整图零强调色。
+  expect(
+    accent - baselineAccent,
+    lessThan(50),
+    reason: '截图新增了叠加层强调色像素（during=$accent baseline=$baselineAccent），说明隐藏失败。',
+  );
 }
 
 List<Map<String, dynamic>> _nodes(Map<String, dynamic> tree) {

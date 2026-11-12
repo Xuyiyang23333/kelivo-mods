@@ -168,6 +168,22 @@ phone_agent_screenshot
 
 首版保留此限制，不增加 Android 宿主补丁。默认关闭胶囊的真机验收必须全部通过；开启胶囊的情况只记录，不宣称兼容。
 
+本 Mod 自己的可视化叠加层（2.6）是另一个窗口，`FLAG_NOT_TOUCHABLE`，不会拦截手势；它也不能隐藏上游胶囊。
+
+### 2.6 前台可视化叠加层
+
+用户要求助手在后台操作时前台可见。实现为独立 `PhoneAgentOverlay`，只借上游 `BackgroundOverlay` 的视觉语言（深/浅色面、描边、强调色 `#008999`），不复用 `BackgroundRuntime`/`BackgroundOverlay` 代码，不修改上游宿主，也不需要普通悬浮窗权限。
+
+- 窗口：`TYPE_ACCESSIBILITY_OVERLAY`、`FLAG_NOT_TOUCHABLE | FLAG_NOT_FOCUSABLE | FLAG_LAYOUT_IN_SCREEN`、`PixelFormat.TRANSLUCENT`；不申请 `SYSTEM_ALERT_WINDOW`，不调用 `Settings.canDrawOverlays`，不设 `FLAG_SECURE`。`FLAG_NOT_TOUCHABLE` 保证真实触摸注入不被拦截；`FLAG_NOT_FOCUSABLE` 保证叠加层不会成为 `rootInActiveWindow`，读树不受影响。窗口按需 add/remove，空闲时不存在，服务断连即随连接销毁。
+- 显示时机（首版默认开启，不新增设置开关、`status` 字段或 ARB 文案）：读树成功进入遍历前显示观察脉冲；截图成功返回后显示短暂完成脉冲（此时图片已生成，不会进入图片）；节点动作在前置校验通过且 `perform` 返回 true 后，用刷新后的 `bounds` 中心显示圆环和边框；坐标手势在 `dispatchGesture` 返回 true 后，按同一物理起点/终点和真实 `duration_ms` 显示移动圆点；系统动作在 `performGlobalAction` 返回 true 后显示无文本方向图形。`perform=false`、`dispatch=false`、前置校验失败、`stale_handle`、`package_not_allowed`、`system_window_denied`、`device_locked` 等拒绝路径不产生任何视觉。
+- 语义：动画只表示系统接受或完成动作，不代表业务成功、任务进度、模型思考或用户审批；不是安全护栏，也不改变任何工具结果和错误码。
+- 隐私：只用无文本图形；不显示输入文字、密码、截图字节或缩略图、节点文本、包名和坐标数值；不写敏感日志。`set_text` 只画输入框边框和光标。
+- 截图不污染：截图前在主线程 `removeViewImmediate` 并等待两帧（`Choreographer`），再额外等待约 48ms 合成周期后调用 `takeScreenshot`；没有窗口时零等待；隐藏失败或 250ms 有界等待超时返回 `screenshot_failed`，不发送图片或图片 metadata，不得跳过隐藏让截图成功。等待可被服务中断解除，迟到的帧回调不得触发第二次截图。读树不隐藏叠加层。API35 实测仅等两帧仍会抓到旧帧，因此保留 48ms 合成等待；总等待仍远小于 250ms 上限。
+- 密码遮挡：截图前遍历 `service.windows` 时只跳过自身 `TYPE_ACCESSIBILITY_OVERLAY` 窗口（root 包名为自身包，或 root 为 null），其他服务或应用的窗口继续参与密码遮挡。
+- 生命周期：所有窗口操作在主线程；旋转（`onConfigurationChanged`）、锁屏（`ensureUnlocked` 失败）、`onInterrupt`/`onUnbind`/`onDestroy`、`interruptPending` 和前台窗口状态切换到其他包时清理；每个视觉有边界时长（观察约 700ms、节点动作 450–900ms、手势按真实时长加尾段、系统动作 500ms、截图完成 500ms，硬上限约 2.5s）并自动隐藏；新事件替换旧事件，不堆叠。
+- `addView` 失败（`BadTokenException`/`SecurityException`/`IllegalStateException`）只禁用本会话可视化，不改变工具结果，也不写成工具错误。
+- 上游可触摸后台胶囊仍是已知兼容限制：Mod 无法隐藏其他 owner 的窗口；开启胶囊时截图可能包含胶囊、坐标手势可能被胶囊拦截。只记录和提示，不宣称兼容。
+
 ## 3. Mod 文件结构
 
 以下为当前文件划分；职责和边界不变。`mod.json` 的 `patches`、`touches` 和 `copy` 必须与最终文件一致。
@@ -408,6 +424,7 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 - `FLAG_SECURE` 只阻止截图；它不会隐藏无障碍树，也不会阻止读树和输入。输入边界由包名白名单决定，不能把 secure window 描述成“不可读、不可操作”。secure 窗口的树在 API35 夹具上可读，但不是绝对保证；密码字段、自定义 View 和窗口变化仍会影响树。
 - `isPassword` 节点及其子树文本不进入树结果；直接节点输入默认拒绝密码节点。
 - 截图前按密码节点 bounds 涂黑。该遮挡依赖应用正确标记，自定义 View/WebView 可能遗漏，只能称为“尽力而为”。
+- 截图前必须移除本 Mod 自己的可视化叠加层并等待两帧；隐藏失败返回 `screenshot_failed`，不得发送可能带叠加层的图片。密码窗口遍历只排除自身 accessibility overlay 窗口，不屏蔽其他应用窗口。
 - 截图字节和密码文本不得写入日志或崩溃报告。
 
 ### 7.2 首版必须实现的技术护栏
@@ -445,7 +462,10 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 - 整屏截图会检测 `FLAG_SECURE` 或不发送黑图（可能成功返回黑图）；
 - `home`/`recents` 之后模型能自行回到测试应用（前台离开白名单后输入会被拒绝）；
 - 系统窗口或权限弹窗会阻止读树和截图（只有输入被拒绝）；
-- 权限弹窗一定能被识别为 `system_window_denied`（API35 实测无可访问 root 且无来源包名，读树/截图/输入仍为 `no_window`，只做条件式人工提示）。
+- 权限弹窗一定能被识别为 `system_window_denied`（API35 实测无可访问 root 且无来源包名，读树/截图/输入仍为 `no_window`，只做条件式人工提示）；
+- 可视化叠加层动画代表业务成功、任务进度或用户审批（它只表示系统接受或完成动作）；
+- 可视化叠加层在所有 Android 厂商设备上都可用（`addView` 可能失败，失败时只禁用可视化）；
+- 上游后台胶囊会被叠加层隐藏或免于干扰（Mod 无法操作其他 owner 的窗口）。
 
 真正需要逐步授权时，应后续增加“每个动作均由原生确认”的模式，而不是依赖危险文本识别。
 
@@ -849,6 +869,43 @@ M22 已按用户同意取消上述 skip：宿主 `dumpsys` 确认真实 `GrantPe
 - 产品 debug APK：在最终树 `b9989da92f35bac8` 显式 `flutter build apk --debug` 生成（新建树，未在该树运行 integration_test），**181,370,434 字节**，SHA-256 `06b806e4ac80b998b2b3c114eacbd7971a34a5e16e8b1467b6450b5a2846a04a`；debug merged manifest 含 `SecureWindowFixtureActivity`（1 处），release merged manifest 不含该夹具（0 处，不宣称签名 release）。设备测试树 `d94f4165af9277d5` 的 clean APK 为 181,373,914 字节 / `5cc74cabf3fc02c9c0a7e79174ea5b9467523d25a72c760b65cb634daf69f0e3`，仅作设备证据；两树代码/测试一致，仅 `plugin/README.md` 文档副本不同。
 - API29 真机 `357784090209204` 本轮不在线，未运行，不写成通过。
 
+#### 9.3.7 M23 前台可视化叠加层（API35 模拟器 + 物理 MIUI API31）
+
+代码与契约见 2.6。新增 `OverlayVisuals.kt`（纯 JVM：事件、几何、状态机、截图隐藏握手）和 `PhoneAgentOverlay.kt`（`TYPE_ACCESSIBILITY_OVERLAY` 窗口、无文本图形、主线程生命周期），接入 `PhoneAgentService`、`NodeActionExecutor` 和 `ScreenshotCapture`。首版不新增设置开关、`status` 字段、ARB 文案或插件通道方法。
+
+JVM 测试（无 Robolectric、无新依赖）：
+
+- 几何：偶数/奇数 bounds 中心、退化 bounds 不绘制、中心 clamp 到屏幕内、手势复用真实起点/终点与 `duration_ms`、时长下限/上限。
+- 状态机：`begin` 替换不堆叠、截图隐藏期间 `begin` 被抑制、`resume` 不恢复旧事件、`clear` 幂等、TTL 到期不可见。
+- 截图隐藏握手：无窗口零延迟、有窗口等两帧后才 `proceed`、隐藏失败不 `proceed` 且触发失败、250ms 超时失败、`resume` 后迟到帧回调不触发第二次截图、重复 `resume` 安全。
+- 动作拒绝不显示：`action_unavailable`、`password_node_denied`、`perform=false` 时可视化回调不被调用；接受时收到刷新后的 `bounds`；可视化回调抛异常不改变 `InputOutcome`。
+
+设备矩阵（API35 模拟器 `emulator-5554`，物理 MIUI `1960cd68`）：
+
+1. 观察动画：读树时出现无文本边缘脉冲，约 700ms 后消失；连续读树不堆叠。
+2. 节点点击/长按/滚动：圆环出现在刷新后 bounds 中心；`set_text` 不显示文本。
+3. 坐标手势：圆点按真实起点/终点和 `duration_ms` 移动；手势完成后自动隐藏。
+4. 触摸穿透：叠加层可见期间坐标 tap 仍生效（JVM 只证 flag 位，真机做行为确认）。
+5. 截图纯净性：debug 夹具 `SecureWindowFixtureActivity` 纯色 `#00C8FF`，在动作动画进行中立即截图，图片中心 60% 与基线截图逐像素一致，且整图不含叠加层强调色 `#008999`；`adb screencap` 只用于观察叠加层本身，不替代产品截图链路。
+6. 生命周期：旋转、锁屏、权限窗口、服务停用/重启后无残留窗口，下一次动作正常；`device_locked`、`no_window` 等拒绝路径不产生动画。
+7. MIUI：`addView` 兼容性、是否被 keyguard 遮挡、触摸穿透和截图无污染；保存并恢复当轮真实无障碍授权值，只恢复 Phone Agent 组件。
+8. 上游胶囊开启：记录截图含胶囊、坐标手势被拦截的现象，不宣称兼容。
+
+本轮结果（API35 模拟器 `emulator-5554`，Android 15，2026-11-12）：
+
+- 产品代码：新增 `OverlayVisuals.kt`（纯 JVM 事件、几何、状态机、截图隐藏握手、自身 overlay 窗口过滤）和 `PhoneAgentOverlay.kt`（`TYPE_ACCESSIBILITY_OVERLAY` 窗口、无文本图形、主线程生命周期）；`ScreenshotCapture` 的隐藏握手为「移除窗口 → 两帧 → 48ms 合成周期 → 截图」。实测仅等两帧时截图中心仍出现叠加层点击圆点（约 518 像素差异），增加 48ms 后中心 60% 与基线逐像素一致；总等待仍远小于 250ms 有界失败。
+- 官方 `phone_agent_test.dart`：**`+2`、`All tests passed!`、EXIT=0**；打印 `PHONE_AGENT_OVERLAY_NODE_TAP` 标记，叠加层接入后截图、读树、节点点击、坐标滑动、节点滚动和 `set_text` 未回归。
+- 完整异常套件 `phone_agent_exception_test.dart`：**`+7 -1`、EXIT=1**。唯一失败为「服务禁用中断与重新启用恢复」的宿主操作时序：测试在 30 秒内没有等到宿主打开无障碍设置页，不是产品失败；该用例单独重跑为 **`+1`、`All tests passed!`、EXIT=0**，`PHONE_AGENT_SERVICE_PENDING_BATCH: size=1000 elapsed=1191ms codes=interrupted,ok`。
+- 新增用例通过：
+  - 「叠加层不污染产品截图」：debug 夹具纯色 `#00C8FF`，在坐标 tap 动画进行中立即通过产品截图链路截图，图片中心 60% 与基线逐像素一致；新增强调色像素为 0。状态栏隐私盾牌本身带约 85 个强调色像素，因此断言改为与基线比较，而不是要求整图零强调色。
+  - 「叠加层可见时真实触摸不被拦截」：截图完成脉冲可见时从顶部下滑，通知栏真实打开，前台包名变为 `com.android.systemui`，证明 `FLAG_NOT_TOUCHABLE` 生效。
+- 其他通过项：FLAG_SECURE、旋转、home/recents、权限窗口（`no_window` + 条件式提示，`POST_NOTIFICATIONS` 仍 `granted=false`）、锁屏。
+- 设备截图只作宿主证据：第一版失败截图中心出现叠加层圆点，修正握手后通过；`adb` 截图不替代产品截图链路。
+- 物理 MIUI API31（Redmi K30 5G，`1960cd68`）：官方 `phone_agent_test.dart` **`+2`、`All tests passed!`、EXIT=0**；「叠加层不污染产品截图」**`+1`、EXIT=0**；「叠加层可见时真实触摸不被拦截」**`+1`、EXIT=0**（`PHONE_AGENT_OVERLAY_TOUCH: package=com.android.systemui`）。logcat 出现 `PhoneAgentOverlay` 窗口的 input channel 创建/释放，未出现 `overlay_add_failed`，说明 MIUI 上 `addView` 成功；服务停用后 `dumpsys window windows` 中 `PhoneAgentOverlay` 窗口数为 0，无孤儿窗口。
+- MIUI 授权与恢复：原始 `enabled_accessibility_services=null`、`accessibility_enabled=0`；测试期间用用户授权的 `settings put secure` 预配置 Phone Agent 组件，结束时删除该键并写回 `accessibility_enabled=0`，只恢复 Phone Agent 组件，未修改其他服务或扩大白名单；`svc power stayon` 临时保持屏幕常亮，结束时恢复为 `false`。
+- 未验证：叠加层在 MIUI 上的 keyguard 遮挡行为未单独验证（锁屏场景在 API35 通过）；上游可触摸后台胶囊开启时的干扰只记录、不宣称兼容；API29 真机不在线，未运行；签名 release 未验证。
+- 交付树与 APK：最终合成树 `V:/coding/kelivo-private/.tower/worktrees/wt-23/.build/worktrees/1cb055c3aa49c023`，`modsetHash` `1cb055c3aa49c023570730f9385b600db843ee6d16c777f8955b198db9401aed`；设备测试在 `V:/coding/kelivo-private/.tower/worktrees/wt-23/.build/worktrees/bca9edfb383b74c0`（`modsetHash` `bca9edfb383b74c00802ffb10d771639f628a1c8b6e1306d7fba889fd66e9b55`），两树仅 `plugin/README.md` 文档副本和异常测试文件换行格式不同，代码/测试语义一致。产品 debug APK 在最终树 `flutter clean` 后显式 `flutter build apk --debug` 生成：**181,392,762 字节**，SHA-256 `ea901e5472fb8b93ade9cea7fac5b8109948f19f54069fb93ab746961024afa6`；debug merged manifest 含 `SecureWindowFixtureActivity`（1 处），release merged manifest 不含（0 处，不宣称签名 release）。
+
 ### 9.4 VLM 图片链路与固定任务验收（API 35 模拟器，magpie `llama-cpp/llama-cpp`）
 
 以下为 API 35 模拟器上的历史 VLM 验收记录；M10 历史的 FLAG_SECURE/异常路径结果见 9.3.1，物理 MIUI API31 真机的 VLM 结果见 9.4.2。
@@ -940,6 +997,7 @@ M22 已按用户同意取消上述 skip：宿主 `dumpsys` 确认真实 `GrantPe
 - VLM 图片链路、Kelivo 应用内固定任务和跨新用户轮次历史图片回放已在 API 35 模拟器用 magpie `llama-cpp/llama-cpp` 通过；物理 MIUI API31 真机由 `llama-cpp/llama-cpp` 通过归一化坐标 tap（打开抽屉/Settings/Search），由 magpie `mistral/deepseek-v4-1-flash-1017` 通过真实图片请求、归一化坐标 swipe 的物理 UI 效果和像素专属视觉确认；`llama-cpp/llama-cpp` 的完整坐标 swipe 仍未验证；不承诺任意模型或设备。
 - 上一轮 VLM 文档轮只改中文文档，未重跑测试；该标签仅适用于该历史 VLM 文档轮，不代表当前 M17。M17 已重跑 Loader 165、插件 Kotlin 66、插件 Dart 17、根项目 `dart analyze --fatal-infos` 和 Flutter 182；历史 Phone Agent 105、Mods 16、settings 入口 2、上游 `tool_result_content` 14 通过 + 1 Windows 条件跳过、上游 PhoneControl 49 结果继续有效。
 - Loader verify 通过；最终 APK 已生成。
+- 前台可视化叠加层（M23）已实现：独立 `TYPE_ACCESSIBILITY_OVERLAY`、无文本图形、无设置开关；API35 模拟器和物理 MIUI API31 均验证官方测试、截图无污染和触摸穿透，未验证项见 10.2 和 9.3.7。
 - 中文维护文档与真实行为一致。
 
 最终验收已完成；仍不宣称第二阶段全部完成，未验证项见 10.2。
@@ -951,6 +1009,10 @@ M22 已按用户同意取消上述 skip：宿主 `dumpsys` 确认真实 `GrantPe
 - 两个无障碍服务可以同时存在于系统中；正常 UI 只限制助手工具选择，不限制系统级服务开关。
 - 已有仅启用 `phone_control` 的助手不会自动迁移，用户需要在 Mods 页手动选择 Phone Agent。
 - 后台悬浮胶囊不在首版处理。
+- 可视化叠加层是独立 `TYPE_ACCESSIBILITY_OVERLAY` 窗口，只借上游视觉风格；它不显示输入文本、密码、截图字节或节点文本，不代表业务成功、任务进度或用户审批，也不是安全护栏。
+- 叠加层 `addView` 在部分厂商 ROM 上可能失败；失败时只禁用本会话可视化，工具行为不变。上游可触摸后台胶囊无法被 Mod 隐藏，开启胶囊时截图可能包含胶囊、坐标手势可能被拦截。
+- 截图前隐藏叠加层会增加约两帧（约 33ms）等待和极少量 `screenshot_failed` 风险；隐藏失败时不发送图片，不静默跳过隐藏。
+- 叠加层动画按工具事件触发，不表示模型思考过程；模型未调用工具时前台没有提示。
 - Mod 工具不进入上游 schema override 和通用审批流程，自己的助手工具选择和限制必须自行执行。
 - 截图密码遮挡、节点校验和窗口检查只能降低风险，不能提供绝对安全保证。
 - 自动模式不承诺识别或阻止所有发消息、购买、删除等不可逆行为。
