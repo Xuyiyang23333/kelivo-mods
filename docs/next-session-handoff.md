@@ -102,7 +102,7 @@
 - 上游基线：`73afa4ec77cfc9af2efea2487fee8bba1362639d`。
 - 当前 Mod 版本：`0.2.0`。
 - 当前 M23 设备运行树：`V:/coding/kelivo-private/.tower/worktrees/wt-23/.build/worktrees/f1b26a580b737e14`（`modsetHash` `f1b26a580b737e14117a22bd11b8304e3fe725c477dc3f90ad881b663432b824`）。
-- 当前 M23 最终源码树：与设备运行树相同（`f1b26a580b737e14`），`plan`/`apply`/`verify` 通过。
+- 当前 M23 最终源码树：`V:/coding/kelivo-private/.tower/worktrees/wt-23/.build/worktrees/2445a838f5b71e56`（`modsetHash` `2445a838f5b71e562fad471f0468abe62c467f08eef114e91f9a5d6cd502c82b`），与设备运行树仅 `plugin/README.md` 文档副本不同，代码/测试语义一致；`plan`/`apply`/`verify` 通过。
 - 当前产品 debug APK：**尚未生成**。API35 完整异常套件尚未绿色，按 AGENTS 要求不能把测试入口构建当产品；历史 `1cb055c3aa49c023` 的 `app-debug.apk` 是约 249 MB 的测试入口构建（`kernel_blob.bin` 212 MB），不得作为产品 APK。只有新 tip 上 API35 绿色整轮后，才在干净最终树 `flutter clean` + `flutter build apk --debug` 重新生成并记录真实大小/hash 和 manifest 隔离。
 - 三个工具：`phone_agent_screenshot`、`phone_agent_tree`、`phone_agent_input`。
 - 每助手独立 `localToolId='phone_agent'`；Mods 页提供关闭/原生手机控制/Phone Agent 三态单选，已有助手不自动迁移。
