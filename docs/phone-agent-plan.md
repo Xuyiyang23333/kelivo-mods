@@ -3,7 +3,7 @@
 ## 0. 文档状态
 
 - 当前阶段：第二阶段验收进行中（UI/选择契约改造已完成），Mod 版本 0.2.0。
-- 当前 M23（前台可视化叠加层，2026-11-12，返工完成待交付）：独立 `TYPE_ACCESSIBILITY_OVERLAY` 叠加层已实现并接入读树、截图、节点/手势/系统动作；reviewer round 1 的 6 项 findings、round 2 的窗口重校验/附件 fail-closed/代次窄窗口、round 3 的 `onSuccess` 回调窗口重校验和文档/JVM 矩阵修正已处理。round-4 设备运行树 `V:/coding/kelivo-private/.tower/worktrees/wt-23/.build/worktrees/9ebf2e991caa07ed`（`modsetHash` `9ebf2e991caa07ed3e8e5b4484649de84139e89a31ac8837f779ca34aa2d8c66`），最终源码树 `V:/coding/kelivo-private/.tower/worktrees/wt-23/.build/worktrees/dfcef53cfd77ea78`（`modsetHash` `dfcef53cfd77ea78fe898710efa92991fa15a140b8d0424193279f7ad21aac77`），与设备树仅 `plugin/README.md` 文档副本不同，`plan`/`verify` 通过：API35 独立 AVD `Kelivo_M23_API_35` 完整异常套件 **`+8`、`All tests passed!`、EXIT=0**（含旋转、锁屏、服务禁用/重启、权限窗口），官方 `phone_agent_test.dart` `+2`、EXIT=0；物理 MIUI API31 官方 `+2`、EXIT=0，「叠加层不污染产品截图」`+1`、EXIT=0。本地 Loader 165、插件 Kotlin 97、Flutter Mod/Phone Agent 126、根项目与 Loader 静态分析均通过。产品 debug APK 在最终树 `dfcef53cfd77ea78` 于全部设备测试后 `flutter clean` 显式构建：181,403,054 字节，SHA-256 `501d4a0087294258baa882e9a32856208805fcba88228ec34e15016ae89689fb`，debug merged manifest 含 `SecureWindowFixtureActivity`，release 不含且含 `PhoneAgentService`；构建后未再运行 integration_test。设备结果见 9.3.7。
+- 上一轮 M23（前台可视化叠加层，2026-11-12，历史；M24 当前状态见 9.3.2.1）：独立 `TYPE_ACCESSIBILITY_OVERLAY` 叠加层已实现并接入读树、截图、节点/手势/系统动作；reviewer round 1 的 6 项 findings、round 2 的窗口重校验/附件 fail-closed/代次窄窗口、round 3 的 `onSuccess` 回调窗口重校验和文档/JVM 矩阵修正已处理。round-4 设备运行树 `V:/coding/kelivo-private/.tower/worktrees/wt-23/.build/worktrees/9ebf2e991caa07ed`（`modsetHash` `9ebf2e991caa07ed3e8e5b4484649de84139e89a31ac8837f779ca34aa2d8c66`），最终源码树 `V:/coding/kelivo-private/.tower/worktrees/wt-23/.build/worktrees/dfcef53cfd77ea78`（`modsetHash` `dfcef53cfd77ea78fe898710efa92991fa15a140b8d0424193279f7ad21aac77`），与设备树仅 `plugin/README.md` 文档副本不同，`plan`/`verify` 通过：API35 独立 AVD `Kelivo_M23_API_35` 完整异常套件 **`+8`、`All tests passed!`、EXIT=0**（含旋转、锁屏、服务禁用/重启、权限窗口），官方 `phone_agent_test.dart` `+2`、EXIT=0；物理 MIUI API31 官方 `+2`、EXIT=0，「叠加层不污染产品截图」`+1`、EXIT=0。本地 Loader 165、插件 Kotlin 97、Flutter Mod/Phone Agent 126、根项目与 Loader 静态分析均通过。产品 debug APK 在最终树 `dfcef53cfd77ea78` 于全部设备测试后 `flutter clean` 显式构建：181,403,054 字节，SHA-256 `501d4a0087294258baa882e9a32856208805fcba88228ec34e15016ae89689fb`，debug merged manifest 含 `SecureWindowFixtureActivity`，release 不含且含 `PhoneAgentService`；构建后未再运行 integration_test。设备结果见 9.3.7。
 - 上一轮 M22（权限弹窗保守收尾，2026-11-12）：用户明确同意“不可识别权限弹窗仍返回 `no_window`，消息条件式提示人工处理/取消并返回测试应用”。M20（窗口 root 补全）与 M21（事件来源包名）均已在 API35 设备上证伪并 abandoned，未合并生产代码；本轮整合其准确证据，只把 `PhoneAgentService` 三处无可访问窗口的英文提示改为条件式人工提示，错误码、guard、读树/截图密码遮挡、输入边界和白名单均不变。异常测试改为宿主 `dumpsys` 独立确认真实 `GrantPermissionsActivity` 后直接 tap/back/截图断言 `no_window` + 提示，不再因 `root=null` skip，也不把任意 `no_window` 当通过。设备结果与新树/APK 记录见 9.3.6。
 - 上一轮 M21（权限弹窗事件来源评估，abandoned）：按 mission 先做临时事件诊断，不改生产代码。API35 真实 `GrantPermissionsActivity` 弹窗期间，服务已连接并持续收到应用和 systemui 事件，但没有收到任何 `permissioncontroller` 的 `TYPE_WINDOW_STATE_CHANGED`；只有 `pkg=null` 的 `TYPE_WINDOWS_CHANGED`（窗口 id 指向无 root 的弹窗）和后台 systemui 事件。活动/聚焦弹窗窗口仍没有可访问 root，无法取得包名，因此事件来源包名无法与活动/聚焦窗口 id 建立可靠匹配，该机制不可用。按 mission 停止条件停止，未提交生产代码或测试改动；临时诊断已从交付移除，证据见 9.3.5。
 - 上一轮 M20（权限窗口输入路径诊断，abandoned）：只做设备诊断，不改生产代码。API35 真实 `GrantPermissionsActivity` 弹窗期间服务 `rootInActiveWindow` 为 null；临时诊断（已移除，不进交付）实测 `windows` 只有两个窗口：`com.android.systemui` 窗口 `active=false focused=false hasRoot=true`，权限弹窗窗口 `active=true focused=true hasRoot=false pkg=null`。活动/聚焦窗口没有可访问 root，无法取得包名；唯一有 root 的是后台 systemui 窗口。因此「用可确认的活动/聚焦系统窗口补全 WindowState 以返回 `system_window_denied`」在本设备不可实现；证据见 9.3.4。
@@ -13,7 +13,7 @@
 - 上一轮 M16（物理 MIUI API31 验收记录，历史）：该轮只改中文文档，产品代码/测试/`mod.json`/schema/白名单/上游均未修改。最终源码 `modsetHash` `3d3cd25b4def35633dcf848373037cbe2c5200f795339c315b3ac9c3268a3174`，合成树 `V:/coding/kelivo-private/.tower/worktrees/wt-16/.build/worktrees/3d3cd25b4def3563`，`plan`/`apply`/`verify` 通过；该轮产品 debug APK 为 181,369,890 字节，SHA-256 `c6f20d250239bae223a4fdaa5ff1807ba34eab38bd8f9e7f9710e8c21747a58b`。设备证据来自此前相同代码/测试行为，未在新树重跑设备。结果见 9.3.2 与 9.4.2。
 - 上一轮 M10（API35 FLAG_SECURE/异常路径）：最终源码 `modsetHash` `5b1cde0304e687b9e3a26935cf85b5a27d102c9ecb409ff0e8b1358075aa902d`，合成树 `V:/coding/kelivo-private/.tower/worktrees/wt-10/.build/worktrees/5b1cde0304e687b9`；完整异常套件实际运行于 `2c1513ecef3f2293` 树，`+5 ~1`、EXIT=0；当前 `5b1cde...` 是仅文档哈希变化后的最终源码/构建树，关键代码/测试一致，新树未重跑设备；权限窗口未验证；API35/API29 官方测试各 2 项通过。契约和结果见 9.3.1。
 - 上一轮 magpie VLM 验收（历史，API35 模拟器）：使用当时的 debug APK 和 magpie 网关模型 `llama-cpp/llama-cpp`（provider `http://10.0.2.2:3425/v1`，UI Image + Tools；局域网访问由用户开启，未读取或记录密钥）完成真实图片链路、Kelivo 应用内固定任务和跨新用户轮次历史图片回放。证据见 9.4。该轮的合成树 `5f0be65f...` 和 APK 181369230 字节是历史记录，不代表当前实现。
-- 当前 M23 产品 debug APK（最终树 `V:/coding/kelivo-private/.tower/worktrees/wt-23/.build/worktrees/dfcef53cfd77ea78`，全部设备测试后 `flutter clean` + 显式 `flutter build apk --debug`，构建后未再运行 integration_test）：**181,403,054 字节**，SHA-256 `501d4a0087294258baa882e9a32856208805fcba88228ec34e15016ae89689fb`；debug merged manifest 含 `SecureWindowFixtureActivity`（1 处），release merged manifest 不含该夹具（0 处）且含 `PhoneAgentService`（1 处，不宣称签名 release）。历史：此前 181,402,630 / `a72cac9b…` 在 `a460dcbc` 构建，随后被 17:29/17:32 的 integration_test 覆盖为 251,120,349 / `e3d9d22b…` 测试入口构建，不能作为产品；`b56fc97d` 的 181,403,426 / `f40b76cf…` 是不同 artifact，未采用。设备运行树 `9ebf2e991caa07ed` 的 `app-debug.apk` 是测试入口构建，只作设备/测试证据，不作为产品。「M23 尚未生成产品 APK」只适用于 round-2/3 历史，不代表当前。
+- 历史 M23 产品 debug APK（最终树 `V:/coding/kelivo-private/.tower/worktrees/wt-23/.build/worktrees/dfcef53cfd77ea78`，全部设备测试后 `flutter clean` + 显式 `flutter build apk --debug`，构建后未再运行 integration_test）：**181,403,054 字节**，SHA-256 `501d4a0087294258baa882e9a32856208805fcba88228ec34e15016ae89689fb`；debug merged manifest 含 `SecureWindowFixtureActivity`（1 处），release merged manifest 不含该夹具（0 处）且含 `PhoneAgentService`（1 处，不宣称签名 release）。历史：此前 181,402,630 / `a72cac9b…` 在 `a460dcbc` 构建，随后被 17:29/17:32 的 integration_test 覆盖为 251,120,349 / `e3d9d22b…` 测试入口构建，不能作为产品；`b56fc97d` 的 181,403,426 / `f40b76cf…` 是不同 artifact，未采用。设备运行树 `9ebf2e991caa07ed` 的 `app-debug.apk` 是测试入口构建，只作设备/测试证据，不作为产品。「M23 尚未生成产品 APK」只适用于 round-2/3 历史，不代表当前。
 - 历史产品 debug APK（M22 最终合成树 `V:/coding/kelivo-private/.tower/worktrees/wt-22/.build/worktrees/b9989da92f35bac8`，新建树后显式 `flutter build apk --debug` 生成，测试后未在该树运行 integration_test）：**181,370,434 字节**，SHA-256 `06b806e4ac80b998b2b3c114eacbd7971a34a5e16e8b1467b6450b5a2846a04a`；debug merged manifest 含 `SecureWindowFixtureActivity`（1 处），release merged manifest 不含该夹具（0 处，不宣称签名 release）。设备测试在 `d94f4165af9277d5` 树运行，其 clean 产品 APK 为 181,373,914 字节 / `5cc74cabf3fc02c9c0a7e79174ea5b9467523d25a72c760b65cb634daf69f0e3`，仅作设备证据；两树代码/测试一致，仅 `plugin/README.md` 文档副本不同，APK 二进制略有差异，未进一步归因，未把测试入口构建当产品。该 M22 APK 不代表 M23 代码。
 - 当前 M22 自动检查：最终合成树 `V:/coding/kelivo-private/.tower/worktrees/wt-22/.build/worktrees/b9989da92f35bac8`，`modsetHash` `b9989da92f35bac8703cb5ed803499222886ec6bae15d5e8045a8e45b6689725`，`plan`/`apply`/`verify` 通过；Loader 165、插件 Kotlin 66、插件 Dart 17、根项目 seam 56（均在设备测试树运行，代码/测试与最终树一致）、根项目 `dart analyze --fatal-infos lib test integration_test tool` 通过（最终树已重跑，根分析前已运行 `flutter pub get --directory tool/l10n --enforce-lockfile`）。API35 官方 `phone_agent_test.dart` `+2`、完整异常套件 `+6`，均 EXIT=0（设备测试树 `d94f4165af9277d5` 与最终树仅 `plugin/README.md` 文档副本不同）；API29 不在线未运行。结果见 9.3.6。
 - 上一轮自动检查（历史）：Loader 165、Phone Agent 105、Mods 16、settings 入口 2、上游 `tool_result_content` 回归、插件 Dart 17、插件 Kotlin 66 和上游 PhoneControl 49；M10 历史轮只改测试/文档，未重复这些静态套件，新增聚焦工具测试 32 项通过。
@@ -367,7 +367,8 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 - 节点被真正替换、内容变化、稳定能力字段变化、`isSelected` 变化、窗口/包名/尺寸/旋转变化和 120 秒 TTL 超时仍返回 `stale_handle` 或 `stale_observation`。
 - `stale_handle` 的错误信息会附带发生变化的指纹字段名（只含固定字段名，不含文本内容）；指纹是结构化字段列表，值只参与相等比较，不会被反解为字段名。
 - 前置重验失败与指纹变化使用同一错误码 `stale_handle`，但消息中的诊断标识可区分来源：`refresh()` 返回 false 时为 `refresh_failed`，刷新成功但 `isVisibleToUser` 为 false 时为 `not_visible`，前两者通过但 `isEnabled` 为 false 时为 `not_enabled`。三者按该顺序短路判断，只输出固定标识，不输出节点文本、类名、viewId 或其他内容；诊断不改变任何通过条件，也不把失败自动转成重新读树或重试。
-- 该决定由 `ObservationRegistryTest` 的 focus-only 复用、action-only 复用、selected-only 拒绝、稳定能力变化拒绝和三项前置诊断用例固定；放宽更多字段必须先更新本节、`AGENTS.md` 和 `mods/phone_agent/README.md`，并补对应测试。
+- 节点重解析（M24）：`refresh()` 返回 false 时，先按读树时记录的“从根到该节点的子索引路径”在当前活动窗口重新解析一次。这是**双重闸门**：路径可能因同一窗口内滚动而指向别的节点，但紧随其后的指纹逐字段全等比较会拒绝，除非存在结构完全等价的孪生节点（同包同窗口、同步长、同层、全部能力字段与文本字段相同）。并要求重新解析出的节点指纹与读树时逐字段完全一致；路径解析失败、节点不存在或任一指纹字段不等时仍返回 `stale_handle`（路径解析失败的消息保留 `refresh_failed`），不返回新句柄。该重解析只处理“平台重建了节点对象、逻辑节点未变”的情况：不按文本、描述或相似度查找节点，不放宽任何指纹字段，不改变可见性、可用性、TTL 和窗口/包名/尺寸/旋转校验，也不自动重试动作。
+- 该决定由 `ObservationRegistryTest` 的 focus-only 复用、action-only 复用、selected-only 拒绝、稳定能力变化拒绝、三项前置诊断和重解析用例固定；放宽更多字段必须先更新本节、`AGENTS.md` 和 `mods/phone_agent/README.md`，并补对应测试。
 - 该契约不保证节点始终有效，也不保证业务结果成功；模型仍应在页面明显变化时重新读树。
 
 该策略允许模型在同一页执行多个相互独立的操作，但是否需要重新观察由任务语义决定。它不保证节点始终有效，也不保证业务结果成功。
@@ -616,6 +617,8 @@ dart analyze --fatal-infos
 - 含 NUL 的文本变化只报告 `text` 字段名，`stale_handle` 不包含 NUL 后的内容；
 - 前置重验三项精确诊断：`refresh()` 为 false 时消息含 `refresh_failed`、`isVisibleToUser` 为 false 时含 `not_visible`、`isEnabled` 为 false 时含 `not_enabled`，错误码均为 `stale_handle`，且消息不含节点文本；刷新失败优先于可见性和可用性判断；
 - `performNodeAction` 在请求动作从当前节点移除后返回 `action_unavailable`，且不执行 `beforeAction` 或 `perform`；
+- M24 路径重解析：`refresh()` 失败后按子索引路径重解析并要求指纹逐字段一致时句柄可继续用于 `set_text`；重解析出的节点指纹不同、路径缺失、无活动窗口 root 时仍返回 `stale_handle`（含 `refresh_failed`）；`refresh()` 成功时不触发重解析；重解析结果会被同一观测的后续动作复用；
+- 读树记录每个节点的从根子索引路径（`TreeObservation.paths`），嵌套节点的路径与父 id 一致；
 - 动作后有效句柄可复用，失效句柄不会重定向；
 - 归一化坐标、越界、NaN、旋转和尺寸变化；
 - 节点动作、系统导航、手势回调和并发 `busy`；
@@ -758,6 +761,44 @@ adb -s emulator-5554 install -r <临时项目目录>/app/build/outputs/apk/debug
 - 坐标 UI 效果：`llama-cpp/llama-cpp` 轮用归一化坐标 tap 真实打开抽屉、Settings 和 Search，`set_text Phone` 成功；后续 swipe 因网关故障未完成，该模型的完整坐标 swipe 仍属未验证。
 - 未在物理设备运行：锁屏、home/recents、服务禁用/重启、权限窗口；这些场景不能从 API35 模拟器结果推断为物理设备通过。
 - 产品 APK 覆盖提醒：`flutter test` 会把树内 `build/app/outputs/flutter-apk/app-debug.apk` 覆盖为测试入口构建；产品 APK 必须在干净合成树显式 `flutter build apk --debug` 重新生成并重新计算大小与 SHA-256，不能沿用旧哈希，也不能把测试入口构建当产品。旧 M10 树 `5b1cde0304e687b9` 的 APK 就曾被覆盖为测试入口构建（249,642,846 字节，SHA-256 前缀 `1138b4d2`），之后才显式重建；因此旧 181,373,590 字节 / `581d56...` 与 249,642,846 字节 / `1138b4d2...` 都不能当作当前产品 APK。
+
+#### 9.3.2.1 M24 聚焦后 `stale_handle` 复现与路径重解析修复
+
+本轮目标：处理"聚焦后同一句柄 `set_text` 返回 `stale_handle`"这一长期未结问题，先复现、再解释机制、最后做最小修复。
+
+自然循环复现（均未触发）：
+
+- API35 `emulator-5554`：同一句柄 tap → 0/50/100/200/400ms → `set_text` 共 150 次；改为真实焦点切换（先点空白目标再点输入框）后 48 次；改为单次读树 + 6 档延迟后 60 次；再改为按官方序列（读树 → 点目标 → 滚动 → 读树 → 点输入框 → 400ms → `set_text`）循环 20 次。全部未出现 `stale_handle`，唯一稳定失败是 `delay=0` 时的 `action_unavailable`（tap 后语义树尚未更新出 `SET_TEXT` 动作）。
+- 物理 MIUI `1960cd68`：同款焦点切换夹具 60 次、官方序列循环 20 次，均未出现 `stale_handle`；官方 `phone_agent_test.dart` 连续 4 轮 `+2`、`All tests passed!`、EXIT=0。
+- 字段探针（聚焦后延迟读树并逐字段比较输入框）：API35 15 次、MIUI 15 次全部为 `same`，说明仅靠聚焦本身不重建语义节点。
+
+受控机制验证（设备实测，非代码推断）：
+
+- 夹具在第 2 步后强制重建输入框所在子树（`KeyedSubtree` 更换 key）。重建后旧句柄 `set_text` 连续 3/3 次返回 `stale_handle`，消息精确为 `The target node changed (refresh_failed)`；未重建的对照组 3/3 成功。
+- 重建后重新读树可见同一逻辑节点仍在（同 `class`、`hint`、`bounds`，`editable=true`），说明是平台重建了 `AccessibilityNodeInfo` 对象、逻辑节点未变，`refresh()` 因此失败。
+- A/B 对照（同一夹具 8 轮，含 `refocus=false`/`true` 各半）。**证据重心在启用组**：修复后 8/8 `set_text` 成功，且控件内容确实变为 `fix 0`…`fix 7`（与轮次严格对应）。旧句柄此时 `refresh()` 已为 false，文本能落进重建后的控件，唯一可能的路径就是按子索引路径重新取到了节点——这是「重解析真的被执行」的直接证据。禁用组（把 `resolveByPath` 短路为 `return null`）8/8 返回 `stale_handle(refresh_failed)`，但短路后必然抛错，属构造性结果，只作对照，不构成独立证据。
+- A/B 所用树 `V:/coding/kelivo-private/.tower/worktrees/wt-24/.build/worktrees/dfcef53cfd77ea78` 是**手工注入** `dependencies/kelivo_phone_agent/` 的临时树，未走 `apply`，其 `.state.json` 里的 `modsetHash` 仍是 M23 基线 `dfcef53cfd77ea78…`，**不代表该树实际内容，不可作为可复现基线**；该树的 `verify` 结论也不可信。已验证其插件源码与 R1 前的 `fa251a4` 逐字节一致（34 个文件全等），故 A/B 测的是当时的交付代码；该树与最终 tip `6222d78` 有 4 个文件不同（`NodeTreeReader.kt`、`ObservationRegistry.kt`、`PhoneNode.kt`、`ObservationRegistryTest.kt`），差异仅限 F1/F2 的行为保持型重构，因此不能再写成「与最终分支一致」。本轮唯一可复现基线是 R1 返工后的 `29861376ffaa5e41`。残留临时夹具与脚本已删除。
+
+修复边界（写清楚，不宣称彻底解决）：
+
+- 只对"平台重建节点对象、逻辑节点未变且重建后的节点仍 advertise 所需动作"的情况生效。若重建后的语义节点不再 advertise `SET_TEXT`，执行层仍按当前节点返回 `action_unavailable`；本轮没有放宽 `performNodeAction` 的动作校验。
+- 第一版验证时重建销毁了 `TextField` 并丢失焦点，重解析拿到的节点不 advertise `SET_TEXT`，结果从 `stale_handle` 变成 `action_unavailable`。因此改用显式 `FocusNode` 重建，模拟真实场景中"节点对象被重建但逻辑节点与焦点仍在"。这不是产品缺陷被掩盖，而是动作可用性校验按设计生效。
+- 不按文本/描述/相似度查找节点，不放宽任何指纹字段，不改变可见性、可用性、TTL 和窗口/包名/尺寸/旋转校验，不自动重试动作。
+
+自动检查（R1 返工后合成树 `29861376ffaa5e41`，`modsetHash` `29861376ffaa5e4123b8884b5a67cd07d102666acfdee83d0e1ed6f815afce2a`）：Loader format/analyze 通过、Loader 165、插件 Kotlin 106（新增 7 + R1 返工 2）、Flutter Mod/Phone Agent 126、上游 seam 56、`dart analyze --fatal-infos lib test integration_test tool` 无问题、`verify` 通过。
+
+设备结果：
+
+- API35 `emulator-5554` 官方 `phone_agent_test.dart` `+2`、`All tests passed!`、EXIT=0。
+- API35 完整异常套件本轮未取得绿色整轮：最好一轮 `+6 -2`，最后一轮 `+5 -3`。逐条判定：叠加层截图污染（`518/409920` 像素差异，M24 未改 `OverlayVisuals`/`PhoneAgentOverlay`/`ScreenshotCapture`，属 M23 既有宿主/时序敏感断言）、权限窗口用例（宿主 `am start` 重建了 Activity 导致 harness 丢失）、服务禁用用例（宿主确认弹窗在 1000 个 pending 请求排空后才到达）。这三条均为宿主脚本时序，不是本轮产品断言失败；已通过的用例为 FLAG_SECURE、旋转、home/recents、锁屏、叠加层可见时宿主触摸。按收口规则不再为宿主脚本继续迭代，不写成全绿。
+- 物理 MIUI `1960cd68` 官方 `phone_agent_test.dart` `+2`、`All tests passed!`、EXIT=0（R1 前树 `47675033b3d132e0`；R1 的 F1/F2 未重跑设备，见下）。
+- API 29 真机 `357784090209204` 本轮离线，按用户决定记录为**未运行**，不以任何替代手段伪造。
+
+产品 APK（R1 返工后最终树 `29861376ffaa5e41`，`flutter clean` 后的干净树 `flutter pub get` + `flutter pub get --directory tool/l10n --enforce-lockfile` + 显式 `flutter build apk --debug`，构建后未再运行 integration_test）：**181,403,918 字节**，SHA-256 `5a54cb3a459a9c8758033fce6eba14bdf098b0b6c02477be45e83e723bd41b43`；debug merged manifest 含 `SecureWindowFixtureActivity`（1 处）与 `PhoneAgentService`（1 处）。本轮未构建 release，不宣称签名 release。此前 R1 前树 `47675033b3d132e0` 的 APK 为 181,404,642 字节 / `677c26d9…`，已被 R1 的 F1/F2 重构取代，只作历史。
+
+设备结果与代码版本的对应关系（如实标注）：API35 与 MIUI 的官方测试结果、异常套件结果均取自 **R1 前的树 `47675033b3d132e0`**。该树之后被就地改动过（插件源码在 02:34 同步为 R1 之后的 tip 版本，但其 `MOD_BUILD.json` 仍记录 R1 前哈希、`app-debug.apk` 仍是 01:07 的 R1 前代码 181,404,642 字节 / `677c26d9…`），因此该树的「源码 / 构建记录 / APK」三者不一致，`verify` 与 `MOD_BUILD.json` 不可信，**不能作为 R1 前代码的可复现样本**；它只用来标明上述设备结果对应的代码版本（同一份 R1 前逻辑）。R1 的 F1（`TreeObservation` 去 data class、句柄槽位封装）与 F2（去掉 `!==` 回收守卫、写清 `child()` 契约）是行为保持型重构，按审查结论不涉及运行时语义，因此未重跑设备；这两项只由插件 Kotlin 106 项单测（新增 2 项路径回收断言）覆盖。
+
+未验证：`stale_handle` 真实自然触发仍属窄窗口间歇性，本轮只以受控夹具复现机制，不能写成"已彻底修复历史间歇性失败"；"重建后语义节点不接受所需动作"的情况仍返回 `action_unavailable`，属已知边界；API 29 未运行；签名 release 未验证；完整异常套件本轮未取得绿色整轮（原因见上）；物理设备未运行锁屏、home/recents、服务中断和权限弹窗。
 
 #### 9.3.3 M19 权限窗口真实验证（API35 模拟器）
 

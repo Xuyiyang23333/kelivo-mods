@@ -44,11 +44,14 @@ internal class SavedHandle(
  *
  * 句柄只在当前观测内有效。动作后不清空树句柄；每次使用前重新
  * `refresh()` 并比较指纹（焦点变化和动作集合变化不失效，动作可用性在动作前按当前节点校验）。
+ * `refresh()` 失败时按读树时记录的子索引路径在当前活动窗口重解析一次，
+ * 并要求指纹逐字段一致；否则仍返回 `stale_handle`。
  * 窗口、包名、尺寸或旋转变化会让树和截图失效。
  */
 internal class ObservationRegistry(
     private val ttlMillis: Long = DEFAULT_TTL_MILLIS,
     private val now: () -> Long,
+    private val rootProvider: () -> PhoneNode? = { null },
 ) {
     private var tree: TreeObservation? = null
     private var screenshot: ScreenshotObservation? = null
@@ -101,27 +104,53 @@ internal class ObservationRegistry(
                 "Unknown node handle $nodeId. Call phone_agent_tree with offset 0.",
             )
         }
-        val node = observation.handles[index]
+        val node = observation.handleAt(index)
         if (!node.refresh()) {
-            throw targetChanged("refresh_failed")
+            val resolved = resolveByPath(observation, index) ?: throw targetChanged("refresh_failed")
+            runCatching { node.recycle() }
+            observation.replaceHandle(index, resolved)
         }
-        if (!node.isVisibleToUser) {
+        val target = observation.handleAt(index)
+        if (!target.isVisibleToUser) {
             throw targetChanged("not_visible")
         }
-        if (!node.isEnabled) {
+        if (!target.isEnabled) {
             throw targetChanged("not_enabled")
         }
-        val current = node.fingerprint()
+        val current = target.fingerprint()
         if (current != observation.fingerprints[index]) {
             val changed = fingerprintDiff(observation.fingerprints[index], current)
             throw targetChanged(changed.joinToString(", "))
         }
         return SavedHandle(
             id = nodeId,
-            node = node,
+            node = target,
             fingerprint = observation.fingerprints[index],
             record = observation.records[index],
         )
+    }
+
+    /**
+     * `refresh()` 失败后的受控重解析：按读树时记录的从根到目标的子索引路径
+     * 在当前活动窗口重新取节点，并要求指纹逐字段一致。路径不存在、节点缺失
+     * 或指纹不同都返回 null，由调用方维持 `stale_handle`。
+     */
+    private fun resolveByPath(observation: TreeObservation, index: Int): PhoneNode? {
+        val path = observation.paths.getOrNull(index) ?: return null
+        var current: PhoneNode = rootProvider() ?: return null
+        for (step in path) {
+            val child = runCatching { current.child(step) }.getOrNull()
+            // 契约：PhoneNode.child() 每次返回可独立回收的引用，因此无条件回收上一层。
+            runCatching { current.recycle() }
+            if (child == null) return null
+            current = child
+        }
+        val fingerprint = runCatching { current.fingerprint() }.getOrNull()
+        if (fingerprint == null || fingerprint != observation.fingerprints[index]) {
+            runCatching { current.recycle() }
+            return null
+        }
+        return current
     }
 
     @Synchronized
@@ -205,8 +234,9 @@ internal class ObservationRegistry(
     )
 
     private fun clearTreeLocked() {
-        tree?.handles?.forEach { handle ->
-            runCatching { handle.recycle() }
+        val observation = tree ?: return
+        for (index in 0 until observation.handleCount) {
+            runCatching { observation.handleAt(index).recycle() }
         }
         tree = null
     }
