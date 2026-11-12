@@ -441,9 +441,21 @@ flutter test integration_test/phone_agent_exception_test.dart -d <android-device
 
 ## 验证状态
 
-### 本轮 M23 前台可视化叠加层（API35 模拟器 + 物理 MIUI API31）
+### 本轮 M24 `stale_handle` 复现与路径重解析（API35 模拟器 + 物理 MIUI API31）
 
-本轮新增独立 `TYPE_ACCESSIBILITY_OVERLAY` 前台可视化叠加层（无文本图形、无设置开关、无 ARB、无插件通道方法），并接入读树、截图、节点动作、坐标手势和系统动作。交付树、`modsetHash`、APK 大小/SHA-256 和 manifest 隔离记录在 `docs/phone-agent-plan.md` 9.3.7 与 `docs/next-session-handoff.md`。
+本轮处理「聚焦后同一句柄 `set_text` 返回 `stale_handle`」：自然循环未复现（API35 278 次迭代、MIUI 80 次、MIUI 官方测试 4 轮全绿），改用受控夹具确认机制——Flutter 重建输入框语义子树会让持有的 `AccessibilityNodeInfo` 无法 `refresh()`。
+
+- 机制复现：强制重建输入框子树后旧句柄 `set_text` 3/3 返回 `stale_handle`，消息 `The target node changed (refresh_failed)`；不重建的对照组 3/3 成功。
+- 修复：读树记录「根→节点子索引路径」，`refresh()` 失败时按路径在当前活动窗口重解析一次，并要求指纹逐字段完全一致；路径缺失、节点不存在或任一字段不等仍 `stale_handle`（路径失败保留 `refresh_failed`）。
+- A/B（同一夹具 8 轮）：修复后 8/8 成功且控件内容变为 `fix 0`…`fix 7`——旧句柄已无法 `refresh()`，文本能落进重建后的控件，唯一路径就是按路径重取，这是重解析被执行的直接证据。禁用重解析的 8/8 `refresh_failed` 属构造性对照，不构成独立证据。
+- 边界：只对「平台重建节点对象、逻辑节点未变且重建后仍 advertise 所需动作」生效；重建后不接受所需动作仍是 `action_unavailable`，未放宽动作校验。
+- 结果：API35 官方 `phone_agent_test.dart` `+2`、EXIT=0；物理 MIUI `1960cd68` 官方 `+2`、EXIT=0。API35 完整异常套件未取得绿色整轮（最好 `+6 -2`，三条失败均为宿主脚本时序），已通过 FLAG_SECURE、旋转、home/recents、锁屏、叠加层宿主触摸。API29 离线，未运行。
+- 检查：Loader 165、插件 Kotlin 106、Flutter 126、上游 seam 56、`dart analyze --fatal-infos` 无问题、`verify` 通过。设备结果取自 R1 前的树 `47675033b3d132e0`；R1 的 F1/F2 为行为保持型重构，未重跑设备，只由插件 Kotlin 单测覆盖。
+- 产品 debug APK（R1 返工后最终树 `29861376ffaa5e41`，干净树 `flutter clean` + `pub get` + 显式 `flutter build apk --debug`）：181,403,918 字节，SHA-256 `5a54cb3a459a9c8758033fce6eba14bdf098b0b6c02477be45e83e723bd41b43`；构建后未再运行 integration_test。交付基线只认该树（A/B 用的 `dfcef53cfd77ea78` 是手工注入的临时树，其 `modsetHash` 不代表内容；R1 前树 `47675033b3d132e0` 的 181,404,642 / `677c26d9…` 只作历史）。
+
+### M23 前台可视化叠加层（历史，API35 模拟器 + 物理 MIUI API31）
+
+（保留历史，不代表 M24 现状）本轮新增独立 `TYPE_ACCESSIBILITY_OVERLAY` 前台可视化叠加层（无文本图形、无设置开关、无 ARB、无插件通道方法），并接入读树、截图、节点动作、坐标手势和系统动作。交付树、`modsetHash`、APK 大小/SHA-256 和 manifest 隔离记录在 `docs/phone-agent-plan.md` 9.3.7 与 `docs/next-session-handoff.md`。
 
 - round 4 结果（设备运行树 `9ebf2e991caa07ed`，最终源码树 `dfcef53cfd77ea78`，仅 `plugin/README.md` 副本不同；产品 APK 在最终树构建）：API35 独立 AVD `Kelivo_M23_API_35` 完整异常套件 **`+8`、`All tests passed!`、EXIT=0**（含旋转、锁屏、服务禁用/重启、权限窗口），官方 `phone_agent_test.dart` **`+2`、EXIT=0**；物理 MIUI 官方 **`+2`、EXIT=0**，「叠加层不污染产品截图」**`+1`、EXIT=0**。本地 Loader 165、插件 Kotlin 97、Flutter 126、静态分析和 `verify` 通过。产品 debug APK 在最终树 `dfcef53cfd77ea78` 于全部设备测试后 `flutter clean` 显式构建：181,403,054 字节，SHA-256 `501d4a0087294258baa882e9a32856208805fcba88228ec34e15016ae89689fb`；debug merged manifest 含 `SecureWindowFixtureActivity`，release 不含且含 `PhoneAgentService`；构建后未再运行 integration_test。此前 181,402,630 / `a72cac9b…` 已被 `a460dcbc` 上 17:29/17:32 的 integration_test 覆盖为测试入口构建，仅作历史。API35 服务禁用用例单独 `+1`、EXIT=0，宿主 `dumpsys` 原始输出 `R5_OVERLAY_WINDOWS_AFTER_DISABLE: count=0`、`R5_OVERLAY_WINDOWS_AFTER_RESTART: count=0`；宿主 `screenrecord` 帧确认观察脉冲、节点点击圆环和坐标滑动轨迹（1500ms 定向验证，`#008999` 圆点沿 x≈539 从 y≈1110 上移到 y≈462，约 42 帧/1.4s）。
 - round 2/3 历史（不代表 round-4 现状）：API35 模拟器（`emulator-5554`，Android 15）：返工树官方 `phone_agent_test.dart` **`+2`、EXIT=0**。完整异常套件返工后多次整轮运行的真实退出码均为 1，未得到绿色整轮：一次 `+6 -2`（锁屏/服务禁用失败，期间模拟器 system_server 重启），一次 `+7 -1`（唯一失败为「服务禁用中断与重新启用恢复」的宿主设置页时序），最后一次有界整轮在 `setUpAll` 失败。`dumpsys activity lastanr` 为 `Input dispatching timed out (Application does not have a focused window)`，ANR 发生在任何工具调用之前、应用进程存活、无障碍连接为 DEAD，属宿主/模拟器窗口焦点与输入分发问题，不是 overlay 主线程死锁；ANR 弹窗阻塞宿主通过系统 UI 启用服务。round 2 树 `f1b26a580b737e14` 的完整异常套件为 `+6 -2`、EXIT=1：失败为「旋转后旧句柄与旧截图失效」（转回竖屏截图 10 秒 timeout，单独重跑 `+1`、EXIT=0）和「锁屏 device_locked 与解锁恢复」（宿主恢复等待点击目标超时）；「服务禁用中断与重新启用恢复」该轮通过且单独重跑 `+1`、EXIT=0（`codes=interrupted,ok`）。该历史轮未生成产品 APK；round-4 产品 APK 已生成，见上方 round 4 结果。
