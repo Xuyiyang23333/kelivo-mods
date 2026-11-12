@@ -27,8 +27,10 @@ internal data class NodeRecord(
 /** 一次完整读树的原生结果。分页只切片，不重新遍历。 */
 internal data class TreeObservation(
     val records: List<NodeRecord>,
-    val handles: List<PhoneNode>,
+    val handles: MutableList<PhoneNode>,
     val fingerprints: List<NodeFingerprint>,
+    /** 每个节点从根开始的子索引路径，用于 `refresh()` 失败后的受控重解析。 */
+    val paths: List<List<Int>>,
     val truncated: Boolean,
     val textTruncated: Boolean,
     val windowId: Int,
@@ -63,6 +65,7 @@ internal class NodeTreeReader(
         val records = mutableListOf<NodeRecord>()
         val handles = mutableListOf<PhoneNode>()
         val fingerprints = mutableListOf<NodeFingerprint>()
+        val paths = mutableListOf<List<Int>>()
         var visited = 0
         var remainingText = textBudget
         var truncated = false
@@ -81,7 +84,7 @@ internal class NodeTreeReader(
             return result
         }
 
-        fun visit(node: PhoneNode, depth: Int, parentId: String?) {
+        fun visit(node: PhoneNode, depth: Int, parentId: String?, path: List<Int>) {
             try {
                 if (visited >= maxVisited || records.size >= maxNodes || depth > maxDepth) {
                     truncated = true
@@ -119,6 +122,7 @@ internal class NodeTreeReader(
                     )
                     handles += node.duplicate()
                     fingerprints += node.fingerprint()
+                    paths += path
                     nextParent = id
                 }
                 if (!node.isPassword) {
@@ -128,7 +132,7 @@ internal class NodeTreeReader(
                             break
                         }
                         val child = node.child(index) ?: continue
-                        visit(child, depth + 1, nextParent)
+                        visit(child, depth + 1, nextParent, path + index)
                     }
                 }
             } finally {
@@ -136,11 +140,12 @@ internal class NodeTreeReader(
             }
         }
 
-        visit(root, 0, null)
+        visit(root, 0, null, emptyList())
         return TreeObservation(
             records = records,
             handles = handles,
             fingerprints = fingerprints,
+            paths = paths,
             truncated = truncated,
             textTruncated = textTruncated,
             windowId = windowId,

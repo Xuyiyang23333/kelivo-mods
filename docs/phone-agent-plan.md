@@ -367,7 +367,8 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 - 节点被真正替换、内容变化、稳定能力字段变化、`isSelected` 变化、窗口/包名/尺寸/旋转变化和 120 秒 TTL 超时仍返回 `stale_handle` 或 `stale_observation`。
 - `stale_handle` 的错误信息会附带发生变化的指纹字段名（只含固定字段名，不含文本内容）；指纹是结构化字段列表，值只参与相等比较，不会被反解为字段名。
 - 前置重验失败与指纹变化使用同一错误码 `stale_handle`，但消息中的诊断标识可区分来源：`refresh()` 返回 false 时为 `refresh_failed`，刷新成功但 `isVisibleToUser` 为 false 时为 `not_visible`，前两者通过但 `isEnabled` 为 false 时为 `not_enabled`。三者按该顺序短路判断，只输出固定标识，不输出节点文本、类名、viewId 或其他内容；诊断不改变任何通过条件，也不把失败自动转成重新读树或重试。
-- 该决定由 `ObservationRegistryTest` 的 focus-only 复用、action-only 复用、selected-only 拒绝、稳定能力变化拒绝和三项前置诊断用例固定；放宽更多字段必须先更新本节、`AGENTS.md` 和 `mods/phone_agent/README.md`，并补对应测试。
+- 节点重解析（M24）：`refresh()` 返回 false 时，先按读树时记录的“从根到该节点的子索引路径”在当前活动窗口重新解析一次，并要求重新解析出的节点指纹与读树时逐字段完全一致；路径解析失败、节点不存在或任一指纹字段不等时仍返回 `stale_handle`（路径解析失败的消息保留 `refresh_failed`），不返回新句柄。该重解析只处理“平台重建了节点对象、逻辑节点未变”的情况：不按文本、描述或相似度查找节点，不放宽任何指纹字段，不改变可见性、可用性、TTL 和窗口/包名/尺寸/旋转校验，也不自动重试动作。
+- 该决定由 `ObservationRegistryTest` 的 focus-only 复用、action-only 复用、selected-only 拒绝、稳定能力变化拒绝、三项前置诊断和重解析用例固定；放宽更多字段必须先更新本节、`AGENTS.md` 和 `mods/phone_agent/README.md`，并补对应测试。
 - 该契约不保证节点始终有效，也不保证业务结果成功；模型仍应在页面明显变化时重新读树。
 
 该策略允许模型在同一页执行多个相互独立的操作，但是否需要重新观察由任务语义决定。它不保证节点始终有效，也不保证业务结果成功。

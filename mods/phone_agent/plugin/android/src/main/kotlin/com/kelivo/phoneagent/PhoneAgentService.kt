@@ -99,7 +99,10 @@ class PhoneAgentService : AccessibilityService() {
 
     override fun onCreate() {
         super.onCreate()
-        registry = ObservationRegistry(now = { SystemClock.elapsedRealtime() })
+        registry = ObservationRegistry(
+            now = { SystemClock.elapsedRealtime() },
+            rootProvider = { rootInActiveWindow?.let(::AndroidPhoneNode) },
+        )
         treeBudget = ActionBudget(
             limit = 60,
             windowMillis = 60_000,

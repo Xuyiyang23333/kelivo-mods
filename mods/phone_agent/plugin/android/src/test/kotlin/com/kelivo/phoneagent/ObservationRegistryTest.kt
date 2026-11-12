@@ -288,6 +288,137 @@ class ObservationRegistryTest {
     }
 
     @Test
+    fun `refresh failure re-resolves the same node by path`() {
+        val root = FakeNode(text = "root")
+        val field = FakeNode(
+            className = "android.widget.EditText",
+            text = "",
+            isEditable = true,
+            actions = setOf(NodeAction.CLICK, NodeAction.SET_TEXT),
+        )
+        root.children += field
+        val observation = readTree(root)
+        val replacement = FakeNode(text = "root")
+        val replacementField = FakeNode(
+            className = "android.widget.EditText",
+            text = "",
+            isEditable = true,
+            actions = setOf(NodeAction.CLICK, NodeAction.SET_TEXT),
+        )
+        replacement.children += replacementField
+        registry = ObservationRegistry(now = { now }, rootProvider = { replacement })
+        registry.beginTree(observation)
+        field.refreshResult = false
+
+        val handle = registry.handle("n1", window)
+
+        assertEquals("n1", handle.id)
+        assertTrue(handle.node === replacementField)
+        assertTrue(handle.node.perform(NodeAction.SET_TEXT, "x"))
+        assertEquals(listOf(NodeAction.SET_TEXT), replacementField.performed)
+    }
+
+    @Test
+    fun `refresh failure with a changed fingerprint still fails`() {
+        val root = FakeNode(text = "root")
+        val field = FakeNode(text = "before", isClickable = true)
+        root.children += field
+        val observation = readTree(root)
+        val replacement = FakeNode(text = "root")
+        val replacementField = FakeNode(text = "after", isClickable = true)
+        replacement.children += replacementField
+        registry = ObservationRegistry(now = { now }, rootProvider = { replacement })
+        registry.beginTree(observation)
+        field.refreshResult = false
+
+        val error = assertThrows(PhoneAgentError::class.java) {
+            registry.handle("n1", window)
+        }
+
+        assertEquals("stale_handle", error.code)
+        assertTrue(error.message.contains("refresh_failed"))
+        assertFalse(error.message.contains("after"))
+    }
+
+    @Test
+    fun `refresh failure with a missing path still fails`() {
+        val root = FakeNode(text = "root")
+        val field = FakeNode(text = "child", isClickable = true)
+        root.children += field
+        val observation = readTree(root)
+        val replacement = FakeNode(text = "root")
+        registry = ObservationRegistry(now = { now }, rootProvider = { replacement })
+        registry.beginTree(observation)
+        field.refreshResult = false
+
+        val error = assertThrows(PhoneAgentError::class.java) {
+            registry.handle("n1", window)
+        }
+
+        assertEquals("stale_handle", error.code)
+        assertTrue(error.message.contains("refresh_failed"))
+    }
+
+    @Test
+    fun `refresh failure without a root provider still fails`() {
+        val root = FakeNode(text = "root")
+        val field = FakeNode(text = "child", isClickable = true)
+        root.children += field
+        val observation = readTree(root)
+        registry.beginTree(observation)
+        field.refreshResult = false
+
+        val error = assertThrows(PhoneAgentError::class.java) {
+            registry.handle("n1", window)
+        }
+
+        assertEquals("stale_handle", error.code)
+        assertTrue(error.message.contains("refresh_failed"))
+    }
+
+    @Test
+    fun `successful refresh does not re-resolve`() {
+        val root = FakeNode(text = "root")
+        val field = FakeNode(text = "child", isClickable = true)
+        root.children += field
+        val observation = readTree(root)
+        var providerCalls = 0
+        registry = ObservationRegistry(
+            now = { now },
+            rootProvider = {
+                providerCalls++
+                FakeNode(text = "other")
+            },
+        )
+        registry.beginTree(observation)
+
+        val handle = registry.handle("n1", window)
+
+        assertEquals("n1", handle.id)
+        assertEquals(0, providerCalls)
+    }
+
+    @Test
+    fun `re-resolved handle is reused for the next action`() {
+        val root = FakeNode(text = "root")
+        val field = FakeNode(text = "child", isClickable = true)
+        root.children += field
+        val observation = readTree(root)
+        val replacement = FakeNode(text = "root")
+        val replacementField = FakeNode(text = "child", isClickable = true)
+        replacement.children += replacementField
+        registry = ObservationRegistry(now = { now }, rootProvider = { replacement })
+        registry.beginTree(observation)
+        field.refreshResult = false
+
+        val first = registry.handle("n1", window)
+        val second = registry.handle("n1", window)
+
+        assertTrue(first.node === replacementField)
+        assertTrue(second.node === replacementField)
+    }
+
+    @Test
     fun `unknown handle is rejected`() {
         val (_, observation) = observation()
         registry.beginTree(observation)

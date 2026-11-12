@@ -129,6 +129,20 @@ class NodeTreeReaderTest {
     }
 
     @Test
+    fun `records child index paths for re-resolution`() {
+        val root = FakeNode(text = "root")
+        val first = FakeNode(text = "first")
+        val nested = FakeNode(text = "nested")
+        first.children += nested
+        root.children += first
+        root.children += FakeNode(text = "second")
+
+        val observation = read(root)
+
+        assertEquals(listOf(emptyList<Int>(), listOf(0), listOf(0, 0), listOf(1)), observation.paths)
+    }
+
+    @Test
     fun `does not report truncation for a small tree`() {
         val root = FakeNode()
         root.children += FakeNode(text = "one")
