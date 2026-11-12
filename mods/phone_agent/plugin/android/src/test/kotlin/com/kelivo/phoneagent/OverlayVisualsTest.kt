@@ -294,6 +294,23 @@ class OverlayVisualsTest {
     }
 
     @Test
+    fun `gate resume is idempotent and ignores late callbacks`() {
+        val scheduler = FakeScheduler()
+        val gate = OverlayCaptureGate(scheduler, { OverlayHideResult.HIDDEN })
+        var proceeded = 0
+        var failed = 0
+
+        gate.hideForCapture({ proceeded++ }, { failed++ })
+        val lateFirstFrame = scheduler.frames.removeFirst()
+        gate.resumeAfterCapture()
+        gate.resumeAfterCapture()
+        lateFirstFrame()
+        assertEquals(0, proceeded)
+        assertEquals(0, failed)
+        assertTrue(scheduler.frames.isEmpty())
+    }
+
+    @Test
     fun `late settle callback after resume cannot proceed or affect the next request`() {
         val scheduler = FakeScheduler()
         val gate = OverlayCaptureGate(scheduler, { OverlayHideResult.HIDDEN })

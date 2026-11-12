@@ -483,7 +483,7 @@ void main() {
 
   testWidgets('锁屏 device_locked 与解锁恢复', (tester) async {
     await _pumpHarness(tester);
-    await _ensureAppForeground(service);
+    await _ensureAppForeground(service, repump: () => _pumpHarness(tester));
     final before = await _tree(service);
     final tapNode = _nodeForText(before, _tapTarget);
     expect(tapNode, isNotNull, reason: '锁屏测试前读树没有找到点击目标。');
@@ -661,14 +661,27 @@ void _hostStep(String marker, String instruction) {
   debugPrint('$marker: $instruction');
 }
 
-Future<void> _ensureAppForeground(PhoneAgentService service) async {
+Future<void> _ensureAppForeground(
+  PhoneAgentService service, {
+  Future<void> Function()? repump,
+}) async {
   final deadline = DateTime.now().add(const Duration(seconds: 5));
+  var repumped = false;
   while (DateTime.now().isBefore(deadline)) {
     final tree = await _tryTree(service);
     if (tree != null &&
         tree['package_name'] == _appPackage &&
         _nodeForText(tree, _tapTarget) != null) {
       return;
+    }
+    // 应用已在前台但语义树没有点击目标时，重新 pump 一次测试 harness，
+    // 覆盖后台恢复后 Flutter 语义树未刷新的宿主时序；不改变任何断言。
+    if (!repumped &&
+        repump != null &&
+        tree != null &&
+        tree['package_name'] == _appPackage) {
+      repumped = true;
+      await repump();
     }
     await Future<void>.delayed(_pollInterval);
   }
@@ -779,14 +792,19 @@ Future<ClientToolResult> _screenshot(PhoneAgentService service) async {
     PhoneAgentToolNames.screenshot,
     const <String, dynamic>{},
   );
-  if (_payload(result)['error'] == 'rate_limited') {
-    // 截图限频约一次/秒；相邻用例之间可能不足一秒，重试一次而不是判失败。
+  var error = _payload(result)['error'];
+  var attempts = 0;
+  // 截图限频约一次/秒；慢速模拟器在旋转/窗口过渡后也可能超过产品 10 秒 timeout。
+  // 这是宿主稳定性重试，不改变产品超时语义，最终仍要求成功截图。
+  while ((error == 'rate_limited' || error == 'timeout') && attempts < 2) {
+    attempts++;
     await Future<void>.delayed(const Duration(milliseconds: 1200));
     result = await _callResult(
       service,
       PhoneAgentToolNames.screenshot,
       const <String, dynamic>{},
     );
+    error = _payload(result)['error'];
   }
   return result;
 }
