@@ -341,6 +341,70 @@ class ObservationRegistryTest {
     }
 
     @Test
+    fun `re-resolution recycles intermediate nodes along the path`() {
+        val root = FakeNode(text = "root")
+        val middle = FakeNode(text = "middle")
+        val field = FakeNode(
+            className = "android.widget.EditText",
+            text = "",
+            isEditable = true,
+            actions = setOf(NodeAction.CLICK, NodeAction.SET_TEXT),
+        )
+        middle.children += field
+        root.children += middle
+        val observation = readTree(root)
+        val replacement = FakeNode(text = "root")
+        val replacementMiddle = FakeNode(text = "middle")
+        val replacementField = FakeNode(
+            className = "android.widget.EditText",
+            text = "",
+            isEditable = true,
+            actions = setOf(NodeAction.CLICK, NodeAction.SET_TEXT),
+        )
+        replacementMiddle.children += replacementField
+        replacement.children += replacementMiddle
+        registry = ObservationRegistry(now = { now }, rootProvider = { replacement })
+        registry.beginTree(observation)
+        field.refreshResult = false
+
+        val handle = registry.handle("n2", window)
+
+        assertTrue(handle.node === replacementField)
+        // 契约：每层 child() 都返回可独立回收的引用，重解析路上的中间节点各回收一次。
+        assertEquals(1, replacement.recycleCount)
+        assertEquals(1, replacementMiddle.recycleCount)
+        assertEquals(0, replacementField.recycleCount)
+        assertTrue(handle.node.perform(NodeAction.SET_TEXT, "ok"))
+    }
+
+    @Test
+    fun `failed re-resolution still recycles nodes visited along the path`() {
+        val root = FakeNode(text = "root")
+        val middle = FakeNode(text = "middle")
+        val field = FakeNode(text = "child", isClickable = true)
+        middle.children += field
+        root.children += middle
+        val observation = readTree(root)
+        val replacement = FakeNode(text = "root")
+        val replacementMiddle = FakeNode(text = "middle")
+        replacementMiddle.children += FakeNode(text = "changed", isClickable = true)
+        replacement.children += replacementMiddle
+        registry = ObservationRegistry(now = { now }, rootProvider = { replacement })
+        registry.beginTree(observation)
+        field.refreshResult = false
+
+        val error = assertThrows(PhoneAgentError::class.java) {
+            registry.handle("n2", window)
+        }
+
+        assertEquals("stale_handle", error.code)
+        assertTrue(error.message.contains("refresh_failed"))
+        // 指纹不等时也要回收路径上已取得的节点，避免 AccessibilityNodeInfo 泄漏。
+        assertEquals(1, replacement.recycleCount)
+        assertEquals(1, replacementMiddle.recycleCount)
+    }
+
+    @Test
     fun `refresh failure with a missing path still fails`() {
         val root = FakeNode(text = "root")
         val field = FakeNode(text = "child", isClickable = true)

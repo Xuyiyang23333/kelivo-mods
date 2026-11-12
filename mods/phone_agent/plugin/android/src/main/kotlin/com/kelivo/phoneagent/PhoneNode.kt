@@ -94,6 +94,10 @@ internal interface PhoneNode {
     val actions: Set<NodeAction>
     val childCount: Int
 
+    /**
+     * 契约：每次调用返回可独立回收的引用，调用方回收上一层节点不影响返回值；
+     * 实现不得返回缓存实例或自身。`ObservationRegistry` 依赖该契约按路径逐层回收。
+     */
     fun child(index: Int): PhoneNode?
     fun duplicate(): PhoneNode
     fun refresh(): Boolean

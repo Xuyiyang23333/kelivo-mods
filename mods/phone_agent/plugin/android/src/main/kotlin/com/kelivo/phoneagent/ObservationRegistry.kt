@@ -104,13 +104,13 @@ internal class ObservationRegistry(
                 "Unknown node handle $nodeId. Call phone_agent_tree with offset 0.",
             )
         }
-        val node = observation.handles[index]
+        val node = observation.handleAt(index)
         if (!node.refresh()) {
             val resolved = resolveByPath(observation, index) ?: throw targetChanged("refresh_failed")
             runCatching { node.recycle() }
-            observation.handles[index] = resolved
+            observation.replaceHandle(index, resolved)
         }
-        val target = observation.handles[index]
+        val target = observation.handleAt(index)
         if (!target.isVisibleToUser) {
             throw targetChanged("not_visible")
         }
@@ -140,11 +140,9 @@ internal class ObservationRegistry(
         var current: PhoneNode = rootProvider() ?: return null
         for (step in path) {
             val child = runCatching { current.child(step) }.getOrNull()
-            if (child == null) {
-                runCatching { current.recycle() }
-                return null
-            }
-            if (current !== child) runCatching { current.recycle() }
+            // 契约：PhoneNode.child() 每次返回可独立回收的引用，因此无条件回收上一层。
+            runCatching { current.recycle() }
+            if (child == null) return null
             current = child
         }
         val fingerprint = runCatching { current.fingerprint() }.getOrNull()
@@ -236,8 +234,9 @@ internal class ObservationRegistry(
     )
 
     private fun clearTreeLocked() {
-        tree?.handles?.forEach { handle ->
-            runCatching { handle.recycle() }
+        val observation = tree ?: return
+        for (index in 0 until observation.handleCount) {
+            runCatching { observation.handleAt(index).recycle() }
         }
         tree = null
     }
