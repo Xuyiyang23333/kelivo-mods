@@ -6,7 +6,7 @@
 - 新增 `docs/phone-agent-plan.md` **7.5 应用边界与应用授权（设计提案，尚未实现）**：默认拒绝；三层判定（硬基线 → 窗口类型 → 用户白名单），顺序插在 `no_window` 之后、句柄/截图校验之前；`(包名, 签名证书哈希)` 双匹配；`com.android.settings` 及厂商变体进硬基线且仍返回 `system_window_denied`（不新增错误码）；`package_not_allowed` 保留为构建期硬禁止语义。
 - 窗口类型双层判定写成不对称集：输入允许集 `{TYPE_APPLICATION}`；观察允许集 `{TYPE_APPLICATION, TYPE_INPUT_METHOD}`。文档写清了两层都判的必要性（只看包名漏输入法/overlay 窗口，只看类型漏 `TYPE_APPLICATION` 的 settings）与未知类型 fail closed。
 - 观察边界只判硬基线与窗口类型、不判白名单，理由与代价都写明：**不承诺读树不泄漏第三方应用自身界面文本**；截图的前台判定先于且独立于全窗口密码遮挡遍历。
-- 新增 `docs/phone-agent-plan.md` **7.6 实现前置风险与行为变更**：`WindowState` 加 `windowType` 的影响面、`phone_agent_exception_test.dart:537/549-550` 的 settings 依赖、收紧型行为变更、历史 VLM 结果不可复用、五项待实测假设。
+- 新增 `docs/phone-agent-plan.md` **7.6 实现前置风险与行为变更**：`WindowState` 加 `windowType` 的影响面、`phone_agent_exception_test.dart` 5 处会红的观察边界依赖（settings 树 `:537`/`:549-550`/`:557`、叠加层触摸 `:202-232`、home/recents `:346-377`）、收紧型行为变更、历史 VLM 结果不可复用、五项待实测假设。
 - 同步 `AGENTS.md`（8 条契约条目）、`mods/phone_agent/README.md`（用户可读的「应用白名单与批准（设计提案，尚未实现）」+ 错误码表分界）、本文件（本节 + 第 8 节下一阶段入口）。
 - **重要边界**：本轮未改一行产品代码，**未运行任何测试、未构建 APK、未接设备**，未产生新 `modsetHash` 或 APK 记录。所有“会被拒绝”的描述都是设计意图。当前代码仍是输入只允许 `com.psyche.kelivo.phoneagent`、读树与截图不检查包名或窗口类型。
 - 写文档时修正了 M25 草稿的三处不准确：`WindowState` 实际只有 `PhoneAgentService.kt:512` 一个构造点（M25 写“四个构造点”，实为 1 个定义 + `:294/:340/:434` 三个调用点 + 三个测试夹具）；补充了“Kelivo 自身进硬基线”与测试包 `com.psyche.kelivo.phoneagent` 的精确包名区分陷阱；M25 说“README 与 9.3.7 本来就写着宿主确认、属实现落后于文档”不成立——现有文档只规定了权限弹窗的宿主 `dumpsys` 确认与“服务开关由宿主在系统界面操作”，**没有**规定服务禁用用例的前台页面由宿主确认，实现时必须补齐这一条。
@@ -315,10 +315,10 @@ dart tool/mod_loader.dart verify
 
 实现时按以下顺序，前一步不稳定不要开始后一步：
 
-1. **硬基线集合 + `WindowState.windowType`**。把 `com.android.settings` 及厂商变体、电话/短信角色持有者、Kelivo 自身 `com.psyche.kelivo` 补进系统包集合（仍返回 `system_window_denied`，不新增码）；给 `WindowState`（`ObservationRegistry.kt:4-10`）加 `windowType`，在 `windowState()`（`PhoneAgentService.kt:512`）按 `windowId` 从 `windows` 匹配，类型解析失败 fail closed。同步三个调用点 `:294`/`:340`/`:434`、`sameWindow()`（`ObservationRegistry.kt:222-228`）和三处测试夹具。策略做成纯函数，用纯 JVM 测试覆盖，不引入 Robolectric。
-2. **观察边界**。`readTree` 与 `captureScreenshot` 各加一次 `requireObservable()`；**同批**把 `phone_agent_exception_test.dart` 对 `com.android.settings` 树的依赖（`:537`、`:549-550` 的前台断言，以及 `:557` 起的 1000 个 pending 读树）改为宿主 `dumpsys` 独立确认，否则异常套件必红。此步之后读设置页/通知栏/输入法窗口的行为会变更。
+1. **硬基线集合 + `WindowState.windowType`**。settings 及厂商变体补进**静态**系统包集合；电话/短信角色持有者需运行时 `RoleManager` 解析，Kelivo 自身 `com.psyche.kelivo` 按精确包名硬编码判定——后两类在策略层另行判定（仍返回 `system_window_denied`，不新增码）；给 `WindowState`（`ObservationRegistry.kt:4-10`）加 `windowType`，在 `windowState()`（`PhoneAgentService.kt:512`）按 `windowId` 从 `windows` 匹配，类型解析失败 fail closed。同步三个调用点 `:294`/`:340`/`:434`、`sameWindow()`（`ObservationRegistry.kt:222-228`）和三处测试夹具。策略做成纯函数，用纯 JVM 测试覆盖，不引入 Robolectric；`PackagePolicyTest` 错误码断言不变，但调用签名要加窗口类型参数。
+2. **观察边界**。`readTree` 与 `captureScreenshot` 各加一次 `requireObservable()`；**同批**改异常测试，否则套件必红。共 5 处：(a) `:537`、`:549-550` 的 settings 前台断言与 `:557` 起 1000 个 pending 读树改为宿主 `dumpsys` 确认、pending 批次改在测试应用前台建立；(b) `:202-232` 叠加层触摸用例改为宿主 `dumpsys` 确认通知栏已打开，只保留叠加层可见性证据；(c) `:346-377`（经 `_expectSystemNavigationDenied` `:1019`）home/recents 用例改为宿主确认前台后直接断言输入错误码，不再读树取包名。详见 plan 7.6 风险 2。此步之后读设置页/通知栏/输入法窗口的行为会变更。
 3. **用户白名单与签名校验**。`(包名, 签名证书 SHA-256)` 双匹配，未命中返回 `permission_required`；签名解析能力受 Android 11+ 包可见性限制，需先实测（见 7.6 风险 5）。
-4. **批准交互**。先做聊天内卡片（复用 `ToolApprovalService` 的 Completer 模式），再做通知栏（必须新增通知 action + `BroadcastReceiver`，现有 `NotificationService` 只有点击打开会话）。
+4. **批准交互**。先做聊天内卡片（复用 `ToolApprovalService` 的请求结构、pending 存储与 `notifyListeners()` 刷新，**不复用其等待语义**——工具调用已返回 `permission_required`，卡片须自带 TTL 与“任一端批准即置终态”的收敛），再做通知栏（必须新增通知 action + `BroadcastReceiver`，现有 `NotificationService` 只有点击打开会话）。
 5. **审计**。落盘元数据，滚动保留 30 天或 2000 条。
 
 实现后必须重跑并把结果写入 9.3/9.4：API35 官方测试、完整异常套件、物理 MIUI 官方测试，以及至少一轮 VLM 固定任务（含 `permission_required` → 批准 → 重试 → 重新观察的完整链路）。重跑前，9.4 与 10.1 的 VLM 结果**只能作为旧代码证据**，不得用于宣称新边界已验证。

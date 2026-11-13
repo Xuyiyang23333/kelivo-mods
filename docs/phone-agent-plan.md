@@ -390,7 +390,7 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 - `plugin_unavailable`：插件不可用；
 - `package_not_allowed`：目标包名不在测试白名单（**仅表示构建期硬禁止**，不表示“用户未批准”）；
 - `permission_required`：目标应用尚未获得用户批准（**7.5 设计提案，尚未实现**）；立即返回、不排队、不静默降级；
-- `system_window_denied`：系统窗口、权限弹窗或锁屏窗口被拒绝；
+- `system_window_denied`：系统窗口、硬基线或窗口类型拒绝（锁屏仍返回 `device_locked`，不会走本码）；
 - `device_locked`：设备锁屏或息屏；
 - `budget_exceeded`：本次生成的动作预算超限。
 
@@ -511,7 +511,7 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 - 电话/短信核心应用：按系统角色解析默认电话、默认短信持有者；
 - 承载助手的 Kelivo 包 `com.psyche.kelivo`：批准卡片本身就在这个包里，允许输入等于让模型点自己的批准按钮。
 
-硬基线失败仍返回 **`system_window_denied`**，**不新增错误码**。语义由“是否属于硬基线集合”表达，6.6 的固定优先级链与既有 `PackagePolicyTest` 断言都不改变，只把 settings 及厂商变体补进系统包集合。
+硬基线失败仍返回 **`system_window_denied`**，**不新增错误码**。落地方式分三种，不能用一句“补进集合”概括：静态系统包集合补入 settings 及厂商变体；“电话/短信角色持有者”需要运行时 `RoleManager` 解析；“Kelivo 自身”是按精确包名 `com.psyche.kelivo` 的硬编码判定，不需要也无法通过角色解析。后两类在策略层另行判定。现有 `PackagePolicyTest` 的**错误码断言不变**，但调用签名会随纯函数改造增加窗口类型（及白名单）参数。
 
 权限弹窗不因本层改变：API35 实测该窗口 `hasRoot=false`、`pkg=null`，在到达硬基线判定前就以 `no_window` 退出（见 6.6 与 9.3.6）。硬基线只在能取得包名时生效，不能把 `no_window` 改写成 `system_window_denied`。
 
@@ -562,7 +562,7 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 - 顺序固定为：取前台 `WindowState` → **观察边界判定**（硬基线 + 窗口类型）→ 通过后才执行 `collectPasswordBounds` 全窗口遍历 → 截图。
 - `collectPasswordBounds`（`PhoneAgentService.kt:454`）读的是**所有**窗口的 root，不能因为前台被拒就缩窄遍历范围，也不能把“前台不合格”当成“不用遮挡”。
 - 两者必须在代码上是独立步骤：遮挡遍历只按密码节点与自身 overlay 规则工作，不感知边界策略；边界策略也不读节点内容。
-- 入口判定之后不必再加一次类型判定：既有 `ScreenshotCapture` 的 gate 与 `onSuccess` 回调已比较 `windowId`（不一致返回 `stale_observation` 且不发图），同一 `windowId` 的类型在正常使用中不变；这一条是待实测假设，不是已知事实。若实测发现同一窗口会在类型上变化，应在 gate 里补判，而不是取消入口判定。
+- 入口判定之后不必再加一次类型判定：既有 `ScreenshotCapture` 的 gate 与 `onSuccess` 回调比较的是**完整 `WindowState`**（`OverlayVisuals.kt:136` 的 `windowChanged(original, latest) = latest != original`，`WindowState` 是 data class，逐字段比较 `windowId`/包名/宽高/旋转），不一致即返回 `stale_observation` 且不发图。把 `windowType` 加入 `WindowState` 后，这处比较会自动覆盖类型变化，因此入口判定之外的补判并非必需。仍需实测的假设收窄为：同一 `windowId` 的窗口类型在正常使用中是否会发生变化；若确实会变，应让比较继续覆盖它，而不是取消入口判定。
 
 #### 7.5.5 三项已定决策
 
@@ -594,7 +594,8 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 
 - **两个入口，一套状态**：聊天内批准卡片 + 通知栏批准，共用同一个 pending 请求和同一份持久化白名单；任一端批准后，另一端自动消失，不会产生两条互相矛盾的记录。
 - **摩擦单位是每个新应用一次**（绑定签名后 = 每个 `(包名, 签名)` 一次），不是每个动作、每个会话或每个任务。
-- 聊天卡片**复用**上游 `ToolApprovalService` 的 Completer 模式（`tool_approval_service.dart:34` 的 `Completer<ToolApprovalResult>`、`:129` 处创建）：只新增卡片内容与“批准后写入白名单”的副作用，不改审批机制本身，也不改上游 pending 表结构。
+- 聊天卡片**复用上游 `ToolApprovalService` 的模式与 UI 通知机制，不复用它的等待语义**。可复用部分：`Completer<ToolApprovalResult>` 的请求结构（`tool_approval_service.dart:34`）、pending 存储（`:64`）、创建方式（`:129`）和 `notifyListeners()` 驱动的卡片刷新。不可复用部分：`requestApproval` 返回的 `completer.future` 假定有调用方 `await` 它。本设计里工具调用**已经返回 `permission_required`**，没有人在 await 这个 Future，如果直接套用，pending 会一直留在 `_pending`、聊天卡片永不消失，与“任一端批准后另一端自动消失”直接冲突。
+- 因此批准请求**不是由工具调用 await 的 Future 承载**：它是一条独立的状态记录，需要自己的生命周期规则——(a) TTL 到期自动失效（模型侧的 `permission_required` 早已返回，卡片过期不需要通知模型，模型下次调用会重新触发）；(b) 两端任一处批准或拒绝即**置终态**并同时撤下另一端（聊天卡片与通知）；(c) 服务断连、应用重启、切换会话时清理，不留下无法关闭的卡片。这些规则必须显式实现，不能靠“Future 被 await 后自然结束”。
 - 通知栏**需要新建基础设施**：上游 `NotificationService` 只有 `onDidReceiveNotificationResponse`（`notification_service.dart:102`，点击打开会话），现有代码中 `AndroidNotificationAction` 零命中；宿主虽已有其他 `BroadcastReceiver`（如定时任务），但它们不是通知 action 通道，不能复用为批准链路。必须新增通知 action、`BroadcastReceiver` 与幂等写入。
 - **不得写成“复用现有通知”**：通知 action 的点击语义、幂等去重、pending 失效清理都是新增工作。
 - 批准写入必须幂等：同一 `(包名, 签名)` 重复批准不产生重复条目，只更新最后批准时间与来源（保留首次来源）。
@@ -606,7 +607,7 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 
 #### 7.5.7 `permission_required` 契约
 
-- **立即返回，不阻塞**：检测到未批准时立刻返回 `permission_required`，不持有 `Completer` 等待、不排队重试、不静默降级为只读。
+- **立即返回，不阻塞**：检测到未批准时立刻返回 `permission_required`，不持有 `Completer` 等待、不排队重试、不静默降级为只读。与 7.5.6 的关系需要读清：我们复用 `ToolApprovalService` 的**请求结构与 UI 通知机制**，但批准请求**不挂在工具调用上**——工具调用拿到 `permission_required` 就结束，卡片/通知是独立的状态记录，有自己的 TTL 与终态收敛规则。因此“立即返回”与“复用该服务”并不互斥：互斥的只是“复用它的等待语义”。
 - 理由是数字，不是偏好：Dart 通道超时 **35 秒**（`phone_agent_service.dart:149`），原生排队超时 **15 秒**（`PhoneAgentService.kt:35` 的 `QUEUE_TIMEOUT_MS`）。让工具调用等一封可能几小时后才来的批准，必然先把设计好的 `permission_required` 退化成 `timeout`，模型无法区分“用户拒绝”“用户不在场”和“系统卡住”。
 - 明说取舍：批准未到时**当前任务停在此处**；用户批准后模型需要**重新观察**（旧句柄、旧截图会因时间与窗口变化失效），之前规划的步骤不能假设仍然有效。**长任务会中断**，不描述成无感体验，也不描述成“部分完成”。
 - 不自动批准、不自动重试、不在失败后循环弹批准卡片。
@@ -636,12 +637,35 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 - 类型解析失败（`windows` 里找不到对应 `windowId`、或返回未知类型）必须 **fail closed**：输入与观察都拒绝，不能默认放行。
 - 测试夹具里另有三处 `WindowState(...)` 直接构造（`NodeActionExecutorTest.kt:10`、`ObservationRegistryTest.kt:14`、`OverlayVisualsTest.kt:191`），加字段会同时波及；策略本身应做成纯函数（输入包名/类型/白名单 → 允许或错误），用纯 JVM 测试覆盖，不引入 Robolectric 或新依赖。
 
-**风险 2：`phone_agent_exception_test.dart` 的 settings 依赖必须同步改为宿主 `dumpsys`**
+**风险 2：`phone_agent_exception_test.dart` 会因观察边界变红，必须同批改宿主 `dumpsys` 确认**
+
+观察边界收紧后，异常套件共有 **5 处** 依赖"读树能看到非本应用前台"的地方会失败，实现观察边界时必须同批改掉，否则套件无法变绿：
+
+**（a）settings 树依赖（服务禁用/中断/重启用例）**
 
 - `phone_agent_exception_test.dart:537` 靠读 `com.android.settings` 树判断宿主已打开无障碍详情页，`:549-550` 靠读 settings 树并断言存在 `Turn off` 节点来判断关闭确认弹窗已出现。
 - 同一用例的 pending 批次也在该页面上建立观测：`:557` 的 `_tree(service)` 与随后 1000 个 `readTree(offset: 1)` 都是在无障碍设置页前台时发出的（见 9.3.1 的“先建立 Settings 观测”）。观察边界一收紧，这一步会直接返回 `system_window_denied`，用例在到达禁用断言前就失败。
-- 观察边界一收紧，这三处必然变红；而且用例在真正关闭服务之前就已经无法建立观测，pending 批次也无从发起。必须在同一次实现里改为**宿主 `dumpsys` 独立确认**（`dumpsys window` / `dumpsys activity` 判断前台是设置页或确认弹窗），测试只轮询非 settings 的前台与工具结果并断言错误码。
-- 这不是推翻既有分工，而是把它补完整：`mods/phone_agent/README.md` 的故障排查与 9.3.1 的边界本就写明服务开关由宿主在系统界面操作、测试只轮询断言，以及权限弹窗由宿主 `dumpsys` 独立确认；但**没有**规定服务禁用用例的前台页面也要由宿主独立确认。实现本提案时必须补上这一条，否则测试无法在不读 settings 树的前提下知道自己在哪一页。
+- 改法：这三处全部改为**宿主 `dumpsys` 独立确认**（`dumpsys window` / `dumpsys activity` 判断前台是设置页或确认弹窗）；pending 批次改在测试应用自身前台（`TYPE_APPLICATION`）上建立观测，不再依赖 Settings 页面。
+
+**（b）`:202-232`「叠加层可见时真实触摸不被拦截」**
+
+- 第 `219` 行 `final tree = await _tryTree(service);` 轮询等待前台包名 `!= _appPackage`（`:221-224`），宿主 `adb shell input swipe` 触摸后打开的是通知栏（`com.android.systemui`，`TYPE_SYSTEM`）。`TYPE_SYSTEM` 拒观察后 `_tryTree`（`:759-773`，`ok != true` 即返回 null）恒为 null，`:228` 的 `expect(foreground, isNotNull)` 必然失败——而且失败点正是"证明叠加层不拦截宿主触摸"这个核心断言。
+- 改法：前台由**宿主 `dumpsys` 确认通知栏已打开**并打印标记，测试侧只保留叠加层可见性证据（叠加层是否在触摸期间显示、截图无污染等既有断言），不再用读树取前台包名。
+
+**（c）`:346-377`「home 与 recents 后输入被包名策略拒绝」**
+
+- 该用例经 `_expectSystemNavigationDenied`（`:1005-1040`）驱动：`:1019` 的 `_waitForTreeWhere`（`:913-928`，内部同样走 `_tryTree`）读树等待前台离开白名单。`home`/`recents` 后前台通常是 systemui，读树被窗口类型拒绝后拿不到 `package_name`，在 `:1025` 的 `expect(foreground, isNotNull)` 处失败，根本到不了 `:1037`/`:1039` 的输入错误码断言。
+- 改法：由**宿主确认前台已离开白名单**，测试直接断言输入与 `back` 的错误码（`system_window_denied` / `package_not_allowed`），不再依赖读树取包名；`_systemPackages` 的期望值改由宿主提供的包名或固定期望给出。
+
+**（d）不受影响的部分（避免过度改动）**
+
+- `phone_agent_test.dart` 不读 settings，不受观察边界影响。
+- `:116-127`、`:303`、`:334`、`:479` 等读树点都在测试应用自身前台（`TYPE_APPLICATION`），不需要改。
+- 权限窗口用例读树得到 `no_window`（不只是"失败"），与本层无关，保持原样。
+
+**（e）宿主确认是前提不是产品能力**
+
+- 这不是推翻既有分工，而是把它补完整：`mods/phone_agent/README.md` 的故障排查与 9.3.1 的边界本就写明服务开关由宿主在系统界面操作、测试只轮询断言，以及权限弹窗由宿主 `dumpsys` 独立确认；但**没有**规定（a）（b）（c）三类用例的前台也要由宿主独立确认。实现本提案时必须补上，否则测试无法在不读 settings 树、通知栏或系统窗口的前提下知道自己在哪一页。
 - 反过来说：在测试依赖改完之前，不能宣称新边界“已通过异常套件”。
 
 **风险 3：行为变更（收紧），不是纯新增**
@@ -1291,7 +1315,7 @@ JVM 测试（无 Robolectric、无新依赖）：
 - 整屏 `takeScreenshot` 不保证对 `FLAG_SECURE` 报错；secure 内容可能以黑色区域出现在成功截图中。不根据像素猜 secure，不承诺不发送黑图，正常黑色页面保留。
 - 平台明确报错时不得把图片或图片 metadata 交给模型；成功黑图只作为普通截图，模型应优先读树、不凭黑图猜坐标。
 - `FLAG_SECURE` 不阻止无障碍读树和输入；API35 夹具树可读，但不是绝对保证；密码字段、自定义 View、窗口变化仍会影响树；非白名单输入仍被拒绝。
-- `system_window_denied` 和 `package_not_allowed` 只约束输入；读树和截图仍可观察系统窗口、权限弹窗和其他应用。
+- `system_window_denied` 和 `package_not_allowed` 只约束输入；**当前实现**下读树和截图仍可观察系统窗口、权限弹窗和其他应用（7.5 的设计提案会让系统窗口与硬基线窗口不可观察，尚未实现，见该节状态块）。
 - 应用边界与应用授权（7.5/7.6）**只是设计提案，尚未实现**：当前版本没有用户白名单、签名绑定、批准卡片、通知栏批准、`permission_required`、窗口类型判定和审计；输入仍只允许测试包，读树与截图仍不检查包名或窗口类型。该设计未经任何设备或测试验证，不得写成已生效能力。
 - `home`/`recents` 执行后前台离开白名单，后续输入（包括 `back`）会被拒绝，模型无法自行回到测试应用，需要用户或宿主恢复。
 - `SecureWindowFixtureActivity` 只是 debug 测试夹具，不是产品能力；release 不包含该 Activity。
