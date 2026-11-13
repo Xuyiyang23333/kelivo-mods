@@ -28,6 +28,7 @@ internal data class CapturedScreenshot(
     val windowId: Int,
     val packageName: String?,
     val rotation: Int,
+    val windowType: WindowType,
 )
 
 internal sealed class ScreenshotOutcome {
@@ -438,6 +439,7 @@ internal class ScreenshotCapture(
                     windowId = current.windowId,
                     packageName = current.packageName,
                     rotation = current.rotation,
+                    windowType = current.windowType,
                 ),
             )
         } finally {

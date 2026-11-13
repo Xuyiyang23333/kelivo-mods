@@ -188,7 +188,7 @@ class OverlayVisualsTest {
 
     @Test
     fun `window change is detected for same size other app and unreadable window`() {
-        val original = WindowState(7, "com.psyche.kelivo.phoneagent", 1080, 2400, 0)
+        val original = WindowState(7, TEST_PACKAGE, 1080, 2400, 0, WindowType.APPLICATION)
         assertFalse(OverlayVisuals.windowChanged(original, original))
         assertTrue(
             OverlayVisuals.windowChanged(

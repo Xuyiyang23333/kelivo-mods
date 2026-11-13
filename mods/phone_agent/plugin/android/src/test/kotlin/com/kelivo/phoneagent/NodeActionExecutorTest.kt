@@ -7,7 +7,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class NodeActionExecutorTest {
-    private val window = WindowState(7, "com.psyche.kelivo", 100, 100, 0)
+    private val window = WindowState(7, TEST_PACKAGE, 100, 100, 0, WindowType.APPLICATION)
 
     private fun handle(
         actions: Set<NodeAction>,
@@ -24,10 +24,11 @@ class NodeActionExecutorTest {
         val observation = NodeTreeReader().read(
             root = root,
             windowId = 7,
-            packageName = "com.psyche.kelivo",
+            packageName = TEST_PACKAGE,
             screenWidth = 100,
             screenHeight = 100,
             rotation = 0,
+            windowType = WindowType.APPLICATION,
             createdAt = 0L,
             interactiveOnly = false,
         )

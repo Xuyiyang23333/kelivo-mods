@@ -11,7 +11,7 @@ import org.junit.Test
 class ObservationRegistryTest {
     private var now = 0L
     private lateinit var registry: ObservationRegistry
-    private val window = WindowState(7, "com.psyche.kelivo", 100, 100, 0)
+    private val window = WindowState(7, TEST_PACKAGE, 100, 100, 0, WindowType.APPLICATION)
 
     @Before
     fun setUp() {
@@ -22,10 +22,11 @@ class ObservationRegistryTest {
     private fun readTree(root: FakeNode): TreeObservation = NodeTreeReader().read(
         root = root,
         windowId = 7,
-        packageName = "com.psyche.kelivo",
+        packageName = TEST_PACKAGE,
         screenWidth = 100,
         screenHeight = 100,
         rotation = 0,
+        windowType = WindowType.APPLICATION,
         createdAt = now,
         interactiveOnly = false,
     )
@@ -507,6 +508,46 @@ class ObservationRegistryTest {
     }
 
     @Test
+    fun `window type change invalidates handles and pages`() {
+        val (_, observation) = observation()
+        registry.beginTree(observation)
+
+        val page = assertThrows(PhoneAgentError::class.java) {
+            registry.page(0, 1, window.copy(windowType = WindowType.SYSTEM))
+        }
+        assertEquals("stale_observation", page.code)
+
+        registry.beginTree(observation("again").second)
+        val handle = assertThrows(PhoneAgentError::class.java) {
+            registry.handle("n0", window.copy(windowType = WindowType.INPUT_METHOD))
+        }
+        assertEquals("stale_handle", handle.code)
+    }
+
+    @Test
+    fun `window type change invalidates the screenshot`() {
+        registry.recordScreenshot(
+            ScreenshotObservation(
+                800,
+                600,
+                100,
+                100,
+                7,
+                TEST_PACKAGE,
+                0,
+                WindowType.APPLICATION,
+                now,
+            ),
+        )
+
+        val error = assertThrows(PhoneAgentError::class.java) {
+            registry.requireScreenshot(window.copy(windowType = WindowType.SYSTEM))
+        }
+
+        assertEquals("stale_observation", error.code)
+    }
+
+    @Test
     fun `a new observation renumbers handles`() {
         val (_, first) = observation("first")
         registry.beginTree(first)
@@ -523,7 +564,7 @@ class ObservationRegistryTest {
         val (_, observation) = observation()
         registry.beginTree(observation)
         registry.recordScreenshot(
-            ScreenshotObservation(800, 600, 100, 100, 7, "com.psyche.kelivo", 0, now),
+            ScreenshotObservation(800, 600, 100, 100, 7, TEST_PACKAGE, 0, WindowType.APPLICATION, now),
         )
         registry.clearScreenshot()
 
@@ -536,7 +577,7 @@ class ObservationRegistryTest {
     @Test
     fun `screenshot observation validates the window`() {
         registry.recordScreenshot(
-            ScreenshotObservation(800, 600, 100, 100, 7, "com.psyche.kelivo", 0, now),
+            ScreenshotObservation(800, 600, 100, 100, 7, TEST_PACKAGE, 0, WindowType.APPLICATION, now),
         )
 
         val screenshot = registry.requireScreenshot(window)
@@ -560,7 +601,7 @@ class ObservationRegistryTest {
     @Test
     fun `screenshot expires after the ttl`() {
         registry.recordScreenshot(
-            ScreenshotObservation(800, 600, 100, 100, 7, "com.psyche.kelivo", 0, now),
+            ScreenshotObservation(800, 600, 100, 100, 7, TEST_PACKAGE, 0, WindowType.APPLICATION, now),
         )
         now = ObservationRegistry.DEFAULT_TTL_MILLIS + 1
 
