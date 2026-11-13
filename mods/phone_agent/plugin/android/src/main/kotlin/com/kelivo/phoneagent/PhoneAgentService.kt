@@ -37,11 +37,18 @@ class PhoneAgentService : AccessibilityService() {
         private const val QUEUE_TIMEOUT_MS = 15_000L
 
         /**
-         * 平台窗口列表重读次数。首次失败后各重试一次并递增等待，总上限远小于
-         * 读树/截图的通道超时；仍失败即 `UNKNOWN`（fail closed）。
+         * 窗口类型解析的有界重试预算。实测（M28，API35，服务重连后首次截图）
+         * `root.window` 返回 null，同时 `windows` 只列出别的窗口 id，两条来源
+         * 同时不可用，且窗口列表要滞后约 3 秒才包含目标窗口；原 3 次 × 25/50ms
+         * （共 75ms）在真实滞后面前必然失败，导致首次读树/截图返回
+         * `window_type_unknown`。
+         *
+         * 预算取实测滞后量级，仍远小于读树/截图 35s 通道超时与 15s 排队超时；
+         * 只在两条来源都失败时才消耗，正常路径无额外延迟。预算内拿不到仍是
+         * `UNKNOWN`（fail closed），不无限等待，也不为了让测试变绿而放宽判定。
          */
-        private const val WINDOW_TYPE_ATTEMPTS = 3
-        private const val WINDOW_TYPE_RETRY_DELAY_MS = 25L
+        private const val WINDOW_TYPE_BUDGET_MS = 2_500L
+        private const val WINDOW_TYPE_RETRY_DELAY_MS = 40L
 
         @Volatile
         private var connected: PhoneAgentService? = null
@@ -109,6 +116,13 @@ class PhoneAgentService : AccessibilityService() {
     /** 观察边界策略；输入侧策略由 [NodeActionExecutor] 持有，两者共用同一纯函数实现。 */
     private val policy = PackagePolicy()
 
+    /**
+     * 最近一次 `TYPE_WINDOWS_CHANGED` 事件的时间戳（`SystemClock.elapsedRealtime`）。
+     * 窗口类型解析失败时用它判断“平台是否刚刚报告过窗口变化”，从而在新事件到达后
+     * 立刻重读，而不是在固定退避里空转。
+     */
+    private val lastWindowsChanged = AtomicLong(0)
+
     override fun onCreate() {
         super.onCreate()
         registry = ObservationRegistry(
@@ -159,6 +173,10 @@ class PhoneAgentService : AccessibilityService() {
         // 观测按需读取，不保留窗口内容；只在其他应用窗口状态变化时清理残留可视化，
         // 避免旧动作图形画到权限窗口或新前台应用上。自身 overlay 不触发清理。
         val change = event ?: return
+        if (change.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
+            lastWindowsChanged.set(SystemClock.elapsedRealtime())
+            return
+        }
         if (change.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
         val foreground = change.packageName?.toString() ?: return
         if (foreground != packageName && this::overlay.isInitialized) {
@@ -562,32 +580,53 @@ class PhoneAgentService : AccessibilityService() {
      * 判定，也不按包名、层级顺序或位置猜类型。
      */
     private fun windowType(root: AccessibilityNodeInfo): WindowType {
-        val fromNode = try {
-            root.window?.let { window ->
-                try {
-                    WindowType.fromPlatformType(window.type)
-                } finally {
-                    window.recycle()
-                }
-            }
-        } catch (error: Exception) {
-            null
-        }
-        if (fromNode != null && fromNode != WindowType.UNKNOWN) return fromNode
-
-        repeat(WINDOW_TYPE_ATTEMPTS) { attempt ->
-            val resolved = WindowType.resolveFromSnapshot(root.windowId, readWindowEntries())
+        // 实测（M28，API35 服务重连后首次截图）：root.window 返回 null，同时
+        // windows 只列出别的窗口 id，两条路径同时不可用。因此在总预算内交替
+        // 重试两条来源，而不是只重读列表。预算用尽仍是 UNKNOWN（fail closed）。
+        val deadline = SystemClock.elapsedRealtime() + WINDOW_TYPE_BUDGET_MS
+        var attempt = 0
+        while (true) {
+            val fromNode = nodeWindowType(root)
+            if (fromNode != null && fromNode != WindowType.UNKNOWN) return fromNode
+            val entries = readWindowEntries()
+            val resolved = WindowType.resolveFromSnapshot(root.windowId, entries)
             if (resolved != WindowType.UNKNOWN) return resolved
-            if (attempt < WINDOW_TYPE_ATTEMPTS - 1) {
-                try {
-                    Thread.sleep(WINDOW_TYPE_RETRY_DELAY_MS * (attempt + 1))
-                } catch (error: InterruptedException) {
-                    Thread.currentThread().interrupt()
-                    return WindowType.UNKNOWN
-                }
+            val remaining = deadline - SystemClock.elapsedRealtime()
+            if (remaining <= 0) {
+                // 只在预算耗尽时记录一次：只含窗口 id 与平台类型整数，
+                // 不含包名、节点文本、窗口标题或截图内容。
+                android.util.Log.d(
+                    "PhoneAgentDiag",
+                    "windowType exhausted attempts=$attempt rootWin=${root.windowId} " +
+                        "entries=${entries.joinToString()}",
+                )
+                return WindowType.UNKNOWN
+            }
+            // 优先等平台的 TYPE_WINDOWS_CHANGED：窗口列表刚变化时重读才有意义，
+            // 纯固定退避会在列表尚未更新时反复读到同一份旧快照。
+            val seen = lastWindowsChanged.get()
+            try {
+                Thread.sleep(minOf(WINDOW_TYPE_RETRY_DELAY_MS, remaining))
+            } catch (error: InterruptedException) {
+                Thread.currentThread().interrupt()
+                return WindowType.UNKNOWN
+            }
+            // 只有“等待期间没有新窗口变化事件”才计数；有事件说明列表可能已更新。
+            if (lastWindowsChanged.get() == seen) attempt++
+        }
+    }
+
+    /** 节点自己的窗口类型；取不到返回 null（与“平台给了未知类型”区分）。 */
+    private fun nodeWindowType(root: AccessibilityNodeInfo): WindowType? = try {
+        root.window?.let { window ->
+            try {
+                WindowType.fromPlatformType(window.type)
+            } finally {
+                window.recycle()
             }
         }
-        return WindowType.UNKNOWN
+    } catch (error: Exception) {
+        null
     }
 
     /** 读一次 `windows` 的 (id, 平台类型) 快照，并回收每一个窗口。 */

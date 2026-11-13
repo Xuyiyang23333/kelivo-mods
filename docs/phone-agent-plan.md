@@ -690,11 +690,14 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 - M28 第 2 步起 `system_window_denied` 也由观察层返回。读树/截图侧的 `system_window_denied` 只来自硬基线与观察窗口类型，**不会**来自 `package_not_allowed` 或角色持有者；观察层不查询角色，因此也不会产生 `role_resolution_failed`。
 - 本节不改变 `device_locked`、`no_window`、`stale_handle`、`stale_observation`、`screenshot_blocked` 的含义与范围。
 
-- 前台窗口类型有两个来源，按顺序尝试，**都只认“就是这个窗口”**：
-  1. 节点自己的窗口 `root.window.type`（实测首选）。它与 `windowId`、包名同源，不存在跨读取竞态。
-  2. `windows` 列表按 `windowId` 精确匹配，失败时有界重读（3 次、25/50ms）。
-- **实测证据（M28，API35）**：`windows` 会在服务刚连接、切窗和键盘起落时**持续**只列出 systemui（诊断日志连续 3 次 `entries=[(4430, 3)]`），而同一时刻 `root.window.type` 已是 `APPLICATION`（`rootId=4571 rootPkg=com.psyche.kelivo.phoneagent rootWin=1 count=2 [.. systemui ..] [id=4571 type=1 active=true focused=true pkg=com.psyche.kelivo.phoneagent]`）。因此**不能只依赖 `windows` 列表**，也不能退回“用列表里唯一的那个窗口的类型”。
-- 两条来源都拿不到才落 `UNKNOWN` 并由策略层拒绝。不放宽任何判定，不按包名、层级顺序或位置猜类型；`root.window` 返回 null（部分平台/窗口）时仍走列表匹配。
+- 前台窗口类型有两个来源，**在同一有界预算内交替尝试**，都只认“就是这个窗口”：
+  1. 节点自己的窗口 `root.window.type`。它与 `windowId`、包名同源，不存在跨读取竞态。
+  2. `windows` 列表按 `windowId` 精确匹配。
+- **实测证据（M28，API35，服务重连后首次截图，两种来源同时不可用）**：诊断日志为 `windowType attempt=0/1/2 rootWin=5902 nodeType=null entries=(5890, 3) resolved=UNKNOWN`——`root.window` 返回 **null**，同时 `windows` 只有另一个窗口 id（5890），而 `rootInActiveWindow` 已属于窗口 5902。窗口列表要约 3 秒后才包含目标窗口。因此**既不能只依赖 `windows`，也不能假设 `root.window` 一定可用**；原“3 次 × 25/50ms（共 75ms）”预算在实测滞后面前必然失败，首次读树/截图会返回 `window_type_unknown`。
+- 现实现为**总预算 2500ms、每次间隔 40ms** 的有界重试，交替读取两条来源；同时记录 `TYPE_WINDOWS_CHANGED` 到达时间，只有等待期间没有新窗口事件时才累加尝试计数（用于日志区分“平台没变化”与“我们没去读”）。预算刻意取实测滞后的量级，仍远小于读树/截图 35s 通道超时与 15s 排队超时；**只在两条来源都失败时才消耗**，正常路径无额外延迟。
+- 预算内两条来源都拿不到才落 `UNKNOWN` 并由策略层拒绝（fail closed，消息带 `window_type_unknown`）。不放宽任何判定，不按包名、层级顺序或位置猜类型，也不为了让测试变绿延长等待。
+- 该预算只是**缓解**：它覆盖实测的约 3 秒滞后，不承诺覆盖任意 ROM 或任意极端时序；超过预算仍会返回 `window_type_unknown`，调用方应把它当作“窗口尚未稳定，稍后重试”。
+
 
 ### 7.6 实现前置风险与行为变更
 

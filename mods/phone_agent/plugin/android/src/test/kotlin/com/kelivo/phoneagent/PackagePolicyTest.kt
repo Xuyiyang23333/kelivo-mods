@@ -380,4 +380,25 @@ class PackagePolicyTest {
         assertEquals("system_window_denied", observeCode(TEST_PACKAGE, resolved))
         assertTrue(observeMessage(TEST_PACKAGE, resolved).contains("window_type_unknown"))
     }
+
+    @Test
+    fun `a window that appears later resolves on a subsequent snapshot`() {
+        // M28 设备证据：rootWin=5902 时 windows 只有 (5890, 3)；窗口列表补齐后
+        // 同一 windowId 才命中。这条用例固定“只有真的出现才通过”，不靠猜。
+        val before = listOf(5890 to 3)
+        val after = listOf(5890 to 3, 5902 to 1)
+
+        assertEquals(WindowType.UNKNOWN, WindowType.resolveFromSnapshot(5902, before))
+        assertEquals(WindowType.APPLICATION, WindowType.resolveFromSnapshot(5902, after))
+    }
+
+    @Test
+    fun `a null node window still requires the list to match exactly`() {
+        // root.window 为 null 时不能退化成“accept whatever the list holds”：
+        // 列表里只有别的窗口时仍然拒绝。
+        val resolved = WindowType.resolveFromSnapshot(5902, listOf(5890 to 3))
+
+        assertEquals(WindowType.UNKNOWN, resolved)
+        assertEquals("system_window_denied", observeCode(TEST_PACKAGE, resolved))
+    }
 }
