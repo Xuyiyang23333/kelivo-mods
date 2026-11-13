@@ -690,7 +690,11 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 - M28 第 2 步起 `system_window_denied` 也由观察层返回。读树/截图侧的 `system_window_denied` 只来自硬基线与观察窗口类型，**不会**来自 `package_not_allowed` 或角色持有者；观察层不查询角色，因此也不会产生 `role_resolution_failed`。
 - 本节不改变 `device_locked`、`no_window`、`stale_handle`、`stale_observation`、`screenshot_blocked` 的含义与范围。
 
-- 解析窗口类型必须容忍平台窗口列表滞后：`rootInActiveWindow` 与 `windows` 是两次平台读取，实测出现过 root 属于窗口 A 而 `windows` 只列出窗口 B。按 `windowId` 匹配失败时有界重读同一个列表（3 次，25/50ms），**仍按同一 `windowId` 精确匹配**；重读后仍找不到才 `UNKNOWN`，不放宽判定、不按包名/顺序/位置猜类型。
+- 前台窗口类型有两个来源，按顺序尝试，**都只认“就是这个窗口”**：
+  1. 节点自己的窗口 `root.window.type`（实测首选）。它与 `windowId`、包名同源，不存在跨读取竞态。
+  2. `windows` 列表按 `windowId` 精确匹配，失败时有界重读（3 次、25/50ms）。
+- **实测证据（M28，API35）**：`windows` 会在服务刚连接、切窗和键盘起落时**持续**只列出 systemui（诊断日志连续 3 次 `entries=[(4430, 3)]`），而同一时刻 `root.window.type` 已是 `APPLICATION`（`rootId=4571 rootPkg=com.psyche.kelivo.phoneagent rootWin=1 count=2 [.. systemui ..] [id=4571 type=1 active=true focused=true pkg=com.psyche.kelivo.phoneagent]`）。因此**不能只依赖 `windows` 列表**，也不能退回“用列表里唯一的那个窗口的类型”。
+- 两条来源都拿不到才落 `UNKNOWN` 并由策略层拒绝。不放宽任何判定，不按包名、层级顺序或位置猜类型；`root.window` 返回 null（部分平台/窗口）时仍走列表匹配。
 
 ### 7.6 实现前置风险与行为变更
 

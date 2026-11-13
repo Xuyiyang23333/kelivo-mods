@@ -544,24 +544,39 @@ class PhoneAgentService : AccessibilityService() {
             width = width,
             height = height,
             rotation = rotation(),
-            windowType = windowType(root.windowId),
+            windowType = windowType(root),
         )
     }
 
     /**
-     * 按 `windowId` 从 `windows` 匹配窗口类型。`AccessibilityNodeInfo` 不提供类型，
-     * 只能在这里与前台窗口用同一次读取取得；匹配失败或取到未知类型都落到
-     * [WindowType.UNKNOWN]，由策略层默认拒绝，不在策略层另读一次 `windows`。
+     * 解析前台窗口类型。两个来源按顺序尝试，都只认“就是这个窗口”：
      *
-     * 平台窗口列表在服务重连或切窗瞬间可能滞后：实测出现过 `rootInActiveWindow`
-     * 属于窗口 A，而 `windows` 只列出窗口 B（[M28] `requested=3750 count=1
-     * [id=3739 type=3]`）。因此匹配失败时有界重读几次同一个列表，仍按同一
-     * `windowId` 精确匹配；找不到还是 `UNKNOWN`（窗口真的换了或列表不可用），
-     * 不放宽任何判定、不按包名或位置猜类型。
+     * 1. **节点自己的窗口** `root.window.type`。它直接就是持有该 root 的窗口，
+     *    与 `windowId`、包名同源，不存在跨读取的竞态。
+     * 2. **`windows` 列表按 `windowId` 精确匹配**。实测 `windows` 会在服务刚连接、
+     *    切窗或键盘起落时短暂（甚至持续）只列出 systemui，而 `rootInActiveWindow`
+     *    已经是目标应用；这时按 id 查不到，不能退回“列表里唯一的那个窗口”。
+     *    匹配失败时有界重读同一个列表（[WINDOW_TYPE_ATTEMPTS] 次、递增等待）。
+     *
+     * 两条来源都拿不到才落到 [WindowType.UNKNOWN]，由策略层默认拒绝。不放宽任何
+     * 判定，也不按包名、层级顺序或位置猜类型。
      */
-    private fun windowType(windowId: Int): WindowType {
+    private fun windowType(root: AccessibilityNodeInfo): WindowType {
+        val fromNode = try {
+            root.window?.let { window ->
+                try {
+                    WindowType.fromPlatformType(window.type)
+                } finally {
+                    window.recycle()
+                }
+            }
+        } catch (error: Exception) {
+            null
+        }
+        if (fromNode != null && fromNode != WindowType.UNKNOWN) return fromNode
+
         repeat(WINDOW_TYPE_ATTEMPTS) { attempt ->
-            val resolved = WindowType.resolveFromSnapshot(windowId, readWindowEntries())
+            val resolved = WindowType.resolveFromSnapshot(root.windowId, readWindowEntries())
             if (resolved != WindowType.UNKNOWN) return resolved
             if (attempt < WINDOW_TYPE_ATTEMPTS - 1) {
                 try {

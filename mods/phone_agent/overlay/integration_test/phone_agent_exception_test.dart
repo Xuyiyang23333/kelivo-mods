@@ -207,31 +207,34 @@ void main() {
           '确认前台是 com.android.systemui（通知栏已打开）。'
           '测试会在每次读树时显示约 700ms 的观察叠加层。',
     );
-    Map<String, dynamic>? systemDenied;
+    Map<String, dynamic>? shadeDenied;
     final deadline = DateTime.now().add(const Duration(seconds: 20));
-    while (DateTime.now().isBefore(deadline) && systemDenied == null) {
+    while (DateTime.now().isBefore(deadline) && shadeDenied == null) {
       // 读树会显示观察脉冲，宿主的真实触摸应落在叠加层可见期间。
-      // 通知栏打开后这里必须返回 system_window_denied + window_type_system。
+      // 通知栏打开后这里必须被观察层拒绝。注意标识：com.android.systemui
+      // 本身是硬基线成员，而硬基线判定排在窗口类型之前，所以来源标识是
+      // hard_baseline 而不是 window_type_system；只接受这两个之一。
       final payload = await _tryTreePayload(service);
+      final message = payload?['message'] as String? ?? '';
       if (payload?['error'] == 'system_window_denied' &&
-          (payload?['message'] as String? ?? '').contains(
-            'window_type_system',
-          )) {
-        systemDenied = payload;
+          (message.contains('hard_baseline') ||
+              message.contains('window_type_system'))) {
+        shadeDenied = payload;
       }
       await Future<void>.delayed(const Duration(milliseconds: 500));
     }
     expect(
-      systemDenied,
+      shadeDenied,
       isNotNull,
       reason:
           '宿主 adb 真实触摸没有打开通知栏（读树 20 秒内没有返回 '
-          'system_window_denied + window_type_system），不能证明叠加层不拦截宿主触摸。',
+          'system_window_denied + hard_baseline/window_type_system），'
+          '不能证明叠加层不拦截宿主触摸。',
     );
     debugPrint(
       'PHONE_AGENT_OVERLAY_HOST_TOUCH_RESULT: '
-      'package=com.android.systemui error=${systemDenied!['error']} '
-      'message=${systemDenied['message']}',
+      'package=com.android.systemui error=${shadeDenied!['error']} '
+      'message=${shadeDenied['message']}',
     );
 
     _hostStep(
@@ -1020,43 +1023,32 @@ Future<void> _expectSystemNavigationDenied(
   final navigationPayload = _payload(navigation);
   _expectOk(navigationPayload, action);
 
-  // 观察边界（M28）之后不再读树取前台包名：home/recents 后前台通常是 systemui
-  // （TYPE_SYSTEM），读树本身就会被观察层拒绝。这里用读树的错误码证明前台已
-  // 离开测试应用，再直接断言输入错误码。
+  // 观察边界（M28）之后前台不一定是不可观察的：`home` 与 `recents` 实测落在
+  // launcher（`com.google.android.apps.nexuslauncher`，TYPE_APPLICATION），读树
+  // 仍然成功。因此不能用“读树被拒”作为前台已离开的证据，也不能等一个可能
+  // 永远不会出现的拒绝（会白等 30 秒）。这里只要求前台已经不是本应用：
+  // 读树成功则包名必须不同，读树被拒则必须是观察边界的精确标识。
   _hostStep(
     marker,
     '已执行 $action。可用 adb shell dumpsys window | grep -E '
     '"mCurrentFocus|mFocusedApp" 独立确认前台已离开 $_appPackage',
   );
-  final denied = await _waitForObservationDenied(
+  final foreground = await _waitForForegroundLeftApp(
     service,
     timeout: const Duration(seconds: 30),
   );
-  expect(denied, isNotNull, reason: '$action 后读树仍在测试应用内成功，前台没有离开测试应用。');
-  final deniedCode = denied!['error'];
-  final deniedMessage = (denied['message'] as String? ?? '').toLowerCase();
-  debugPrint(
-    'PHONE_AGENT_SYSTEM_NAVIGATION_DENIED: action=$action '
-    'error=$deniedCode message=${denied['message']}',
-  );
   expect(
-    deniedCode,
-    anyOf('system_window_denied', 'no_window'),
-    reason: '$action 后读树返回了非观察边界的错误码：$deniedCode。',
+    foreground,
+    isNotNull,
+    reason:
+        '$action 后前台仍停留在 $_appPackage（读树成功且包名未变），'
+        '无法证明导航已离开白名单应用。',
   );
-  if (deniedCode == 'system_window_denied') {
-    expect(
-      deniedMessage,
-      anyOf(
-        contains('hard_baseline'),
-        contains('window_type_system'),
-        contains('window_type_overlay'),
-        contains('window_type_split_divider'),
-        contains('window_type_unknown'),
-      ),
-      reason: '$action 后读树只报告错误码而不带边界标识，无法确认来源。',
-    );
-  }
+  debugPrint(
+    'PHONE_AGENT_SYSTEM_NAVIGATION_FOREGROUND: action=$action '
+    'package=${foreground!.packageName} error=${foreground.error} '
+    'message=${foreground.message}',
+  );
 
   // 输入错误码按硬基线集合成员区分：systemui 等硬基线包 → system_window_denied，
   // 其他包 → package_not_allowed；无法确定时只接受这两种之一。
@@ -1102,22 +1094,75 @@ Future<String> _readTreeCode(
   }
 }
 
-/// 轮询读树直到观察层拒绝（system_window_denied 或 no_window），超时返回 null。
-/// 用于“前台已离开测试应用”的证据，不再依赖读树取包名。
-Future<Map<String, dynamic>?> _waitForObservationDenied(
+/// 一次前台观测的结果：读树成功给出包名，读树被拒给出错误码与消息。
+typedef _ForegroundProbe = ({
+  String? packageName,
+  String? error,
+  String message,
+});
+
+/// 轮询读树，直到前台不再是测试应用本身。超时返回 null。
+///
+/// 不能只等“读树被拒”：`home`/`recents` 实测落在 launcher（TYPE_APPLICATION），
+/// 观察是允许的。因此成功时比较包名，被拒时要求是观察边界的精确来源标识。
+Future<_ForegroundProbe?> _waitForForegroundLeftApp(
   PhoneAgentService service, {
   required Duration timeout,
-  String? messageContains,
 }) async {
   final deadline = DateTime.now().add(timeout);
   while (DateTime.now().isBefore(deadline)) {
     final payload = await _tryTreePayload(service);
-    final error = payload?['error'];
-    final message = payload?['message'] as String? ?? '';
-    final denied = error == 'system_window_denied' || error == 'no_window';
-    final matches =
-        messageContains == null || message.contains(messageContains);
-    if (denied && matches) return payload;
+    if (payload != null) {
+      final error = payload['error'] as String?;
+      final message = payload['message'] as String? ?? '';
+      if (error == null) {
+        final tree = payload['result'];
+        final packageName = tree is Map
+            ? tree['package_name'] as String?
+            : null;
+        if (packageName != null &&
+            packageName.isNotEmpty &&
+            packageName != _appPackage) {
+          return (packageName: packageName, error: null, message: '');
+        }
+      } else if (error == 'no_window') {
+        return (packageName: null, error: error, message: message);
+      } else if (error == 'system_window_denied' &&
+          _isObservationBoundaryMessage(message)) {
+        // 硬基线先于窗口类型判定，所以通知栏/systemui 的来源标识是
+        // hard_baseline 而不是 window_type_system；两者都算观察边界。
+        return (packageName: null, error: error, message: message);
+      }
+    }
+    await Future<void>.delayed(_pollInterval);
+  }
+  return null;
+}
+
+/// 只接受观察边界实际会产生的固定标识，不接受任意 system_window_denied。
+/// 特别地，`window_type_unknown` 不在此列：它表示窗口列表还没稳定，
+/// 列入可接受会让时序缺陷静默通过。
+bool _isObservationBoundaryMessage(String message) =>
+    message.contains('hard_baseline') ||
+    message.contains('window_type_system') ||
+    message.contains('window_type_overlay') ||
+    message.contains('window_type_split_divider');
+
+/// 轮询读树，直到观察层以指定来源标识拒绝（例如宿主进入设置页后要求
+/// `hard_baseline`）。超时返回 null；不接受标识不符的拒绝。
+Future<Map<String, dynamic>?> _waitForObservationDenied(
+  PhoneAgentService service, {
+  required Duration timeout,
+  required String messageContains,
+}) async {
+  final deadline = DateTime.now().add(timeout);
+  while (DateTime.now().isBefore(deadline)) {
+    final payload = await _tryTreePayload(service);
+    if (payload != null &&
+        payload['error'] == 'system_window_denied' &&
+        (payload['message'] as String? ?? '').contains(messageContains)) {
+      return payload;
+    }
     await Future<void>.delayed(_pollInterval);
   }
   return null;
