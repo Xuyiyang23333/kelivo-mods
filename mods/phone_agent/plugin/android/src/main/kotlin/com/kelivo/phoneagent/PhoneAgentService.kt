@@ -537,15 +537,18 @@ class PhoneAgentService : AccessibilityService() {
         } catch (error: Exception) {
             return WindowType.UNKNOWN
         }
+        // 记录命中结果后统一返回，保证列表里每个窗口都被 recycle（与 collectPasswordBounds 一致）。
+        var resolved = WindowType.UNKNOWN
+        var found = false
         for (window in windowList) {
             try {
-                if (window.id == windowId) {
-                    val type = try {
+                if (!found && window.id == windowId) {
+                    found = true
+                    resolved = try {
                         WindowType.fromPlatformType(window.type)
                     } catch (error: Exception) {
                         WindowType.UNKNOWN
                     }
-                    return type
                 }
             } catch (error: Exception) {
                 // 读取 id 失败时无法确认是不是目标窗口，继续找；找不到即 fail closed。
@@ -553,7 +556,7 @@ class PhoneAgentService : AccessibilityService() {
                 window.recycle()
             }
         }
-        return WindowType.UNKNOWN
+        return resolved
     }
 
     /**

@@ -84,10 +84,34 @@ class PackagePolicyTest {
     fun `rejects vendor settings variants`() {
         listOf(
             "com.miui.securitycenter",
+            "com.xiaomi.misettings",
             "com.coloros.settings",
             "com.oplus.settings",
             "com.samsung.android.settings",
             "com.huawei.systemmanager",
+        ).forEach { packageName ->
+            assertEquals(packageName, "system_window_denied", codeOf(packageName))
+        }
+    }
+
+    @Test
+    fun `rejects vendor package installers`() {
+        listOf(
+            "com.android.packageinstaller",
+            "com.google.android.packageinstaller",
+            "com.miui.packageinstaller",
+        ).forEach { packageName ->
+            assertEquals(packageName, "system_window_denied", codeOf(packageName))
+        }
+    }
+
+    @Test
+    fun `rejects vendor permission controllers and certificate installer`() {
+        listOf(
+            "com.android.permissioncontroller",
+            "com.google.android.permissioncontroller",
+            "com.lbe.security.miui",
+            "com.android.certinstaller",
         ).forEach { packageName ->
             assertEquals(packageName, "system_window_denied", codeOf(packageName))
         }

@@ -49,20 +49,32 @@ internal const val TEST_PACKAGE = "com.psyche.kelivo.phoneagent"
 internal const val KELIVO_PACKAGE = "com.psyche.kelivo"
 
 /**
- * 静态硬基线：系统 UI、权限控制器、包安装器与设置（含常见厂商变体）。
+ * 静态硬基线：系统 UI、权限控制器、包安装器、证书安装器与设置（含常见厂商变体）。
  * 这些包是“用现有权限扩大权限”的入口，输入一律拒绝，用户不可覆盖。
- * 厂商变体只能尽力枚举，漏写即等于该入口没有硬基线。
+ *
+ * **漏写即等于该入口没有硬基线，且第 3 步白名单上线后会变成真实缺口。**
+ * 厂商变体必须按真机 `cmd package resolve-activity` / `dumpsys package` 实测补全，
+ * 不能只靠记忆枚举；当前集合是实测过的部分清单，不是完整清单。
  */
 internal val HARD_BASELINE_PACKAGES: Set<String> = setOf(
+    // 系统 UI 与权限控制器
     "com.android.systemui",
     "com.android.permissioncontroller",
     "com.google.android.permissioncontroller",
+    // MIUI 权限授予界面（持有 GrantPermissionsActivity / ReviewPermissionsActivity）
+    "com.lbe.security.miui",
+    // 包安装器：AOSP / Google / MIUI（含 InstallStart 与 UninstallStart）
     "com.android.packageinstaller",
     "com.google.android.packageinstaller",
+    "com.miui.packageinstaller",
+    // 证书安装器（android.credentials.INSTALL）
+    "com.android.certinstaller",
+    // 设置与厂商变体
     "com.android.settings",
     "com.google.android.settings",
     "com.samsung.android.settings",
     "com.miui.securitycenter",
+    "com.xiaomi.misettings",
     "com.coloros.settings",
     "com.coloros.safecenter",
     "com.oplus.settings",
