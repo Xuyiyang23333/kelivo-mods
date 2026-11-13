@@ -52,42 +52,6 @@ internal object CoordinateMapper {
     }
 }
 
-/**
- * 首版输入白名单。开发者只能在私有 Mod 中修改此集合。
- * 系统窗口无论是否在白名单内都拒绝。
- */
-internal class PackagePolicy(
-    private val allowedPackages: Set<String> = setOf("com.psyche.kelivo.phoneagent"),
-    private val systemPackages: Set<String> = setOf(
-        "com.android.systemui",
-        "com.android.permissioncontroller",
-        "com.google.android.permissioncontroller",
-        "com.android.packageinstaller",
-        "com.google.android.packageinstaller",
-    ),
-) {
-    fun requireInputAllowed(packageName: String?) {
-        if (packageName.isNullOrBlank()) {
-            throw PhoneAgentError(
-                "no_window",
-                "No foreground app is available. Ask the user to open the test app, then retry.",
-            )
-        }
-        if (packageName in systemPackages) {
-            throw PhoneAgentError(
-                "system_window_denied",
-                "The foreground window is a system window ($packageName). Ask the user to dismiss it and return to the test app.",
-            )
-        }
-        if (packageName !in allowedPackages) {
-            throw PhoneAgentError(
-                "package_not_allowed",
-                "Input is limited to ${allowedPackages.joinToString()} in this build. The foreground app is $packageName.",
-            )
-        }
-    }
-}
-
 /** 滑动窗口动作预算，防止单次生成内无限循环输入。 */
 internal class ActionBudget(
     private val limit: Int = 120,
@@ -119,6 +83,7 @@ internal class NodeActionExecutor(
     private val budget: ActionBudget = ActionBudget(now = { SystemClock.elapsedRealtime() }),
     private val handler: Handler = Handler(Looper.getMainLooper()),
     private val beforeAction: () -> Unit = {},
+    private val roleHolders: () -> RoleHolders = { RoleHolders.Unavailable },
     private val visual: (OverlayEvent, () -> Boolean, Long) -> Unit = { _, _, _ -> },
     private val visualGeneration: () -> Long = { 0L },
     private val clearVisual: () -> Unit = {},
@@ -166,7 +131,7 @@ internal class NodeActionExecutor(
         current: WindowState,
         complete: (InputOutcome) -> Unit,
     ) {
-        policy.requireInputAllowed(current.packageName)
+        policy.requireInputAllowed(current.packageName, current.windowType, roleHolders())
         val handle = registry.handle(request.nodeId, current)
         // 动作开始时捕获清理代次；动作后切窗/clear 会让这个旧动作的视觉失效。
         val generation = visualGeneration()
@@ -199,7 +164,7 @@ internal class NodeActionExecutor(
         current: WindowState,
         complete: (InputOutcome) -> Unit,
     ) {
-        policy.requireInputAllowed(current.packageName)
+        policy.requireInputAllowed(current.packageName, current.windowType, roleHolders())
         if (pendingGesture != null) {
             throw PhoneAgentError(
                 "busy",
@@ -265,7 +230,7 @@ internal class NodeActionExecutor(
         current: WindowState,
         complete: (InputOutcome) -> Unit,
     ) {
-        policy.requireInputAllowed(current.packageName)
+        policy.requireInputAllowed(current.packageName, current.windowType, roleHolders())
         registry.invalidateAll()
         val globalAction = when (request.action) {
             SystemAction.BACK -> AccessibilityService.GLOBAL_ACTION_BACK

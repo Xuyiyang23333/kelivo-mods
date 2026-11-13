@@ -14,10 +14,11 @@ class NodeTreeReaderTest {
     ): TreeObservation = reader.read(
         root = root,
         windowId = 7,
-        packageName = "com.psyche.kelivo",
+        packageName = TEST_PACKAGE,
         screenWidth = 100,
         screenHeight = 100,
         rotation = 0,
+        windowType = WindowType.APPLICATION,
         createdAt = 0,
         interactiveOnly = interactiveOnly,
     )

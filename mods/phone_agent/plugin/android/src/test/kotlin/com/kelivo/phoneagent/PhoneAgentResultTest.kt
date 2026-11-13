@@ -97,8 +97,9 @@ class PhoneAgentResultTest {
                 screenWidth = 1080,
                 screenHeight = 2400,
                 windowId = 7,
-                packageName = "com.psyche.kelivo",
+                packageName = KELIVO_PACKAGE,
                 rotation = 0,
+                windowType = WindowType.APPLICATION,
             ),
         )
 

@@ -1,12 +1,18 @@
 package com.kelivo.phoneagent
 
-/** 当前前台窗口的稳定标识，用于失效判断。 */
+/**
+ * 当前前台窗口的稳定标识，用于失效判断。
+ *
+ * `windowType` 与 `windowId` 同源（同一次 `windowState()` 读取）：类型只能按 id 从
+ * `windows` 匹配，解析失败落到 [WindowType.UNKNOWN] 并拒绝输入。
+ */
 internal data class WindowState(
     val windowId: Int,
     val packageName: String?,
     val width: Int,
     val height: Int,
     val rotation: Int,
+    val windowType: WindowType,
 )
 
 internal data class ScreenshotObservation(
@@ -17,6 +23,7 @@ internal data class ScreenshotObservation(
     val windowId: Int,
     val packageName: String?,
     val rotation: Int,
+    val windowType: WindowType,
     val createdAt: Long,
 )
 
@@ -46,7 +53,7 @@ internal class SavedHandle(
  * `refresh()` 并比较指纹（焦点变化和动作集合变化不失效，动作可用性在动作前按当前节点校验）。
  * `refresh()` 失败时按读树时记录的子索引路径在当前活动窗口重解析一次，
  * 并要求指纹逐字段一致；否则仍返回 `stale_handle`。
- * 窗口、包名、尺寸或旋转变化会让树和截图失效。
+ * 窗口、包名、尺寸、旋转或窗口类型变化会让树和截图失效。
  */
 internal class ObservationRegistry(
     private val ttlMillis: Long = DEFAULT_TTL_MILLIS,
@@ -175,7 +182,8 @@ internal class ObservationRegistry(
             observation.packageName != current.packageName ||
             observation.screenWidth != current.width ||
             observation.screenHeight != current.height ||
-            observation.rotation != current.rotation
+            observation.rotation != current.rotation ||
+            observation.windowType != current.windowType
         ) {
             screenshot = null
             throw PhoneAgentError(
@@ -224,7 +232,8 @@ internal class ObservationRegistry(
             observation.packageName == current.packageName &&
             observation.screenWidth == current.width &&
             observation.screenHeight == current.height &&
-            observation.rotation == current.rotation
+            observation.rotation == current.rotation &&
+            observation.windowType == current.windowType
 
     private fun isExpired(createdAt: Long): Boolean = now() - createdAt > ttlMillis
 

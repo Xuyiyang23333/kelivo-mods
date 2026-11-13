@@ -14,6 +14,8 @@ import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
 import android.os.SystemClock
+import android.provider.Telephony
+import android.telecom.TelecomManager
 import android.view.Display
 import android.view.Surface
 import android.view.WindowManager
@@ -116,6 +118,7 @@ class PhoneAgentService : AccessibilityService() {
                 ensureUnlocked()
                 ensureActive()
             },
+            roleHolders = ::resolveRoleHolders,
             visual = { event, isActive, generation ->
                 val guard = visualGuard()
                 overlay.show(event, { guard() && isActive() }, generation)
@@ -308,6 +311,7 @@ class PhoneAgentService : AccessibilityService() {
                 screenWidth = current.width,
                 screenHeight = current.height,
                 rotation = current.rotation,
+                windowType = current.windowType,
                 createdAt = SystemClock.elapsedRealtime(),
                 interactiveOnly = interactiveOnly,
             )
@@ -358,6 +362,7 @@ class PhoneAgentService : AccessibilityService() {
                                 windowId = shot.windowId,
                                 packageName = shot.packageName,
                                 rotation = shot.rotation,
+                                windowType = shot.windowType,
                                 createdAt = SystemClock.elapsedRealtime(),
                             ),
                         )
@@ -517,7 +522,66 @@ class PhoneAgentService : AccessibilityService() {
             width = width,
             height = height,
             rotation = rotation(),
+            windowType = windowType(root.windowId),
         )
+    }
+
+    /**
+     * 按 `windowId` 从 `windows` 匹配窗口类型。`AccessibilityNodeInfo` 不提供类型，
+     * 只能在这里与前台窗口用同一次读取取得；匹配失败或取到未知类型都落到
+     * [WindowType.UNKNOWN]，由策略层默认拒绝，不在策略层另读一次 `windows`。
+     */
+    private fun windowType(windowId: Int): WindowType {
+        val windowList = try {
+            windows.orEmpty()
+        } catch (error: Exception) {
+            return WindowType.UNKNOWN
+        }
+        // 记录命中结果后统一返回，保证列表里每个窗口都被 recycle（与 collectPasswordBounds 一致）。
+        var resolved = WindowType.UNKNOWN
+        var found = false
+        for (window in windowList) {
+            try {
+                if (!found && window.id == windowId) {
+                    found = true
+                    resolved = try {
+                        WindowType.fromPlatformType(window.type)
+                    } catch (error: Exception) {
+                        WindowType.UNKNOWN
+                    }
+                }
+            } catch (error: Exception) {
+                // 读取 id 失败时无法确认是不是目标窗口，继续找；找不到即 fail closed。
+            } finally {
+                window.recycle()
+            }
+        }
+        return resolved
+    }
+
+    /**
+     * 默认电话/短信持有者。`RoleManager.getRoleHolders` 是 @SystemApi
+     * （`MANAGE_ROLE_HOLDERS` 签名权限），公共 SDK 无法调用；这里改用解析
+     * `ROLE_DIALER` / `ROLE_SMS` 的公共等价接口：`TelecomManager.defaultDialerPackage`
+     * 与 `Telephony.Sms.getDefaultSmsPackage`。
+     *
+     * 两种情况必须区分：查询抛异常或系统服务缺失表示“不知道”，返回
+     * [RoleHolders.Unavailable]，策略层拒绝全部输入；查询返回 null 表示系统明确
+     * 回答“没有该角色的默认应用”（例如无短信能力的平板），不算解析失败，
+     * 否则会把这类正常设备整体封死。
+     */
+    private fun resolveRoleHolders(): RoleHolders {
+        val telecom = getSystemService(TelecomManager::class.java)
+            ?: return RoleHolders.Unavailable
+        return try {
+            RoleHolders.Resolved(
+                roleHolderSet(
+                    listOf(telecom.defaultDialerPackage, Telephony.Sms.getDefaultSmsPackage(this)),
+                ),
+            )
+        } catch (error: Exception) {
+            RoleHolders.Unavailable
+        }
     }
 
     private fun screenSize(): Pair<Int, Int> {

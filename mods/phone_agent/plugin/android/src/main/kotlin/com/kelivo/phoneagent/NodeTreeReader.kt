@@ -44,6 +44,7 @@ internal class TreeObservation(
     val screenWidth: Int,
     val screenHeight: Int,
     val rotation: Int,
+    val windowType: WindowType,
     val createdAt: Long,
 ) {
     /** 句柄槽位；重解析会就地替换元素，调用方不得缓存整个列表。 */
@@ -77,6 +78,7 @@ internal class NodeTreeReader(
         screenWidth: Int,
         screenHeight: Int,
         rotation: Int,
+        windowType: WindowType,
         createdAt: Long,
         interactiveOnly: Boolean,
     ): TreeObservation {
@@ -171,6 +173,7 @@ internal class NodeTreeReader(
             screenWidth = screenWidth,
             screenHeight = screenHeight,
             rotation = rotation,
+            windowType = windowType,
             createdAt = createdAt,
         )
     }
