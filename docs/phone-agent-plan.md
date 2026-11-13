@@ -725,12 +725,14 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 **（b）`:202-232`「叠加层可见时真实触摸不被拦截」**
 
 - 原失败点：第 `219` 行 `final tree = await _tryTree(service);` 轮询等待前台包名 `!= _appPackage`（`:221-224`）；宿主 `adb shell input swipe` 触摸后打开的是通知栏（`com.android.systemui`，`TYPE_SYSTEM`）。`TYPE_SYSTEM` 拒观察后 `_tryTree`（`ok != true` 即返回 null）恒为 null，`:228` 的 `expect(foreground, isNotNull)` 必然失败。
-- 改法（本步实现）：前台由**宿主 `dumpsys` 确认通知栏已打开**（`mCurrentFocus`/`mFocusedApp` 指向 `com.android.systemui`）并打印标记；测试侧的读树轮询改为“在触摸窗口期内继续读树并记录结果”，**核心证据换成产品能力的正向断言**——同一时段读树必须返回 `system_window_denied` 且带 `window_type_system` 标识（这是新边界在真实通知栏上的直接证据），叠加层可见性证据（触摸期间叠加层显示、随后的截图无污染）保持原样。测试不再要求读到 `com.android.systemui` 的节点树。
+- 改法（本步实现）：前台由**宿主 `dumpsys` 确认通知栏已打开**（`mCurrentFocus`/`mFocusedApp` 指向 `com.android.systemui`）并打印标记；测试侧的读树轮询改为“在触摸窗口期内继续读树并记录结果”，**核心证据换成产品能力的正向断言**——同一时段读树必须返回 `system_window_denied` 并带观察边界的固定标识。叠加层可见性证据（触摸期间叠加层显示、随后的截图无污染）保持原样。测试不再要求读到 `com.android.systemui` 的节点树。
+- **设备实测修正（M28，API35）**：API35 上打开通知栏后 `mCurrentFocus` 实测为 `Window{... NotificationShade}` 而**不是** `com.android.systemui/...`，因此宿主确认不能只按 `mCurrentFocus` 精确匹配该包名。更要紧的是标识：`com.android.systemui` 本身就在 `HARD_BASELINE_PACKAGES` 里，而**硬基线判定排在窗口类型判定之前**，所以实际返回的标识是 `hard_baseline`，**`window_type_system` 不可能独立出现**。断言必须接受 `hard_baseline` 或 `window_type_system`，不能只等后者（只等后者会让该用例必然超时）。这一点容易误读，写死“通知栏 → `window_type_system`”是错的。
 
 **（c）`:346-377`「home 与 recents 后输入被包名策略拒绝」**
 
-- 原失败点：该用例经 `_expectSystemNavigationDenied`（`:1005-1040`）驱动，`:1019` 的 `_waitForTreeWhere`（内部同样走 `_tryTree`）读树等待前台离开白名单；`home`/`recents` 后前台通常是 systemui，读树被窗口类型拒绝后拿不到 `package_name`，在 `:1025` 的 `expect(foreground, isNotNull)` 处失败，根本到不了 `:1037`/`:1039` 的输入错误码断言。
-- 改法（本步实现）：读树取包名改为**观察边界的错误码断言**——`home`/`recents` 之后读树必须返回 `system_window_denied` 或 `no_window`（前台不可观察即已证明离开测试应用），随后直接断言节点输入与 `back` 的错误码。期望值不再依赖宿主提供的包名：错误码按**硬基线集合成员**区分（systemui 等 → `system_window_denied`，其他包 → `package_not_allowed`），无法确定时只能接受这两种之一并要求消息带对应标识，不能退化成“任意错误都算通过”。用例名称与验证目标（导航后输入被拒、模型无法自行恢复）不变。
+- 原失败点：该用例经 `_expectSystemNavigationDenied`（`:1005-1040`）驱动，`:1019` 的 `_waitForTreeWhere`（内部同样走 `_tryTree`）读树等待前台离开白名单；`home`/`recents` 后前台通常是 systemui，读树被窗口类型拒绝后拿不到 `package_name`，在 `:1025` 的 `expect(foreground, isNotNull)` 处失败。
+- 改法（本步实现）：读树取包名改为**“前台已不是本应用”的观测断言**，随后直接断言节点输入与 `back` 的错误码。期望值不依赖宿主提供包名：错误码按**硬基线集合成员**区分（systemui 等 → `system_window_denied`，其他包 → `package_not_allowed`），无法确定时只能接受这两种之一并要求两次判定一致。
+- **设备实测修正（M28，API35）**：`home` 与 `recents` 后前台实测**不是** systemui，而是 `com.google.android.apps.nexuslauncher/.NexusLauncherActivity`（`TYPE_APPLICATION`），**读树成功返回包名**。因此“等读树被观察层拒绝”这一写法对 home/recents 会白等到 30 秒超时。正确断言是：读树成功时要求包名不是测试应用，读树被拒时要求带真实观察标识（`hard_baseline` / `window_type_system` / `window_type_overlay` / `window_type_split_divider`）。**`window_type_unknown` 明确不在可接受集合内**——它表示窗口列表尚未稳定，把它当作“已离开前台”的证据会吞掉真实的时序缺陷。
 
 **（d）不受影响的部分（避免过度改动）**
 
@@ -955,7 +957,13 @@ flutter test integration_test/phone_agent_test.dart -d <android-device-id>
 
 上一轮节点重验修正后的设备结果（历史）：
 
-- **M28 第 2 步（观察边界）设备结果（API35 `emulator-5554`，Android 15）**：合成树 `V:/coding/kelivo-private/.tower/worktrees/wt-28/.build/worktrees/0328aca335a3ceec`（`modsetHash` `0328aca335a3ceec71d00caa8beee688af26d317910ca9dcabcbc8948026fc24`），`flutter test integration_test/phone_agent_test.dart -d emulator-5554` → **`+2`、`All tests passed!`、EXIT=0**（截图 → 读树 → 节点点击 → 坐标滑动 → 节点滚动 → 聚焦后 `set_text` → 二次读树，以及 Mods 页三态选择）。该轮的**诊断价值**在于它推翻了两个假设，见下条。
+- **M28 第 2 步（观察边界）设备结果（API35 `emulator-5554`，Android 15）**：合成树 `V:/coding/kelivo-private/.tower/worktrees/wt-28/.build/worktrees/0328aca335a3ceec`（`modsetHash` `0328aca335a3ceec71d00caa8beee688af26d317910ca9dcabcbc8948026fc24`），`flutter test integration_test/phone_agent_test.dart -d emulator-5554` → **`+2`、`All tests passed!`、EXIT=0**（截图 → 读树 → 节点点击 → 坐标滑动 → 节点滚动 → 聚焦后 `set_text` → 二次读树，以及 Mods 页三态选择）。最终树 `c3c760c0d4502878`（仅文档与新增 2 条 JVM 用例差异）未重跑官方测试。
+- **M28 第 2 步异常套件结果（API35，如实记录，未取得绿色整轮）**：两次尝试的收口结果分别是 `+1 -1` 与 `+1 -1`，**不是**全绿。
+  - 第 1 次（合成树 `c3c760c0d4502878`）：`FLAG_SECURE 截图行为与恢复` 通过后在第二个用例期间，**被测包被外部 `am force-stop` 杀掉**（logcat `Force stopping com.psyche.kelivo.phoneagent ... from pid 7541`），随后全部用例 `did not complete`。判定为宿主脚本时序，不是产品缺陷；成因之一是宿主侧反复执行 `uiautomator dump` 与无障碍服务争用。
+  - 第 2 次（改用只读 `dumpsys window`/`dumpsys accessibility` 与固定坐标 tap 的轻量驱动，不再 `uiautomator dump`、不再 force-stop 被测包）：`FLAG_SECURE 截图行为与恢复` **通过**；`叠加层不污染产品截图` 失败于像素断言 **518/409920（约 0.13%）**；随后测试自身 uninstall 使余下 6 个用例 `did not complete`。
+  - 0.13% 的判定：观察边界改的是**判定入口**（`requireObservable` 与截图前的前台检查），不参与 `_expectOverlayFree` 的像素比较，也没有改动遮挡遍历或叠加层的隐藏握手，因此**不认为由本步引入**；最可能是叠加层隐藏与截图合成之间存在一帧级时序抖动。**该结论是判断而非证据**，未进一步定位。
+  - 因此**旋转、home/recents、权限窗口、锁屏、服务禁用/重启用这几条用例在本次 M28 中没有取得设备结果**，只能写“未验证”，不得写成通过。
+- **M28 第 2 步物理 MIUI（`1960cd68`，Android 12 / API 31）**：同一合成树 `c3c760c0d4502878` 的 debug APK，`flutter test integration_test/phone_agent_test.dart -d 1960cd68` → **`+2`、`All tests passed!`、EXIT=0**。首轮失败一次，原因为设备息屏后 `device_locked`（宿主按到电源键且通知栏未关），唤醒解锁并设 `svc power stayon usb` 后通过——属宿主操作问题，不是产品缺陷。该设备按既有例外用 `settings put secure` 预配置服务，**本轮真实原值为 `enabled_accessibility_services=null`、`accessibility_enabled=0`，结束时已恢复为该值**（`settings delete` + 置 0），并已 `svc power stayon false`。未在该设备运行异常套件。
 - **`window_type_unknown` 的真实根因（M28 实测，API35，服务重连后首次截图）**：`windowType attempt=0/1/2 rootWin=5902 nodeType=null entries=(5890, 3) resolved=UNKNOWN`。即 `root.window` 返回 **null**，同时 `windows` 只有另一个窗口 id（5890），而 `rootInActiveWindow` 已属于 5902；窗口列表约 3 秒后才包含目标窗口。因此“优先读 `root.window.type`”**不足以**修复冷启动，原 75ms 预算差约 40 倍。修正为 **2500ms 有界总预算、40ms 间隔**交替重试两条来源，并在 `onAccessibilityEvent` 记录 `TYPE_WINDOWS_CHANGED` 到达时间。改后首次截图通过，整轮 `+2`。该结果只覆盖这台模拟器的一条冷启动路径，**不承诺**覆盖其他 ROM 或更长滞后；超预算仍返回 `window_type_unknown`。
 - **异常套件两处断言被设备证伪并已修正**：(1) `home`/`recents` 后前台实测是 `com.google.android.apps.nexuslauncher`（`TYPE_APPLICATION`），读树**成功**，旧写法“等观察拒绝”会白等 30 秒；(2) 通知栏 `mCurrentFocus` 是 `NotificationShade`，其包名 `com.android.systemui` 属硬基线，硬基线判定先于窗口类型，标识只会是 `hard_baseline`，不可能出现 `window_type_system`。`window_type_unknown` 已从可接受标识中移除，避免吞掉真实时序缺陷。
 - API 35 模拟器（`emulator-5554`，Android 15；`flutter test --no-uninstall integration_test/phone_agent_test.dart -d emulator-5554`，退出码 0，2 个用例通过）：
