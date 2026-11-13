@@ -356,7 +356,7 @@ flutter gen-l10n
 - `system_window_denied` 同时约束输入与观察；`package_not_allowed` 只约束输入。输入侧只允许 `TYPE_APPLICATION` 窗口；观察侧（读树与截图，M28 第 2 步）允许 `TYPE_APPLICATION` 与 `TYPE_INPUT_METHOD`，其余类型返回 `system_window_denied` 并在消息里带 `window_type_*` 标识。读树与截图**不检查**构建期包名白名单，普通第三方应用仍可观察。无可访问 root 的权限弹窗读树/截图/输入均为 `no_window` 并带条件式人工提示。
 - 应用白名单与批准（上文「应用白名单与批准（设计提案，尚未实现）」）**当前仍未实现**：没有用户白名单、签名校验、批准卡片、通知栏批准、`permission_required` 和审计。**已实现的部分是输入路径的硬基线与窗口类型判定，以及读树/截图的观察边界**（见上文状态说明）：输入仍只允许构建期测试包。用户白名单与批准交互未经设备验证；本文档中所有“会被批准”的描述都只是目标行为，不代表当前版本可用。
 - 观察边界在厂商 ROM 上可能反向误伤：窗口类型只能按 `windowId` 从 `windows` 解析，解析失败一律按 `UNKNOWN` 拒绝观察，因此正常应用上的读树/截图也可能返回 `system_window_denied`；输入法窗口允许观察，但读树可能只拿到键盘与候选词而非目标应用界面（未实测）。
-- `home`/`recents` 后前台离开白名单，后续输入（包括 `back`）被拒绝，读树与截图通常也因 systemui 是 `TYPE_SYSTEM` 而返回 `system_window_denied`，模型无法自行恢复，需要用户或宿主切回测试应用。
+- `home`/`recents` 后前台离开白名单，**后续输入（包括 `back`）被拒绝**，模型无法自行恢复，需要用户或宿主切回测试应用。但**读树与截图仍会成功**：API35 实测 `home`/`recents` 后前台是启动器（`com.google.android.apps.nexuslauncher`，`TYPE_APPLICATION`），观察边界不判构建期白名单。只有**通知栏**这类场景才会被观察层拒绝，且 systemui 属硬基线、硬基线先于窗口类型判定，标识是 `hard_baseline` 而非 `window_type_system`。
 - `SecureWindowFixtureActivity` 只是 debug 测试夹具，不是产品能力；release 不包含该 Activity。
 - API35 模拟器已验证旋转、home/recents、锁屏、服务禁用/重启和权限弹窗保守拒绝（读树/截图/输入均 `no_window` + 条件式人工提示，未执行手势/系统导航）；物理 MIUI API31 真机已验证旋转和物理 `FLAG_SECURE`，但锁屏、home/recents、服务禁用/重启和权限弹窗未在物理设备运行，不能从模拟器结果推断；原生超时仍无法在设备上确定性触发。
 - VLM 图片链路、Kelivo 应用内固定任务和跨新用户轮次历史图片回放已在 API 35 模拟器用 magpie `llama-cpp/llama-cpp` 验证；物理 MIUI API31 真机由 `llama-cpp/llama-cpp` 验证归一化坐标 tap（打开抽屉/Settings/Search），由 magpie `mistral/deepseek-v4-1-flash-1017` 验证真实图片请求、归一化坐标 swipe 的 UI 效果和像素专属视觉确认；`llama-cpp/llama-cpp` 的物理完整坐标 swipe 未验证；只验证这些模型与设备，不承诺任意模型或设备。

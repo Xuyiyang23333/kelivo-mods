@@ -583,7 +583,15 @@ class PhoneAgentService : AccessibilityService() {
         // 实测（M28，API35 服务重连后首次截图）：root.window 返回 null，同时
         // windows 只列出别的窗口 id，两条路径同时不可用。因此在总预算内交替
         // 重试两条来源，而不是只重读列表。预算用尽仍是 UNKNOWN（fail closed）。
-        val deadline = SystemClock.elapsedRealtime() + WINDOW_TYPE_BUDGET_MS
+        //
+        // 主线程调用一律零预算：截图隐藏握手后的窗口重校验
+        // （ScreenshotCapture.start → currentWindow → windowState）在主线程执行，
+        // 那里 sleep 2.5 秒会阻塞 UI 并超出文档承诺的约 250ms 有界握手。该处只做
+        // “窗口是否变了”的变更检测，UNKNOWN 已足以产生 stale_observation，
+        // 重试没有收益，因此不 sleep、只读一次。
+        val onMainThread = Looper.myLooper() == Looper.getMainLooper()
+        val deadline = SystemClock.elapsedRealtime() +
+            if (onMainThread) 0L else WINDOW_TYPE_BUDGET_MS
         var attempt = 0
         while (true) {
             val fromNode = nodeWindowType(root)
@@ -593,13 +601,16 @@ class PhoneAgentService : AccessibilityService() {
             if (resolved != WindowType.UNKNOWN) return resolved
             val remaining = deadline - SystemClock.elapsedRealtime()
             if (remaining <= 0) {
-                // 只在预算耗尽时记录一次：只含窗口 id 与平台类型整数，
+                // 只在真有重试预算时才记录：主线程零预算路径每次截图都会走这里，
+                // 无条件打日志会变成噪声。日志只含窗口 id 与平台类型整数，
                 // 不含包名、节点文本、窗口标题或截图内容。
-                android.util.Log.d(
-                    "PhoneAgentDiag",
-                    "windowType exhausted attempts=$attempt rootWin=${root.windowId} " +
-                        "entries=${entries.joinToString()}",
-                )
+                if (!onMainThread) {
+                    android.util.Log.d(
+                        "PhoneAgentDiag",
+                        "windowType exhausted attempts=$attempt rootWin=${root.windowId} " +
+                            "entries=${entries.joinToString()}",
+                    )
+                }
                 return WindowType.UNKNOWN
             }
             // 优先等平台的 TYPE_WINDOWS_CHANGED：窗口列表刚变化时重读才有意义，

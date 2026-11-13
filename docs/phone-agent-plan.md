@@ -450,7 +450,7 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 - 每次生成过程中的动作预算和速率限制；
 - 默认仅允许显式配置的测试包名，当前为独立测试应用 `com.psyche.kelivo.phoneagent`；开发者只能在私有 Mod 中编辑白名单；
 - 输入与观察请求拒绝可取得包名的系统窗口、硬基线包与不允许的窗口类型（`system_window_denied`）；无可访问 root 的权限弹窗保持 `no_window` 并只做条件式人工提示；锁屏/息屏时读树、截图和输入都返回 `device_locked`；读树和截图**不检查**构建期包名白名单，仍可观察普通第三方应用的前台窗口；
-- `home`/`recents` 执行后前台会离开白名单，后续输入（包括 `back`）会被拒绝，读树与截图通常也返回 `system_window_denied`（systemui 是 `TYPE_SYSTEM`）；模型无法自行把测试应用切回前台，需要用户或宿主动作恢复；
+- `home`/`recents` 执行后前台会离开白名单，**后续输入（包括 `back`）被拒绝**，模型无法自行把测试应用切回前台，需要用户或宿主动作恢复。但**读树与截图仍会成功**：API35 实测 `home`/`recents` 后前台是启动器（`com.google.android.apps.nexuslauncher`，`TYPE_APPLICATION`），而观察边界不判构建期白名单，只判硬基线与窗口类型。反过来说，“前台是 systemui / `TYPE_SYSTEM` 所以读树被拒”只适用于**通知栏**场景；而且由于 `com.android.systemui` 本身就在硬基线集合内、硬基线判定先于窗口类型，该场景返回的标识是 `hard_baseline`，**不会**是 `window_type_system`（详见 7.6 风险 2 的实测修正）。
 - 结构化错误包含可执行的下一步，而非只返回笼统失败。
 
 ### 7.3 工具选择与服务授权边界
@@ -617,9 +617,15 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 
 观察边界收紧后，`phone_agent_exception_test.dart` 有 5 处依赖“读树能看到非本应用前台”，改法统一为**宿主 `dumpsys` 独立确认前台 + 测试断言错误码**，与权限弹窗用例既有的分工一致（宿主确认是测试前提，不是产品检测能力）：
 
-- （a）服务禁用用例的 settings 树依赖（`:537`、`:549-550`）：改为宿主用 `dumpsys window` 确认前台是 `com.android.settings`（并转到 `PHONE_AGENT_OPEN_DISABLE_DIALOG` 标记）后，测试只等待宿主标记时序，不再读 settings 树判断页面；关闭确认弹窗是否出现由宿主 `dumpsys` 确认。1000 个 pending 读树批次改在**测试应用自身前台**建立观测，再让宿主切到设置页关闭服务。
-- （b）叠加层触摸用例（`:202-232`）：宿主用 `dumpsys` 确认通知栏已打开（`mCurrentFocus` / `mFocusedApp` 指向 `com.android.systemui`）并打印标记；测试只保留叠加层可见性证据（触摸期间叠加层显示、截图无污染等既有断言），不再用读树取前台包名，也不再断言 `foreground != null`。
-- （c）home/recents 用例（`:346-377` 经 `_expectSystemNavigationDenied`）：宿主确认前台已离开测试应用后，测试直接断言输入错误码，不再读树取包名。**注意错误码只能按“硬基线集合成员”判定**：systemui 等硬基线包返回 `system_window_denied`，其他包返回 `package_not_allowed`；若宿主无法确定前台包名，`_systemPackages` 的期望值必须由宿主提供的包名给出，不能退化成“只要报错就算通过”。
+- （a）服务禁用用例的 settings 树依赖（`:537`、`:549-550`）：改为宿主用 `dumpsys window` 确认前台是 `com.android.settings`（并转到 `PHONE_AGENT_OPEN_DISABLE_DIALOG` 标记）后，测试只等待宿主标记时序，不再读 settings 树判断页面；关闭确认弹窗是否出现由宿主 `dumpsys` 确认。测试侧改为**等待观察层的硬基线拒绝**（`system_window_denied` + `hard_baseline`）作为“宿主确实进了设置页”的证据。
+- **pending 批次的形态（F1 修正，按实现描述）**：不再是“一次性发起 1000 个 `readTree(offset: 1)` 再 `Future.wait`”，而是**分块循环**——每块 `chunkSize = 200` 并发发起、累计结果码，然后检查 `service.status().enabled`，直到服务变为禁用或累计耗时达到 **35 秒上界**（`phone_agent_exception_test.dart:572-586`）。观测仍在**测试应用自身前台**建立（`offset: 1` 分页复用该观测），因为 settings 是硬基线包、`offset 0` 会被拒绝。**为什么改**：旧形态要求“1000 个请求恰好还在队列里”才有意义，宿主点击时机的抖动会让批次提前排空从而失去意义；分块循环改为“持续施压直到服务真的关掉”，断言（35 秒内完成、无 `timeout`、至少一个 `interrupted`/`service_unavailable`）不依赖排空时机。
+
+- （b）叠加层触摸用例（`:195-245`）：宿主用 `dumpsys` 确认通知栏已打开并打印标记；测试的**核心断言是读树轮询**——20 秒截止内必须出现 `system_window_denied`，且消息带 `hard_baseline` **或** `window_type_system`（两者取其一，见下方实测修正：通知栏实际给的是 `hard_baseline`），同时保留叠加层可见性证据（触摸期间叠加层显示、截图无污染等既有断言）。**不再断言 `foreground != null`**（旧写法等“读到非本应用包名”，在 `TYPE_SYSTEM` 被拒后恒为 null）。
+- 这一形态比旧断言**更强**，不是更弱：旧写法只要求“读到的包名不是测试应用”，新写法要求观察边界给出**固定的来源标识**，等于同时验证了“前台确实切换了”和“观察层确实按新边界拒绝”。
+
+- （c）home/recents 用例（`:350-385` 经 `_expectSystemNavigationDenied`，helper 在 `:1010` 起）：**仍然读树**，但改用的是 `_waitForForegroundLeftApp`（`phone_agent_exception_test.dart:1108-1146`）——它轮询 `_tryTreePayload` 并接受三种结果之一：(1) 读树**成功**且 `package_name` 不是测试应用（实测 home/recents 落在启动器时的正常情况）；(2) `no_window`；(3) `system_window_denied` 且带真实观察标识（`hard_baseline` / `window_type_system` / `window_type_overlay` / `window_type_split_divider`）。**`window_type_unknown` 明确不在可接受集合内**，因为它表示窗口列表尚未稳定，把它当证据会吞掉真实时序缺陷。随后直接断言节点 `tap` 与 `back` 的错误码，并按“硬基线集合成员”区分 `system_window_denied` / `package_not_allowed`，要求两次判定一致；无法确定时不得退化成“只要报错就算通过”。
+- **为什么不能写成“不再读树取包名”**：实测 home/recents 后前台是启动器（可观察、读树成功），所以“前台已离开本应用”的**正向证据恰恰来自读树返回的包名**；只有前台不可观察时才退化为标识断言。
+
 
 不受影响、不得顺手改动：`phone_agent_test.dart`、异常套件的其余读树点（均在测试应用自身前台）、权限窗口用例（`no_window` 而非 `system_window_denied`）。
 
@@ -719,7 +725,7 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 **（a）settings 树依赖（服务禁用/中断/重启用例）**
 
 - 原失败点：`phone_agent_exception_test.dart:537` 靠读 `com.android.settings` 树判断宿主已打开无障碍详情页，`:549-550` 靠读 settings 树并断言存在 `Turn off` 节点来判断关闭确认弹窗已出现；`:557` 的 `_tree(service)` 与随后 1000 个 `readTree(offset: 1)` 也在无障碍设置页前台建立观测（见 9.3.1 的“先建立 Settings 观测”）。观察边界收紧后这一步直接 `system_window_denied`，用例在到达禁用断言前就失败。
-- 改法（本步实现）：两处 settings 树轮询删除，改为**宿主 `dumpsys window` 确认前台包名是 `com.android.settings`** 后由宿主推进到 `PHONE_AGENT_OPEN_DISABLE_DIALOG` 标记；测试用固定短等待 + 一个**不读前台**的活跃性探测（截图或输入错误码）确认服务仍连接，再建立 pending 批次。**pending 批次改在测试应用自身前台**（`TYPE_APPLICATION`）用 `_tree(service)` 建立观测，随后发起 1000 个 `readTree(offset: 1)`；分页请求复用同一观测，因此批次不再依赖 Settings 页面，也不因分页重复判定而失败（见 7.5.4 的“分页不重复判定”）。宿主在批次仍 pending 时切到设置页并关闭服务，断言不变（35 秒内完成、无 `timeout`、存在 `interrupted`/`service_unavailable`）。
+- 改法（本步实现）：两处 settings 树轮询删除，改为**宿主 `dumpsys window` 确认前台包名是 `com.android.settings`** 后由宿主推进到 `PHONE_AGENT_OPEN_DISABLE_DIALOG` 标记；测试侧改为等待观察层的**硬基线拒绝**（`system_window_denied` + `hard_baseline`）作为“宿主确实进了设置页”的证据。**pending 批次改在测试应用自身前台**（`TYPE_APPLICATION`）建立观测（`_tree(service)` 一次，`offset: 1` 分页复用该观测），随后按 `chunkSize = 200` **分块反复**发起 `readTree(offset: 1)` 并累计结果码，每块后检查 `service.status().enabled`，直到服务被禁用或达到 35 秒上界。分页请求复用同一观测，因此批次不再依赖 Settings 页面，也不因分页重复判定而失败（见 7.5.4 的“分页不重复判定”）。宿主在批次仍 pending 时切到设置页并关闭服务，断言（35 秒内完成、无 `timeout`、存在 `interrupted`/`service_unavailable`）在分块形态下不变，但不再依赖“1000 个请求恰好排空”的时机运气。
 - 保留下来的含义：该用例仍验证“禁用服务会中断 pending 请求”，只是不再用读树判断宿主停在哪一页。
 
 **（b）`:202-232`「叠加层可见时真实触摸不被拦截」**
@@ -967,6 +973,7 @@ flutter test integration_test/phone_agent_test.dart -d <android-device-id>
 - **M28 第 2 步物理 MIUI（`1960cd68`，Android 12 / API 31）**：同一合成树 `c3c760c0d4502878` 的 debug APK，`flutter test integration_test/phone_agent_test.dart -d 1960cd68` → **`+2`、`All tests passed!`、EXIT=0**。首轮失败一次，原因为设备息屏后 `device_locked`（宿主按到电源键且通知栏未关），唤醒解锁并设 `svc power stayon usb` 后通过——属宿主操作问题，不是产品缺陷。该设备按既有例外用 `settings put secure` 预配置服务，**本轮真实原值为 `enabled_accessibility_services=null`、`accessibility_enabled=0`，结束时已恢复为该值**（`settings delete` + 置 0），并已 `svc power stayon false`。未在该设备运行异常套件。
 - **M28 第 2 步自检**：Loader `dart format`（0 变更）、`dart analyze tool test` 无问题、`dart test` **165 通过**；插件 Kotlin `:kelivo_phone_agent:testDebugUnitTest --rerun-tasks` **140 通过、0 失败**（`PackagePolicyTest` 新增 2 条覆盖“窗口稍后才出现在列表中”与“`root.window` 为 null 时仍须精确匹配”）；合成树 `dart analyze --fatal-infos lib test integration_test tool` **无问题**；`plan`/`apply`/`verify` 通过。
 - **`window_type_unknown` 的真实根因（M28 实测，API35，服务重连后首次截图）**：`windowType attempt=0/1/2 rootWin=5902 nodeType=null entries=(5890, 3) resolved=UNKNOWN`。即 `root.window` 返回 **null**，同时 `windows` 只有另一个窗口 id（5890），而 `rootInActiveWindow` 已属于 5902；窗口列表约 3 秒后才包含目标窗口。因此“优先读 `root.window.type`”**不足以**修复冷启动，原 75ms 预算差约 40 倍。修正为 **2500ms 有界总预算、40ms 间隔**交替重试两条来源，并在 `onAccessibilityEvent` 记录 `TYPE_WINDOWS_CHANGED` 到达时间。改后首次截图通过，整轮 `+2`。该结果只覆盖这台模拟器的一条冷启动路径，**不承诺**覆盖其他 ROM 或更长滞后；超预算仍返回 `window_type_unknown`。
+- **重试预算只在 worker 线程生效（M28 R1 F5 修正）**：`windowType()` 会在**主线程**被一处路径调用——`ScreenshotCapture` 隐藏叠加层后的窗口重校验（`gate.hideForCapture` → `proceed` → `start()` → `currentWindow()` → `windowState()`）。该处若 sleep 2.5 秒会阻塞 UI，并超出文档承诺的约 250ms 有界隐藏握手。因此实现按调用线程决定预算：**主线程一律零预算**（只读一次 `root.window` 与一次 `windows` 快照，不 sleep），worker 线程才使用 2500ms 预算。零预算不会放宽任何判定——该处只做“窗口是否变了”的变更检测，`UNKNOWN` 本身就会让 `WindowState` 与观测不一致，从而返回 `stale_observation`，重试没有收益。主线程零预算路径不写诊断日志，避免每次截图刷噪声。R1 审查指出这是本步新增的最坏情况（可达性窄：需首个 `windowState()` 刚成功、随后列表退化或窗口在手势期间切换），**未见 ANR，属代码路径分析而非实测**；主线程阻塞是否仍会在极慢设备上造成可感 jank 仍未实测。
 - **异常套件两处断言被设备证伪并已修正**：(1) `home`/`recents` 后前台实测是 `com.google.android.apps.nexuslauncher`（`TYPE_APPLICATION`），读树**成功**，旧写法“等观察拒绝”会白等 30 秒；(2) 通知栏 `mCurrentFocus` 是 `NotificationShade`，其包名 `com.android.systemui` 属硬基线，硬基线判定先于窗口类型，标识只会是 `hard_baseline`，不可能出现 `window_type_system`。`window_type_unknown` 已从可接受标识中移除，避免吞掉真实时序缺陷。
 - API 35 模拟器（`emulator-5554`，Android 15；`flutter test --no-uninstall integration_test/phone_agent_test.dart -d emulator-5554`，退出码 0，2 个用例通过）：
   1. 真实截图（图片与屏幕尺寸有效）→ 读树 → 节点点击（回调计数 1）→ 坐标滑动（原生接受并完成手势）→ 节点滚动（`scrollController.offset > 0`，列表真实滚动）→ 聚焦输入框 → 同一观测句柄 `set_text` 成功并写入文本 → 二次读树返回节点。
