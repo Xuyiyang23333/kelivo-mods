@@ -630,7 +630,7 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 **风险 1：`WindowState` 需要新增 `windowType`，波及 `sameWindow()` 与全部构造/调用点**
 
 - `WindowState`（`ObservationRegistry.kt:4-10`）目前只有 `windowId` / `packageName` / `width` / `height` / `rotation`，**没有窗口类型字段**；`AccessibilityNodeInfo` 不提供窗口类型，类型只能来自 `AccessibilityWindowInfo.type`，需要按 `windowId` 在 `windows` 里另行匹配。
-- 因此 `PhoneAgentService.kt:512` 的 `windowState(root)`（`WindowState` 的唯一构造点）必须多一次 `windows` 枚举与 id 匹配；它的三个调用点是 `:294`（读树）、`:340`（截图）、`:434`（输入前台窗口）。M25 调研里说的“四个构造点”指的是 `windowState()` 的定义处加这三处调用，实际构造仍只有一处。
+- 因此 `PhoneAgentService.kt:512` 的 `windowState(root)`（`WindowState` 的唯一构造点）必须多一次 `windows` 枚举与 id 匹配；`windowState(...)` 的直接调用点是 `:294`（读树）、`:340`（截图）、`:434`（`currentWindow()` 内部，输入路径经 `:419` 调用它）。调研里说“四个构造点/影响点（`:294/:339/:419/:512`）”按“受影响的位置”计，实际 `WindowState(...)` 构造仍只有 `:512` 一处：`:339` 是 `:340` 的外层 `try`，`:419` 是 `currentWindow()` 的调用处。
 - 不得为了省事在策略层另读一次 `windows`：`rootInActiveWindow` 与 `windows` 是两次读取，中间可能切窗，会引入新的竞态。类型必须与 `WindowState` 同源、同一次读取，才能保证“判定用的窗口”就是“执行用的窗口”。
 - `sameWindow()`（`ObservationRegistry.kt:222-228`）若要比较 `windowType`，必须确认正常场景不会因此误报 `stale_handle` / `stale_observation`；同一窗口 id 的类型在正常使用中不变，但这是**待实测假设**，不是已知事实。
 - 类型解析失败（`windows` 里找不到对应 `windowId`、或返回未知类型）必须 **fail closed**：输入与观察都拒绝，不能默认放行。
