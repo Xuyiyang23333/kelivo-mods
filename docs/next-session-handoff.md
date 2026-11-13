@@ -1,6 +1,17 @@
 # 下一次会话交接：Phone Agent 前台可视化叠加层
 
-## 0. M24 当前状态（2026-11-13）
+## 0. M26 当前状态（2026-11-13，仅文档）
+
+- 本轮目标：把 M25 调研结论 + 用户三项决策写成可执行的契约文档；**只改四个文档文件**（`docs/phone-agent-plan.md`、`docs/next-session-handoff.md`、`AGENTS.md`、`mods/phone_agent/README.md`），不改代码、测试、`mod.json`、白名单或上游。
+- 新增 `docs/phone-agent-plan.md` **7.5 应用边界与应用授权（设计提案，尚未实现）**：默认拒绝；三层判定（硬基线 → 窗口类型 → 用户白名单），顺序插在 `no_window` 之后、句柄/截图校验之前；`(包名, 签名证书哈希)` 双匹配；`com.android.settings` 及厂商变体进硬基线且仍返回 `system_window_denied`（不新增错误码）；`package_not_allowed` 保留为构建期硬禁止语义。
+- 窗口类型双层判定写成不对称集：输入允许集 `{TYPE_APPLICATION}`；观察允许集 `{TYPE_APPLICATION, TYPE_INPUT_METHOD}`。文档写清了两层都判的必要性（只看包名漏输入法/overlay 窗口，只看类型漏 `TYPE_APPLICATION` 的 settings）与未知类型 fail closed。
+- 观察边界只判硬基线与窗口类型、不判白名单，理由与代价都写明：**不承诺读树不泄漏第三方应用自身界面文本**；截图的前台判定先于且独立于全窗口密码遮挡遍历。
+- 新增 `docs/phone-agent-plan.md` **7.6 实现前置风险与行为变更**：`WindowState` 加 `windowType` 的影响面、`phone_agent_exception_test.dart` 5 处会红的观察边界依赖（settings 树 `:537`/`:549-550`/`:557`、叠加层触摸 `:202-232`、home/recents `:346-377`）、收紧型行为变更、历史 VLM 结果不可复用、五项待实测假设。
+- 同步 `AGENTS.md`（8 条契约条目）、`mods/phone_agent/README.md`（用户可读的「应用白名单与批准（设计提案，尚未实现）」+ 错误码表分界）、本文件（本节 + 第 8 节下一阶段入口）。
+- **重要边界**：本轮未改一行产品代码，**未运行任何测试、未构建 APK、未接设备**，未产生新 `modsetHash` 或 APK 记录。所有“会被拒绝”的描述都是设计意图。当前代码仍是输入只允许 `com.psyche.kelivo.phoneagent`、读树与截图不检查包名或窗口类型。
+- 写文档时修正了 M25 草稿的三处不准确：`WindowState` 实际只有 `PhoneAgentService.kt:512` 一个构造点（M25 写“四个构造点”，实为 1 个定义 + `:294/:340/:434` 三个调用点 + 三个测试夹具）；补充了“Kelivo 自身进硬基线”与测试包 `com.psyche.kelivo.phoneagent` 的精确包名区分陷阱；M25 说“README 与 9.3.7 本来就写着宿主确认、属实现落后于文档”不成立——现有文档只规定了权限弹窗的宿主 `dumpsys` 确认与“服务开关由宿主在系统界面操作”，**没有**规定服务禁用用例的前台页面由宿主确认，实现时必须补齐这一条。
+
+## 0.1 M24 状态（2026-11-13）
 
 - 本轮目标：处理"聚焦后同一句柄 `set_text` 返回 `stale_handle`"的长期未结问题——先在设备上复现与解释机制，再做最小修复，并跑双 API 与物理 MIUI 回归。
 - **自然循环未复现**（如实记录，不写成已复现）：API35 四版夹具共 278 次迭代、MIUI 80 次迭代、MIUI 官方 `phone_agent_test.dart` 连续 4 轮，均未出现 `stale_handle`。唯一稳定失败是 `delay=0` 的 `action_unavailable`（tap 后语义树尚未更新出 `SET_TEXT`）。
@@ -116,7 +127,7 @@
 6. `llama-cpp/llama-cpp` 的物理完整坐标 swipe 未完成（网关故障）。
 7. 上游可触摸后台胶囊无法被 Mod 隐藏；开启胶囊时截图可能含胶囊、坐标手势可能被拦截，不宣称兼容。
 
-首版输入仍只开放给测试包名 `com.psyche.kelivo.phoneagent`。不要扩大白名单、引入自动无障碍授权，或把发送/购买/删除确认描述成原生硬护栏。
+首版输入仍只开放给测试包名 `com.psyche.kelivo.phoneagent`。**M26 已在计划 7.5 写入应用边界与授权的设计提案（尚未实现）**，下一阶段入口见第 8 节；在实现落地前，不要扩大白名单、引入自动无障碍授权，或把发送/购买/删除确认描述成原生硬护栏。
 
 ## 3. 已有实现与交付基线
 
@@ -297,3 +308,19 @@ dart tool/mod_loader.dart verify
 7. 更新中文验收记录和本交接文档，如实写明未验证项。
 
 仍未完成或不能宣称完成：签名 release、原生超时、`stale_handle` 根因；权限弹窗的保守拒绝只在 API35 模拟器验证（`no_window` + 条件式提示，未执行手势/系统导航），物理设备和其他 Android 版本未验证；物理设备未运行锁屏、home/recents、服务中断和权限弹窗，不能从 API35 模拟器结果推断；`llama-cpp/llama-cpp` 的物理完整坐标 swipe 未完成。物理 MIUI API31 已验证真实截图/读树/节点输入/滚动、物理 `FLAG_SECURE`、旋转，以及 `mistral/deepseek-v4-1-flash-1017` 的真实图片请求、坐标 swipe 的 UI 效果和像素专属视觉确认。API35 模拟器已验证 secure 截图行为、旋转、home/recents、锁屏、服务禁用/重启和权限弹窗保守拒绝；跨新用户轮次历史图片回放已在 API 35 模拟器通过。只验证 magpie `llama-cpp/llama-cpp`、`mistral/deepseek-v4-1-flash-1017` 与这些设备，不承诺任意模型。上游仓保持只读；不向上游提交或推送私有实现。
+
+## 8. 下一阶段入口：实现应用边界与应用授权
+
+契约全文见 `docs/phone-agent-plan.md` 7.5 与 7.6；`AGENTS.md` 有对应 8 条条目；用户可读说明见 `mods/phone_agent/README.md`「应用白名单与批准（设计提案，尚未实现）」。**该设计目前零实现**：本轮只写文档，没有代码、测试、构建或设备结果。
+
+实现时按以下顺序，前一步不稳定不要开始后一步：
+
+1. **硬基线集合 + `WindowState.windowType`**。settings 及厂商变体补进**静态**系统包集合；电话/短信角色持有者需运行时 `RoleManager` 解析，Kelivo 自身 `com.psyche.kelivo` 按精确包名硬编码判定——后两类在策略层另行判定（仍返回 `system_window_denied`，不新增码）；给 `WindowState`（`ObservationRegistry.kt:4-10`）加 `windowType`，在 `windowState()`（`PhoneAgentService.kt:512`）按 `windowId` 从 `windows` 匹配，类型解析失败 fail closed。同步三个调用点 `:294`/`:340`/`:434`、`sameWindow()`（`ObservationRegistry.kt:222-228`）和三处测试夹具。策略做成纯函数，用纯 JVM 测试覆盖，不引入 Robolectric；`PackagePolicyTest` 错误码断言不变，但调用签名要加窗口类型参数。
+2. **观察边界**。`readTree` 与 `captureScreenshot` 各加一次 `requireObservable()`；**同批**改异常测试，否则套件必红。共 5 处：(a) `:537`、`:549-550` 的 settings 前台断言与 `:557` 起 1000 个 pending 读树改为宿主 `dumpsys` 确认、pending 批次改在测试应用前台建立；(b) `:202-232` 叠加层触摸用例改为宿主 `dumpsys` 确认通知栏已打开，只保留叠加层可见性证据；(c) `:346-377`（经 `_expectSystemNavigationDenied` `:1019`）home/recents 用例改为宿主确认前台后直接断言输入错误码，不再读树取包名。详见 plan 7.6 风险 2。此步之后读设置页/通知栏/输入法窗口的行为会变更。
+3. **用户白名单与签名校验**。`(包名, 签名证书 SHA-256)` 双匹配，未命中返回 `permission_required`；签名解析能力受 Android 11+ 包可见性限制，需先实测（见 7.6 风险 5）。
+4. **批准交互**。先做聊天内卡片（复用 `ToolApprovalService` 的请求结构、pending 存储与 `notifyListeners()` 刷新，**不复用其等待语义**——工具调用已返回 `permission_required`，卡片须自带 TTL 与“任一端批准即置终态”的收敛），再做通知栏（必须新增通知 action + `BroadcastReceiver`，现有 `NotificationService` 只有点击打开会话）。
+5. **审计**。落盘元数据，滚动保留 30 天或 2000 条。
+
+实现后必须重跑并把结果写入 9.3/9.4：API35 官方测试、完整异常套件、物理 MIUI 官方测试，以及至少一轮 VLM 固定任务（含 `permission_required` → 批准 → 重试 → 重新观察的完整链路）。重跑前，9.4 与 10.1 的 VLM 结果**只能作为旧代码证据**，不得用于宣称新边界已验证。
+
+三项已定决策不要重新讨论：白名单全局共享、批准长期有效 + Mods 页显式撤销、审计落盘元数据滚动保留。若实现中发现某项不可行，需要回写文档并请用户确认，不得静默改向。
