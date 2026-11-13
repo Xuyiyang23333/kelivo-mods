@@ -690,6 +690,8 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 - M28 第 2 步起 `system_window_denied` 也由观察层返回。读树/截图侧的 `system_window_denied` 只来自硬基线与观察窗口类型，**不会**来自 `package_not_allowed` 或角色持有者；观察层不查询角色，因此也不会产生 `role_resolution_failed`。
 - 本节不改变 `device_locked`、`no_window`、`stale_handle`、`stale_observation`、`screenshot_blocked` 的含义与范围。
 
+- 解析窗口类型必须容忍平台窗口列表滞后：`rootInActiveWindow` 与 `windows` 是两次平台读取，实测出现过 root 属于窗口 A 而 `windows` 只列出窗口 B。按 `windowId` 匹配失败时有界重读同一个列表（3 次，25/50ms），**仍按同一 `windowId` 精确匹配**；重读后仍找不到才 `UNKNOWN`，不放宽判定、不按包名/顺序/位置猜类型。
+
 ### 7.6 实现前置风险与行为变更
 
 本节列的是**动手前必须处理**的事项。**风险 1（`WindowState.windowType`）已由 M27 第 1 步处理**；**风险 2（观察边界的异常测试依赖）已由 M28 第 2 步处理**；风险 3–5 的其余部分（用户白名单、批准交互、审计）仍待处理，不是已完成工作。

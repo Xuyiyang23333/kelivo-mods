@@ -40,14 +40,6 @@ const Duration _pollInterval = Duration(milliseconds: 1500);
 const Duration _screenshotInterval = Duration(milliseconds: 2200);
 const Duration _hostTimeout = Duration(seconds: 120);
 
-const Set<String> _systemPackages = <String>{
-  'com.android.systemui',
-  'com.android.permissioncontroller',
-  'com.google.android.permissioncontroller',
-  'com.android.packageinstaller',
-  'com.google.android.packageinstaller',
-};
-
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
@@ -203,32 +195,43 @@ void main() {
     await _pumpHarness(tester);
     await _ensureAppForeground(service);
 
-    // 宿主用 adb 注入独立真实触摸（不是 phone_agent_input）；测试只负责在
-    // 叠加层可见期间轮询前台包名。先截图让叠加层出现完成脉冲，后续读树会
-    // 继续显示约 700ms 的观察脉冲。
+    // 宿主用 adb 注入独立真实触摸（不是 phone_agent_input）。观察边界（M28）之后
+    // 通知栏（com.android.systemui，TYPE_SYSTEM）不再可观察，因此前台由宿主
+    // dumpsys 确认；测试改用产品错误码作为“前台已切到通知栏”的证据。
     _expectScreenshotOk(await _screenshot(service), '宿主触摸前截图');
     _hostStep(
       'PHONE_AGENT_OVERLAY_HOST_TOUCH',
-      '在接下来约 10 秒内，宿主必须用 adb 注入真实触摸（不是 phone_agent_input）：'
+      '在接下来约 12 秒内，宿主必须用 adb 注入真实触摸（不是 phone_agent_input）：'
           'adb shell input swipe 540 5 540 1200 300；可重复多次。'
+          '触摸后执行 adb shell dumpsys window | grep -E "mCurrentFocus|mFocusedApp" '
+          '确认前台是 com.android.systemui（通知栏已打开）。'
           '测试会在每次读树时显示约 700ms 的观察叠加层。',
     );
-    Map<String, dynamic>? foreground;
-    for (var i = 0; i < 8 && foreground == null; i++) {
+    Map<String, dynamic>? systemDenied;
+    final deadline = DateTime.now().add(const Duration(seconds: 20));
+    while (DateTime.now().isBefore(deadline) && systemDenied == null) {
       // 读树会显示观察脉冲，宿主的真实触摸应落在叠加层可见期间。
-      final tree = await _tryTree(service);
-      final packageName = tree?['package_name'];
-      if (packageName is String &&
-          packageName.isNotEmpty &&
-          packageName != _appPackage) {
-        foreground = tree;
+      // 通知栏打开后这里必须返回 system_window_denied + window_type_system。
+      final payload = await _tryTreePayload(service);
+      if (payload?['error'] == 'system_window_denied' &&
+          (payload?['message'] as String? ?? '').contains(
+            'window_type_system',
+          )) {
+        systemDenied = payload;
       }
       await Future<void>.delayed(const Duration(milliseconds: 500));
     }
-    expect(foreground, isNotNull, reason: '宿主 adb 真实触摸没有打开通知栏，不能证明叠加层不拦截宿主触摸。');
+    expect(
+      systemDenied,
+      isNotNull,
+      reason:
+          '宿主 adb 真实触摸没有打开通知栏（读树 20 秒内没有返回 '
+          'system_window_denied + window_type_system），不能证明叠加层不拦截宿主触摸。',
+    );
     debugPrint(
       'PHONE_AGENT_OVERLAY_HOST_TOUCH_RESULT: '
-      'package=${foreground!['package_name']}',
+      'package=com.android.systemui error=${systemDenied!['error']} '
+      'message=${systemDenied['message']}',
     );
 
     _hostStep(
@@ -528,60 +531,62 @@ void main() {
     final tapNode = _nodeForText(before, _tapTarget);
     expect(tapNode, isNotNull, reason: '服务禁用测试前读树没有找到点击目标。');
 
+    // 观察边界（M28）之后测试不再读 settings 树：settings 属于硬基线包，
+    // 读树会返回 system_window_denied。前台由宿主用 dumpsys 独立确认，
+    // 测试只用“测试应用中建立的观测”与产品错误码作为时序信号。
     _hostStep(
       'PHONE_AGENT_PREPARE_SERVICE_DISABLE',
-      '打开 Kelivo Phone Agent 无障碍详情页并停留在开关前，不要关闭服务',
+      '打开 Kelivo Phone Agent 无障碍详情页并停留到能看到开关，不要关闭服务；'
+          '用 adb shell dumpsys window | grep -E "mCurrentFocus|mFocusedApp" '
+          '确认前台是 com.android.settings',
     );
-    final detailTree = await _waitForTreeWhere(
+    final settingsDenied = await _waitForObservationDenied(
       service,
-      (tree) => tree['package_name'] == 'com.android.settings',
-      timeout: const Duration(seconds: 30),
+      timeout: const Duration(seconds: 60),
+      messageContains: 'hard_baseline',
     );
-    expect(detailTree, isNotNull, reason: '宿主没有打开无障碍设置页。');
+    expect(settingsDenied, isNotNull, reason: '宿主没有进入设置页：读树在 60 秒内没有返回硬基线拒绝。');
+    debugPrint(
+      'PHONE_AGENT_SETTINGS_OBSERVATION_DENIED: '
+      'error=${settingsDenied?['error']}',
+    );
 
     _hostStep(
       'PHONE_AGENT_OPEN_DISABLE_DIALOG',
-      '点击 Kelivo Phone Agent 开关，打开关闭确认窗口',
+      '点击 Kelivo Phone Agent 开关打开关闭确认窗口；用 '
+          'adb shell dumpsys window | grep -E "mCurrentFocus|mFocusedApp" '
+          '确认确认弹窗在前台，然后停留在确认按钮前',
     );
-    final settingsTree = await _waitForTreeWhere(
-      service,
-      (tree) =>
-          tree['package_name'] == 'com.android.settings' &&
-          _nodeForText(tree, 'Turn off') != null,
-      timeout: const Duration(seconds: 30),
-    );
-    expect(settingsTree, isNotNull, reason: '宿主没有打开无障碍关闭确认窗口。');
+    // 宿主确认弹窗存在后，测试给出一次有界等待，让宿主走到确认按钮前。
+    await Future<void>.delayed(const Duration(seconds: 8));
 
-    // 先建立 Settings 观测，再启动一批只读分页请求并保留这些 Future。
-    // 宿主在它们仍 pending 时关闭服务，验证原 Future 在超时前完成。
-    await _tree(service);
-    const batchSize = 1000;
-    final pending = <Future<Map<String, dynamic>>>[
-      for (var i = 0; i < batchSize; i++)
-        service.readTree(offset: 1, maxNodes: 120),
-    ];
+    // 观测已在测试应用前台建立（第 527 行的 _tree），分页请求复用该观测。
+    // 观察边界（M28）之后不能再用“在 settings 前台建立观测”：settings 是硬基线包，
+    // offset 0 会被拒绝。这里改为在宿主关闭服务的期间持续发起分页请求，
+    // 直到服务状态变为禁用；禁用瞬间仍在队列中的请求才会以
+    // interrupted/service_unavailable 完成。这样断言不再依赖“1000 个请求恰好
+    // 在宿主点击前后排空”的时序运气。
+    const chunkSize = 200;
+    final codes = <String>[];
     final startedAt = DateTime.now();
     _hostStep(
       'PHONE_AGENT_DISABLE_DURING_PENDING',
-      '现在在已打开的无障碍详情页关闭 Kelivo Phone Agent',
+      '现在在已打开的无障碍详情页关闭 Kelivo Phone Agent（确认弹窗已打开就直接确认）',
     );
+    var disabled = false;
+    while (!disabled &&
+        DateTime.now().difference(startedAt) < const Duration(seconds: 35)) {
+      final chunk = await Future.wait(<Future<String>>[
+        for (var i = 0; i < chunkSize; i++) _readTreeCode(service, offset: 1),
+      ]);
+      codes.addAll(chunk);
+      disabled = !(await service.status()).enabled;
+    }
 
-    final codes = await Future.wait(
-      pending.map((future) async {
-        try {
-          await future;
-          return 'ok';
-        } on PhoneAgentToolFailure catch (failure) {
-          return failure.code;
-        } catch (_) {
-          return 'error';
-        }
-      }),
-    );
     final elapsed = DateTime.now().difference(startedAt);
     final observed = codes.toSet().toList()..sort();
     debugPrint(
-      'PHONE_AGENT_SERVICE_PENDING_BATCH: size=$batchSize '
+      'PHONE_AGENT_SERVICE_PENDING_BATCH: size=${codes.length} '
       'elapsed=${elapsed.inMilliseconds}ms codes=${observed.join(",")}',
     );
     expect(
@@ -1015,28 +1020,107 @@ Future<void> _expectSystemNavigationDenied(
   final navigationPayload = _payload(navigation);
   _expectOk(navigationPayload, action);
 
-  _hostStep(marker, '已执行 $action，等待前台离开白名单');
-  final foreground = await _waitForTreeWhere(service, (tree) {
-    final packageName = tree['package_name'];
-    return packageName is String &&
-        packageName.isNotEmpty &&
-        packageName != _appPackage;
-  }, timeout: const Duration(seconds: 30));
-  expect(foreground, isNotNull, reason: '$action 后前台仍停留在白名单应用。');
-  final packageName = foreground!['package_name'] as String?;
-  expect(packageName, isNotNull, reason: '$action 后无法读取前台包名，不能把未知包名当作通过。');
-  expect(packageName, isNotEmpty, reason: '$action 后前台包名为空。');
+  // 观察边界（M28）之后不再读树取前台包名：home/recents 后前台通常是 systemui
+  // （TYPE_SYSTEM），读树本身就会被观察层拒绝。这里用读树的错误码证明前台已
+  // 离开测试应用，再直接断言输入错误码。
+  _hostStep(
+    marker,
+    '已执行 $action。可用 adb shell dumpsys window | grep -E '
+    '"mCurrentFocus|mFocusedApp" 独立确认前台已离开 $_appPackage',
+  );
+  final denied = await _waitForObservationDenied(
+    service,
+    timeout: const Duration(seconds: 30),
+  );
+  expect(denied, isNotNull, reason: '$action 后读树仍在测试应用内成功，前台没有离开测试应用。');
+  final deniedCode = denied!['error'];
+  final deniedMessage = (denied['message'] as String? ?? '').toLowerCase();
+  debugPrint(
+    'PHONE_AGENT_SYSTEM_NAVIGATION_DENIED: action=$action '
+    'error=$deniedCode message=${denied['message']}',
+  );
+  expect(
+    deniedCode,
+    anyOf('system_window_denied', 'no_window'),
+    reason: '$action 后读树返回了非观察边界的错误码：$deniedCode。',
+  );
+  if (deniedCode == 'system_window_denied') {
+    expect(
+      deniedMessage,
+      anyOf(
+        contains('hard_baseline'),
+        contains('window_type_system'),
+        contains('window_type_overlay'),
+        contains('window_type_split_divider'),
+        contains('window_type_unknown'),
+      ),
+      reason: '$action 后读树只报告错误码而不带边界标识，无法确认来源。',
+    );
+  }
 
-  final expectedCode = _systemPackages.contains(packageName)
-      ? 'system_window_denied'
-      : 'package_not_allowed';
-  final denied = await _input(service, <String, dynamic>{
+  // 输入错误码按硬基线集合成员区分：systemui 等硬基线包 → system_window_denied，
+  // 其他包 → package_not_allowed；无法确定时只接受这两种之一。
+  final nodeDenied = await _input(service, <String, dynamic>{
     'action': 'tap',
     'node_id': tapNode!['node_id'],
   });
-  _expectToolError(denied, expectedCode, step: '$action 后节点输入');
+  final nodeCode = _payload(nodeDenied)['error'] as String?;
+  expect(
+    nodeCode,
+    anyOf('system_window_denied', 'package_not_allowed'),
+    reason: '$action 后节点输入返回了预期之外的错误码：$nodeCode。',
+  );
   final backDenied = await _input(service, <String, dynamic>{'action': 'back'});
-  _expectToolError(backDenied, expectedCode, step: '$action 后 back');
+  final backCode = _payload(backDenied)['error'] as String?;
+  expect(
+    backCode,
+    anyOf('system_window_denied', 'package_not_allowed'),
+    reason: '$action 后 back 返回了预期之外的错误码：$backCode。',
+  );
+  final expectedCodes = <String>{nodeCode!, backCode!};
+  expect(
+    expectedCodes.length,
+    1,
+    reason:
+        '$action 后节点输入与 back 的错误码不一致（$expectedCodes），'
+        '说明两次判定之间前台发生了变化。',
+  );
+}
+
+/// 发起一次分页读树并归类结果，用于服务禁用用例的“排队中断”断言。
+Future<String> _readTreeCode(
+  PhoneAgentService service, {
+  required int offset,
+}) async {
+  try {
+    await service.readTree(offset: offset, maxNodes: 120);
+    return 'ok';
+  } on PhoneAgentToolFailure catch (failure) {
+    return failure.code;
+  } catch (_) {
+    return 'error';
+  }
+}
+
+/// 轮询读树直到观察层拒绝（system_window_denied 或 no_window），超时返回 null。
+/// 用于“前台已离开测试应用”的证据，不再依赖读树取包名。
+Future<Map<String, dynamic>?> _waitForObservationDenied(
+  PhoneAgentService service, {
+  required Duration timeout,
+  String? messageContains,
+}) async {
+  final deadline = DateTime.now().add(timeout);
+  while (DateTime.now().isBefore(deadline)) {
+    final payload = await _tryTreePayload(service);
+    final error = payload?['error'];
+    final message = payload?['message'] as String? ?? '';
+    final denied = error == 'system_window_denied' || error == 'no_window';
+    final matches =
+        messageContains == null || message.contains(messageContains);
+    if (denied && matches) return payload;
+    await Future<void>.delayed(_pollInterval);
+  }
+  return null;
 }
 
 Future<img.Image> _readScreenshotImage(ClientToolResult result) async {

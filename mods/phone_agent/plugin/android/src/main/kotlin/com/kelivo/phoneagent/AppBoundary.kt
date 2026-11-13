@@ -15,7 +15,11 @@ internal enum class WindowType {
 
     val allowsInput: Boolean get() = this == APPLICATION
 
-    /** 输入拒绝消息中的固定标识；不含窗口标题、类名、包名或节点内容。 */
+    /** 观察允许集比输入宽：输入法窗口必须能被看到，否则模型看不见正在输入的界面。 */
+    val allowsObservation: Boolean
+        get() = this == APPLICATION || this == INPUT_METHOD
+
+    /** 拒绝消息中的固定标识；不含窗口标题、类名、包名或节点内容。输入与观察共用。 */
     val denialTag: String
         get() = when (this) {
             APPLICATION -> "window_type_application"
@@ -36,6 +40,16 @@ internal enum class WindowType {
             5 -> SPLIT_SCREEN_DIVIDER
             else -> UNKNOWN
         }
+
+        /**
+         * 在一次 `windows` 快照里按 id 精确匹配窗口类型。快照用平台整数类型表示，
+         * 便于纯 JVM 覆盖“列表滞后”的情形：同一份快照匹配不到就是 [UNKNOWN]，
+         * 由调用方决定是否重读，绝不按包名、顺序或位置猜。
+         */
+        fun resolveFromSnapshot(windowId: Int, entries: List<Pair<Int, Int>>): WindowType =
+            entries.firstOrNull { it.first == windowId }
+                ?.let { fromPlatformType(it.second) }
+                ?: UNKNOWN
     }
 }
 
@@ -99,13 +113,17 @@ internal fun roleHolderSet(values: Iterable<String?>): Set<String> =
     values.filterNotNull().filter { it.isNotBlank() }.toSet()
 
 /**
- * 输入边界策略。纯函数式判定：只读入参，不读 Android 状态、不持有状态，
+ * 应用边界策略。纯函数式判定：只读入参，不读 Android 状态、不持有状态，
  * 判定集中在这一处。首版不实现用户白名单，未命中构建期集合仍返回
  * `package_not_allowed`（构建期硬禁止），不与运行时白名单混用。
  *
- * 顺序固定：`no_window` → 静态硬基线 → 角色解析失败 → 角色持有者 →
+ * 输入顺序固定：`no_window` → 静态硬基线 → 角色解析失败 → 角色持有者 →
  * 窗口类型 → 构建期白名单。调用方必须在每个输入动作前用**当前**窗口调用，
  * 不能缓存判定结果。
+ *
+ * 观察顺序固定：`no_window` → 静态硬基线 → 观察窗口类型。观察层不查询角色
+ * （角色是输入边界，观察层依赖它会在角色解析失败时让所有设备的读树失败），
+ * 也不判构建期白名单与用户白名单。
  */
 internal class PackagePolicy(
     private val allowedPackages: Set<String> = setOf(TEST_PACKAGE),
@@ -117,18 +135,11 @@ internal class PackagePolicy(
         windowType: WindowType,
         roleHolders: RoleHolders,
     ) {
-        if (packageName.isNullOrBlank()) {
-            throw PhoneAgentError(
-                "no_window",
-                "No foreground app is available. Ask the user to open the test app, then retry.",
-            )
-        }
-        if (packageName == kelivoPackage || packageName in hardBaselinePackages) {
-            throw PhoneAgentError(
-                "system_window_denied",
-                "The foreground window belongs to the system or a protected app ($packageName, hard_baseline). Ask the user to dismiss it and return to the test app, then retry.",
-            )
-        }
+        val foreground = requireForeground(
+            packageName,
+            "No foreground app is available. Ask the user to open the test app, then retry.",
+        )
+        requireNotHardBaseline(foreground)
         val holders = when (roleHolders) {
             is RoleHolders.Unavailable -> throw PhoneAgentError(
                 "system_window_denied",
@@ -136,10 +147,10 @@ internal class PackagePolicy(
             )
             is RoleHolders.Resolved -> roleHolders.packages
         }
-        if (packageName in holders) {
+        if (foreground in holders) {
             throw PhoneAgentError(
                 "system_window_denied",
-                "The foreground app is the default phone or SMS app ($packageName, role_holder). Ask the user to return to the test app, then retry.",
+                "The foreground app is the default phone or SMS app ($foreground, role_holder). Ask the user to return to the test app, then retry.",
             )
         }
         if (!windowType.allowsInput) {
@@ -148,10 +159,47 @@ internal class PackagePolicy(
                 "Input into this window type is not allowed (${windowType.denialTag}). Ask the user to return to the app, then retry.",
             )
         }
-        if (packageName !in allowedPackages) {
+        if (foreground !in allowedPackages) {
             throw PhoneAgentError(
                 "package_not_allowed",
-                "Input is limited to ${allowedPackages.joinToString()} in this build. The foreground app is $packageName.",
+                "Input is limited to ${allowedPackages.joinToString()} in this build. The foreground app is $foreground.",
+            )
+        }
+    }
+
+    /**
+     * 观察边界：读树与截图共用的入口判定。刻意不接收 [RoleHolders] 与白名单：
+     * 未批准应用也必须在模型能看到之后才能向用户解释为什么需要授权。
+     */
+    fun requireObservable(
+        packageName: String?,
+        windowType: WindowType,
+    ) {
+        val foreground = requireForeground(
+            packageName,
+            "No accessible foreground window is available. Ask the user to open the app, then retry.",
+        )
+        requireNotHardBaseline(foreground)
+        if (!windowType.allowsObservation) {
+            throw PhoneAgentError(
+                "system_window_denied",
+                "This window type cannot be observed (${windowType.denialTag}). Ask the user to return to the app, then retry.",
+            )
+        }
+    }
+
+    private fun requireForeground(packageName: String?, message: String): String {
+        if (packageName.isNullOrBlank()) {
+            throw PhoneAgentError("no_window", message)
+        }
+        return packageName
+    }
+
+    private fun requireNotHardBaseline(packageName: String) {
+        if (packageName == kelivoPackage || packageName in hardBaselinePackages) {
+            throw PhoneAgentError(
+                "system_window_denied",
+                "The foreground window belongs to the system or a protected app ($packageName, hard_baseline). Ask the user to dismiss it and return to the test app, then retry.",
             )
         }
     }

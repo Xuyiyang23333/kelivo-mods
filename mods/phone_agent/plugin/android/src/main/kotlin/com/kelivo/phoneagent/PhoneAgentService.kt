@@ -36,6 +36,13 @@ class PhoneAgentService : AccessibilityService() {
     companion object {
         private const val QUEUE_TIMEOUT_MS = 15_000L
 
+        /**
+         * 平台窗口列表重读次数。首次失败后各重试一次并递增等待，总上限远小于
+         * 读树/截图的通道超时；仍失败即 `UNKNOWN`（fail closed）。
+         */
+        private const val WINDOW_TYPE_ATTEMPTS = 3
+        private const val WINDOW_TYPE_RETRY_DELAY_MS = 25L
+
         @Volatile
         private var connected: PhoneAgentService? = null
 
@@ -98,6 +105,9 @@ class PhoneAgentService : AccessibilityService() {
     private lateinit var screenshots: ScreenshotCapture
     private lateinit var treeBudget: ActionBudget
     private lateinit var overlay: PhoneAgentOverlay
+
+    /** 观察边界策略；输入侧策略由 [NodeActionExecutor] 持有，两者共用同一纯函数实现。 */
+    private val policy = PackagePolicy()
 
     override fun onCreate() {
         super.onCreate()
@@ -296,6 +306,14 @@ class PhoneAgentService : AccessibilityService() {
         val root = rootInActiveWindow ?: throw noAccessibleWindowError()
         val current = windowState(root)
         if (offset == 0) {
+            // 观察边界只在这一处判定：分页请求复用同一观测，registry.page 仍会比较
+            // 完整 WindowState，重复判定只会让窗口内翻页被一次类型抖动打断。
+            try {
+                policy.requireObservable(current.packageName, current.windowType)
+            } catch (error: PhoneAgentError) {
+                root.recycle()
+                throw error
+            }
             if (!treeBudget.tryConsume()) {
                 root.recycle()
                 throw PhoneAgentError(
@@ -345,6 +363,10 @@ class PhoneAgentService : AccessibilityService() {
         } finally {
             root.recycle()
         }
+        // 顺序固定：前台窗口 → 观察边界 → 全窗口密码遮挡遍历 → 截图。
+        // 边界判定只读 WindowState，不读节点内容；遮挡遍历不感知边界策略，
+        // 前台被拒时直接失败，不会因此缩窄遍历范围。
+        policy.requireObservable(current.packageName, current.windowType)
         val passwordBounds = collectPasswordBounds(current)
         pendingScreenshot = reply
         screenshots.capture(current, passwordBounds) { outcome ->
@@ -530,33 +552,47 @@ class PhoneAgentService : AccessibilityService() {
      * 按 `windowId` 从 `windows` 匹配窗口类型。`AccessibilityNodeInfo` 不提供类型，
      * 只能在这里与前台窗口用同一次读取取得；匹配失败或取到未知类型都落到
      * [WindowType.UNKNOWN]，由策略层默认拒绝，不在策略层另读一次 `windows`。
+     *
+     * 平台窗口列表在服务重连或切窗瞬间可能滞后：实测出现过 `rootInActiveWindow`
+     * 属于窗口 A，而 `windows` 只列出窗口 B（[M28] `requested=3750 count=1
+     * [id=3739 type=3]`）。因此匹配失败时有界重读几次同一个列表，仍按同一
+     * `windowId` 精确匹配；找不到还是 `UNKNOWN`（窗口真的换了或列表不可用），
+     * 不放宽任何判定、不按包名或位置猜类型。
      */
     private fun windowType(windowId: Int): WindowType {
+        repeat(WINDOW_TYPE_ATTEMPTS) { attempt ->
+            val resolved = WindowType.resolveFromSnapshot(windowId, readWindowEntries())
+            if (resolved != WindowType.UNKNOWN) return resolved
+            if (attempt < WINDOW_TYPE_ATTEMPTS - 1) {
+                try {
+                    Thread.sleep(WINDOW_TYPE_RETRY_DELAY_MS * (attempt + 1))
+                } catch (error: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    return WindowType.UNKNOWN
+                }
+            }
+        }
+        return WindowType.UNKNOWN
+    }
+
+    /** 读一次 `windows` 的 (id, 平台类型) 快照，并回收每一个窗口。 */
+    private fun readWindowEntries(): List<Pair<Int, Int>> {
         val windowList = try {
             windows.orEmpty()
         } catch (error: Exception) {
-            return WindowType.UNKNOWN
+            return emptyList()
         }
-        // 记录命中结果后统一返回，保证列表里每个窗口都被 recycle（与 collectPasswordBounds 一致）。
-        var resolved = WindowType.UNKNOWN
-        var found = false
+        val entries = ArrayList<Pair<Int, Int>>(windowList.size)
         for (window in windowList) {
             try {
-                if (!found && window.id == windowId) {
-                    found = true
-                    resolved = try {
-                        WindowType.fromPlatformType(window.type)
-                    } catch (error: Exception) {
-                        WindowType.UNKNOWN
-                    }
-                }
+                entries += window.id to window.type
             } catch (error: Exception) {
-                // 读取 id 失败时无法确认是不是目标窗口，继续找；找不到即 fail closed。
+                // 读取失败时该窗口不参与匹配；全部失败即 fail closed。
             } finally {
                 window.recycle()
             }
         }
-        return resolved
+        return entries
     }
 
     /**
