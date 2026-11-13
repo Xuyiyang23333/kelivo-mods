@@ -955,6 +955,9 @@ flutter test integration_test/phone_agent_test.dart -d <android-device-id>
 
 上一轮节点重验修正后的设备结果（历史）：
 
+- **M28 第 2 步（观察边界）设备结果（API35 `emulator-5554`，Android 15）**：合成树 `V:/coding/kelivo-private/.tower/worktrees/wt-28/.build/worktrees/0328aca335a3ceec`（`modsetHash` `0328aca335a3ceec71d00caa8beee688af26d317910ca9dcabcbc8948026fc24`），`flutter test integration_test/phone_agent_test.dart -d emulator-5554` → **`+2`、`All tests passed!`、EXIT=0**（截图 → 读树 → 节点点击 → 坐标滑动 → 节点滚动 → 聚焦后 `set_text` → 二次读树，以及 Mods 页三态选择）。该轮的**诊断价值**在于它推翻了两个假设，见下条。
+- **`window_type_unknown` 的真实根因（M28 实测，API35，服务重连后首次截图）**：`windowType attempt=0/1/2 rootWin=5902 nodeType=null entries=(5890, 3) resolved=UNKNOWN`。即 `root.window` 返回 **null**，同时 `windows` 只有另一个窗口 id（5890），而 `rootInActiveWindow` 已属于 5902；窗口列表约 3 秒后才包含目标窗口。因此“优先读 `root.window.type`”**不足以**修复冷启动，原 75ms 预算差约 40 倍。修正为 **2500ms 有界总预算、40ms 间隔**交替重试两条来源，并在 `onAccessibilityEvent` 记录 `TYPE_WINDOWS_CHANGED` 到达时间。改后首次截图通过，整轮 `+2`。该结果只覆盖这台模拟器的一条冷启动路径，**不承诺**覆盖其他 ROM 或更长滞后；超预算仍返回 `window_type_unknown`。
+- **异常套件两处断言被设备证伪并已修正**：(1) `home`/`recents` 后前台实测是 `com.google.android.apps.nexuslauncher`（`TYPE_APPLICATION`），读树**成功**，旧写法“等观察拒绝”会白等 30 秒；(2) 通知栏 `mCurrentFocus` 是 `NotificationShade`，其包名 `com.android.systemui` 属硬基线，硬基线判定先于窗口类型，标识只会是 `hard_baseline`，不可能出现 `window_type_system`。`window_type_unknown` 已从可接受标识中移除，避免吞掉真实时序缺陷。
 - API 35 模拟器（`emulator-5554`，Android 15；`flutter test --no-uninstall integration_test/phone_agent_test.dart -d emulator-5554`，退出码 0，2 个用例通过）：
   1. 真实截图（图片与屏幕尺寸有效）→ 读树 → 节点点击（回调计数 1）→ 坐标滑动（原生接受并完成手势）→ 节点滚动（`scrollController.offset > 0`，列表真实滚动）→ 聚焦输入框 → 同一观测句柄 `set_text` 成功并写入文本 → 二次读树返回节点。
   2. Mods 页真实服务状态与 Phone Agent 三态选择通过。

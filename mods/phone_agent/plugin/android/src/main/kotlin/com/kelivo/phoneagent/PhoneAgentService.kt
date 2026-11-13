@@ -574,7 +574,7 @@ class PhoneAgentService : AccessibilityService() {
      * 2. **`windows` 列表按 `windowId` 精确匹配**。实测 `windows` 会在服务刚连接、
      *    切窗或键盘起落时短暂（甚至持续）只列出 systemui，而 `rootInActiveWindow`
      *    已经是目标应用；这时按 id 查不到，不能退回“列表里唯一的那个窗口”。
-     *    匹配失败时有界重读同一个列表（[WINDOW_TYPE_ATTEMPTS] 次、递增等待）。
+     *    匹配失败时在总预算内重试两条来源（见 [WINDOW_TYPE_BUDGET_MS]）。
      *
      * 两条来源都拿不到才落到 [WindowType.UNKNOWN]，由策略层默认拒绝。不放宽任何
      * 判定，也不按包名、层级顺序或位置猜类型。
