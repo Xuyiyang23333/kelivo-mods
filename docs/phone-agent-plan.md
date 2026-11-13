@@ -3,7 +3,8 @@
 ## 0. 文档状态
 
 - 当前阶段：第二阶段验收进行中（UI/选择契约改造已完成），Mod 版本 0.2.0。
-- 本轮 M27（应用边界第 1 步：硬基线 + `WindowState.windowType`，2026-11-13）：只实现第 1 步，不做观察边界、用户白名单、批准交互和审计。新增 `AppBoundary.kt`（`WindowType`、`HARD_BASELINE_PACKAGES`、`KELIVO_PACKAGE`/`TEST_PACKAGE`、`RoleHolders`、纯函数 `PackagePolicy`）；`WindowState` 加 `windowType`，在 `windowState()` 内按 `windowId` 从 `windows` 匹配，解析失败 fail closed；`sameWindow()`、截图观测、`TreeObservation`、`CapturedScreenshot` 同步。`RoleManager.getRoleHolders` 为 @SystemApi 无法在公共 SDK 编译，改用 `TelecomManager.defaultDialerPackage` + `Telephony.Sms.getDefaultSmsPackage`（差异已写入 7.5.1 与 7.6）。最终合成树 `V:/coding/kelivo-private/.tower/worktrees/wt-27/.build/worktrees/1525e7263f6293d2`，`modsetHash` `1525e7263f6293d29f0775560d4d097e2cb4dd17b55dba31c92486687a555a8f`，`plan`/`apply`/`verify` 通过（前序重算树 `17007461ac82c427`、`eed71ae8a2984e02`、`3403a7239833ec63`、`7a2c1177fbc41351` 只作编译/测试迭代历史，不代表最终代码）；Loader format/analyze 通过、Loader 165、插件 Kotlin **122**（`--rerun-tasks` 强制重跑，0 失败 0 错误；返工后 `PackagePolicyTest` 19 项）、插件 Dart 17 全绿；API35 模拟器（`emulator-5554`）与物理 MIUI API31（`1960cd68`）官方 `phone_agent_test.dart` 各 **`+2`、All tests passed!、EXIT=0**（截图/读树/节点点击/坐标滑动/滚动/聚焦后 `set_text`/二次读树全程无 `stale_*`，即 `sameWindow()` 加 `windowType` 未在两台设备上产生误报）。两台设备的无障碍授权均由宿主编排触摸在系统界面完成（点开 Kelivo Phone Agent → Allow / 「确定（5）」），**未使用 `settings put secure` 写授权**；`flutter test` 每次重装包都会撤销授权，首轮因此在 `setUpAll` 等待超时，授权后才通过。MIUI 轮结束后 `flutter test` 卸载了测试包（`pm list packages` 无 `com.psyche.kelivo.phoneagent`），授权位随之回到 `null`/`0`，不是用 settings 写回的。设备测试在 `1525e7263f6293d2` 树上运行；**R1 返工后**最终源码树为 `V:/coding/kelivo-private/.tower/worktrees/wt-27/.build/worktrees/2f6528a0e4e4c8d6`（`modsetHash` `2f6528a0e4e4c8d69b75b368b0850b599a360893765f841c3250d1b8cc042355`，`plan`/`apply`/`verify` 通过），设备结果来自返工前的树：返工有两处代码改动，需逐项说明设备结果为何仍可沿用。（1）补入 4 个厂商硬基线包名——**这确实改变了可观察行为**：`PackagePolicy` 的硬基线判定排在构建期 allowlist 之前，这 4 个包一旦成为前台窗口，错误码由 `package_not_allowed` **收紧为** `system_window_denied`（消息也换成硬基线文案）。设备结果可沿用的依据是**官方 `phone_agent_test.dart` 全程前台为测试包 `com.psyche.kelivo.phoneagent`，这 4 个包不会在该流程里成为前台**，与“错误码没变”无关。（2）`windowType()` 改为循环结束统一返回——只改回收时机，判定结果等价。据此**未重跑设备**。产品 debug APK 在该最终树上 `flutter clean` + `flutter pub get` + `flutter pub get --directory tool/l10n --enforce-lockfile` + 显式 `flutter build apk --debug` 生成：**181,408,190 字节**，SHA-256 `1c2b50967f2c2be0c432218ace3a3bd25f7ea4a932092e75c06af1fed48c387c`；debug merged manifest 含 `SecureWindowFixtureActivity`（1 处）与 `PhoneAgentService`（1 处），dex 中检出 4 个新增硬基线包名，未构建 release；构建后未再运行 integration_test。返工前的 181,407,582 / `5b706dd5…` 只作历史。**未跑 Flutter 根项目静态分析/上游 seam 回归与异常套件**。`sameWindow()` 加 `windowType` 是否会在其他场景误报仍属未验证假设（`sameWindow()` 比较是精确相等，只有窗口类型真的变化才失效）。**观察边界、用户白名单、签名校验、`permission_required`、批准交互与审计仍为零实现。**
+- 本轮 M28（应用边界第 2 步：观察边界，2026-11-13）：基线 tag `phone-agent-m27-boundary-step1`（commit `f799b75`）。按用户要求的提交顺序，**第一个提交只改文档**（本节、7.5.4、7.5.3、7.6 风险 2/3/4/5、`AGENTS.md`、`mods/phone_agent/README.md`），把观察边界写成设计契约；**第二个提交**再提交代码、JVM 测试与异常测试改造。设计要点：新增纯函数 `PackagePolicy.requireObservable(packageName, windowType)`，判定顺序 `no_window` → 静态硬基线（与输入共用同一集合与 Kelivo 精确包名）→ 观察窗口类型 `{APPLICATION, INPUT_METHOD}`，命中返回 `system_window_denied` 并追加固定标识；**不判用户白名单、不查询角色持有者**（角色是输入边界，观察层若也依赖角色解析会在所有设备上随机失败）。接入点为 `PhoneAgentService.readTree()` 与 `captureScreenshot()` 各一次，分页不重复判定；截图顺序固定为取前台 `WindowState` → `requireObservable` → `collectPasswordBounds` 全窗口遍历 → 截图，三段独立，前台被拒时直接失败、不缩窄遮挡遍历。异常套件 5 处依赖同批改为“宿主 `dumpsys` 确认前台 + 测试断言错误码/观察边界标识”。**本提交不含代码、测试或设备结果**；设备结果与 APK 记录在第二个提交后补充到 9.3 的新增小节。
+- 上一轮 M27（应用边界第 1 步：硬基线 + `WindowState.windowType`，2026-11-13）：只实现第 1 步，不做观察边界、用户白名单、批准交互和审计。新增 `AppBoundary.kt`（`WindowType`、`HARD_BASELINE_PACKAGES`、`KELIVO_PACKAGE`/`TEST_PACKAGE`、`RoleHolders`、纯函数 `PackagePolicy`）；`WindowState` 加 `windowType`，在 `windowState()` 内按 `windowId` 从 `windows` 匹配，解析失败 fail closed；`sameWindow()`、截图观测、`TreeObservation`、`CapturedScreenshot` 同步。`RoleManager.getRoleHolders` 为 @SystemApi 无法在公共 SDK 编译，改用 `TelecomManager.defaultDialerPackage` + `Telephony.Sms.getDefaultSmsPackage`（差异已写入 7.5.1 与 7.6）。最终合成树 `V:/coding/kelivo-private/.tower/worktrees/wt-27/.build/worktrees/1525e7263f6293d2`，`modsetHash` `1525e7263f6293d29f0775560d4d097e2cb4dd17b55dba31c92486687a555a8f`，`plan`/`apply`/`verify` 通过（前序重算树 `17007461ac82c427`、`eed71ae8a2984e02`、`3403a7239833ec63`、`7a2c1177fbc41351` 只作编译/测试迭代历史，不代表最终代码）；Loader format/analyze 通过、Loader 165、插件 Kotlin **122**（`--rerun-tasks` 强制重跑，0 失败 0 错误；返工后 `PackagePolicyTest` 19 项）、插件 Dart 17 全绿；API35 模拟器（`emulator-5554`）与物理 MIUI API31（`1960cd68`）官方 `phone_agent_test.dart` 各 **`+2`、All tests passed!、EXIT=0**（截图/读树/节点点击/坐标滑动/滚动/聚焦后 `set_text`/二次读树全程无 `stale_*`，即 `sameWindow()` 加 `windowType` 未在两台设备上产生误报）。两台设备的无障碍授权均由宿主编排触摸在系统界面完成（点开 Kelivo Phone Agent → Allow / 「确定（5）」），**未使用 `settings put secure` 写授权**；`flutter test` 每次重装包都会撤销授权，首轮因此在 `setUpAll` 等待超时，授权后才通过。MIUI 轮结束后 `flutter test` 卸载了测试包（`pm list packages` 无 `com.psyche.kelivo.phoneagent`），授权位随之回到 `null`/`0`，不是用 settings 写回的。设备测试在 `1525e7263f6293d2` 树上运行；**R1 返工后**最终源码树为 `V:/coding/kelivo-private/.tower/worktrees/wt-27/.build/worktrees/2f6528a0e4e4c8d6`（`modsetHash` `2f6528a0e4e4c8d69b75b368b0850b599a360893765f841c3250d1b8cc042355`，`plan`/`apply`/`verify` 通过），设备结果来自返工前的树：返工有两处代码改动，需逐项说明设备结果为何仍可沿用。（1）补入 4 个厂商硬基线包名——**这确实改变了可观察行为**：`PackagePolicy` 的硬基线判定排在构建期 allowlist 之前，这 4 个包一旦成为前台窗口，错误码由 `package_not_allowed` **收紧为** `system_window_denied`（消息也换成硬基线文案）。设备结果可沿用的依据是**官方 `phone_agent_test.dart` 全程前台为测试包 `com.psyche.kelivo.phoneagent`，这 4 个包不会在该流程里成为前台**，与“错误码没变”无关。（2）`windowType()` 改为循环结束统一返回——只改回收时机，判定结果等价。据此**未重跑设备**。产品 debug APK 在该最终树上 `flutter clean` + `flutter pub get` + `flutter pub get --directory tool/l10n --enforce-lockfile` + 显式 `flutter build apk --debug` 生成：**181,408,190 字节**，SHA-256 `1c2b50967f2c2be0c432218ace3a3bd25f7ea4a932092e75c06af1fed48c387c`；debug merged manifest 含 `SecureWindowFixtureActivity`（1 处）与 `PhoneAgentService`（1 处），dex 中检出 4 个新增硬基线包名，未构建 release；构建后未再运行 integration_test。返工前的 181,407,582 / `5b706dd5…` 只作历史。**未跑 Flutter 根项目静态分析/上游 seam 回归与异常套件**。`sameWindow()` 加 `windowType` 是否会在其他场景误报仍属未验证假设（`sameWindow()` 比较是精确相等，只有窗口类型真的变化才失效）。**观察边界、用户白名单、签名校验、`permission_required`、批准交互与审计仍为零实现。**
 - 上一轮 M26（应用边界与授权契约文档，2026-11-13）：只改中文文档，不改代码、测试、`mod.json`、白名单或上游。新增 7.5「应用边界与应用授权（设计提案）」与 7.6「实现前置风险与行为变更」，写入用户已定的三项决策（白名单全局共享、批准长期有效 + Mods 页显式撤销、审计落盘元数据滚动保留 30 天或 2000 条）、`permission_required` 契约和批准交互口径；同步更新 `AGENTS.md`、`mods/phone_agent/README.md` 与 `docs/next-session-handoff.md`。**M26 当时该设计尚未实现**（M27 随后实现了第 1 步）：M26 结束时代码是输入只允许 `com.psyche.kelivo.phoneagent`、读树与截图不检查包名或窗口类型；M26 本轮未运行测试、未构建 APK、未接设备，未产生新 `modsetHash` 或 APK 记录。
 - 上一轮 M23（前台可视化叠加层，2026-11-12，历史；M24 当前状态见 9.3.2.1）：独立 `TYPE_ACCESSIBILITY_OVERLAY` 叠加层已实现并接入读树、截图、节点/手势/系统动作；reviewer round 1 的 6 项 findings、round 2 的窗口重校验/附件 fail-closed/代次窄窗口、round 3 的 `onSuccess` 回调窗口重校验和文档/JVM 矩阵修正已处理。round-4 设备运行树 `V:/coding/kelivo-private/.tower/worktrees/wt-23/.build/worktrees/9ebf2e991caa07ed`（`modsetHash` `9ebf2e991caa07ed3e8e5b4484649de84139e89a31ac8837f779ca34aa2d8c66`），最终源码树 `V:/coding/kelivo-private/.tower/worktrees/wt-23/.build/worktrees/dfcef53cfd77ea78`（`modsetHash` `dfcef53cfd77ea78fe898710efa92991fa15a140b8d0424193279f7ad21aac77`），与设备树仅 `plugin/README.md` 文档副本不同，`plan`/`verify` 通过：API35 独立 AVD `Kelivo_M23_API_35` 完整异常套件 **`+8`、`All tests passed!`、EXIT=0**（含旋转、锁屏、服务禁用/重启、权限窗口），官方 `phone_agent_test.dart` `+2`、EXIT=0；物理 MIUI API31 官方 `+2`、EXIT=0，「叠加层不污染产品截图」`+1`、EXIT=0。本地 Loader 165、插件 Kotlin 97、Flutter Mod/Phone Agent 126、根项目与 Loader 静态分析均通过。产品 debug APK 在最终树 `dfcef53cfd77ea78` 于全部设备测试后 `flutter clean` 显式构建：181,403,054 字节，SHA-256 `501d4a0087294258baa882e9a32856208805fcba88228ec34e15016ae89689fb`，debug merged manifest 含 `SecureWindowFixtureActivity`，release 不含且含 `PhoneAgentService`；构建后未再运行 integration_test。设备结果见 9.3.7。
 - 上一轮 M22（权限弹窗保守收尾，2026-11-12）：用户明确同意“不可识别权限弹窗仍返回 `no_window`，消息条件式提示人工处理/取消并返回测试应用”。M20（窗口 root 补全）与 M21（事件来源包名）均已在 API35 设备上证伪并 abandoned，未合并生产代码；本轮整合其准确证据，只把 `PhoneAgentService` 三处无可访问窗口的英文提示改为条件式人工提示，错误码、guard、读树/截图密码遮挡、输入边界和白名单均不变。异常测试改为宿主 `dumpsys` 独立确认真实 `GrantPermissionsActivity` 后直接 tap/back/截图断言 `no_window` + 提示，不再因 `root=null` skip，也不把任意 `no_window` 当通过。设备结果与新树/APK 记录见 9.3.6。
@@ -399,7 +400,7 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 
 输入路径的错误码优先级固定为：空包名 → `no_window`；系统包 → `system_window_denied`；其他非白名单包 → `package_not_allowed`；白名单内再校验句柄/截图，失效返回 `stale_handle` 或 `stale_observation`。因此系统窗口或非白名单应用在前台时，即使句柄已经失效，也先返回包名策略错误，而不是句柄错误。锁屏/息屏在包名策略之前检查，所有方法（含读树和截图）返回 `device_locked`。
 
-以上是**当前实现**的链。7.5 的判定已插入 `no_window` 之后：**硬基线与窗口类型已实现（M27 第 1 步，见 7.5.2/7.5.3）**，两者复用 `system_window_denied`，因此既有三段相对顺序不变；**观察边界、用户白名单（新增 `permission_required`）与批准交互尚未实现**，构建期硬禁止 `package_not_allowed` 已在实现中排在窗口类型之后。未实现的层不得当作当前行为引用。
+以上是**当前实现**的链。7.5 的判定已插入 `no_window` 之后：**硬基线与输入窗口类型已实现（M27 第 1 步，见 7.5.2/7.5.3）**，两者复用 `system_window_denied`，因此既有三段相对顺序不变；**观察边界已实现（M28 第 2 步，见 7.5.4）**，读树与截图在硬基线与观察窗口类型处返回 `system_window_denied`，且**不判** `package_not_allowed`；**用户白名单（新增 `permission_required`）与批准交互尚未实现**，构建期硬禁止 `package_not_allowed` 已在实现中排在输入窗口类型之后。未实现的层不得当作当前行为引用。
 
 权限弹窗的处理边界（M20/M21 设备证伪 + M22 保守收尾）：
 
@@ -410,7 +411,8 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 
 `system_window_denied`、`package_not_allowed` 和 `screenshot_blocked` 的适用范围必须区分：
 
-- `system_window_denied` / `package_not_allowed` 只约束**输入**（节点动作、坐标手势、系统动作）；读树和截图不检查包名，仍可观察当前前台窗口。
+- `system_window_denied` 同时约束**输入**与**观察**，但触发来源不同：输入层由硬基线 + 输入窗口类型 `{TYPE_APPLICATION}` 触发，观察层由硬基线 + 观察窗口类型 `{TYPE_APPLICATION, TYPE_INPUT_METHOD}` 触发（M28 第 2 步已实现，见 7.5.4）。读树与截图仍**不检查**包名是否在构建期白名单内。
+- `package_not_allowed` 只约束**输入**；读树和截图对非白名单的普通应用（`TYPE_APPLICATION`）仍成功，这是 VLM 需要的行为。
 - `screenshot_blocked` 只表示平台明确返回的截图失败；整屏 `takeScreenshot` 成功返回的黑图不算 `screenshot_blocked`，也不表示读树或输入不可用。
 - `device_locked` 同时约束读树、截图和输入。
 
@@ -447,8 +449,8 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 - 截图、读树、手势和通道调用超时；
 - 每次生成过程中的动作预算和速率限制；
 - 默认仅允许显式配置的测试包名，当前为独立测试应用 `com.psyche.kelivo.phoneagent`；开发者只能在私有 Mod 中编辑白名单；
-- 输入请求拒绝可取得包名的系统窗口（`system_window_denied`）；无可访问 root 的权限弹窗保持 `no_window` 并只做条件式人工提示；锁屏/息屏时读树、截图和输入都返回 `device_locked`；读树和截图不检查包名，仍可观察当前前台窗口；
-- `home`/`recents` 执行后前台会离开白名单，后续输入（包括 `back`）会被拒绝；模型无法自行把测试应用切回前台，需要用户或宿主动作恢复；
+- 输入与观察请求拒绝可取得包名的系统窗口、硬基线包与不允许的窗口类型（`system_window_denied`）；无可访问 root 的权限弹窗保持 `no_window` 并只做条件式人工提示；锁屏/息屏时读树、截图和输入都返回 `device_locked`；读树和截图**不检查**构建期包名白名单，仍可观察普通第三方应用的前台窗口；
+- `home`/`recents` 执行后前台会离开白名单，**后续输入（包括 `back`）被拒绝**，模型无法自行把测试应用切回前台，需要用户或宿主动作恢复。但**读树与截图仍会成功**：API35 实测 `home`/`recents` 后前台是启动器（`com.google.android.apps.nexuslauncher`，`TYPE_APPLICATION`），而观察边界不判构建期白名单，只判硬基线与窗口类型。反过来说，“前台是 systemui / `TYPE_SYSTEM` 所以读树被拒”只适用于**通知栏**场景；而且由于 `com.android.systemui` 本身就在硬基线集合内、硬基线判定先于窗口类型，该场景返回的标识是 `hard_baseline`，**不会**是 `window_type_system`（详见 7.6 风险 2 的实测修正）。
 - 结构化错误包含可执行的下一步，而非只返回笼统失败。
 
 ### 7.3 工具选择与服务授权边界
@@ -472,17 +474,18 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 - `FLAG_SECURE` 会阻止读树或输入（它只阻止截图）；
 - 整屏截图会检测 `FLAG_SECURE` 或不发送黑图（可能成功返回黑图）；
 - `home`/`recents` 之后模型能自行回到测试应用（前台离开白名单后输入会被拒绝）；
-- 系统窗口或权限弹窗会阻止读树和截图（只有输入被拒绝）；
-- 权限弹窗一定能被识别为 `system_window_denied`（API35 实测无可访问 root 且无来源包名，读树/截图/输入仍为 `no_window`，只做条件式人工提示）；
+- 观察层能准确识别每一个应被拒绝的窗口：窗口类型只能按 `windowId` 从 `windows` 解析，解析失败一律落 `UNKNOWN` 并拒绝观察（fail closed），代价是正常应用也可能被拒；
+- 输入法窗口的读树结果对模型有用（该窗口可被观察，但拿到的可能是键盘与候选词，而非目标应用界面；未经实测）；
+- 权限弹窗一定能被识别为 `system_window_denied` 或被观察层当作系统窗口拒绝（API35 实测无可访问 root 且无来源包名，读树/截图/输入仍为 `no_window`，只做条件式人工提示）；
 - 可视化叠加层动画代表业务成功、任务进度或用户审批（它只表示系统接受或完成动作）；
 - 可视化叠加层在所有 Android 厂商设备上都可用（`addView` 可能失败，失败时只禁用可视化）；
 - 上游后台胶囊会被叠加层隐藏或免于干扰（Mod 无法操作其他 owner 的窗口）。
 
 真正需要逐步授权时，应后续增加“每个动作均由原生确认”的模式，而不是依赖危险文本识别。
 
-### 7.5 应用边界与应用授权（第 1 步已实现，其余仍为设计提案）
+### 7.5 应用边界与应用授权（第 1、2 步已实现，其余仍为设计提案）
 
-> **状态分层，不要混读。** **已实现（M27 第 1 步）**：输入路径的硬基线（静态系统包集合含 settings 与厂商变体、运行时角色持有者解析、精确包名 `com.psyche.kelivo`）与窗口类型判定（输入允许集 `{TYPE_APPLICATION}`），集中在纯函数 `PackagePolicy`（`mods/phone_agent/plugin/android/src/main/kotlin/com/kelivo/phoneagent/AppBoundary.kt`）与 `WindowState.windowType`。**仍为设计提案**：观察边界（读树与截图仍不检查包名或窗口类型）、用户白名单与签名校验、`permission_required`、批准交互、审计。当前读树与截图的行为与 M27 之前一致，`permission_required` 从未返回过。因此**不得**把本节的观察边界、白名单与批准描述引用为已生效，也不得据此宣称 9.3/9.4 的旧设备与 VLM 结果覆盖了新边界。
+> **状态分层，不要混读。** **已实现（M27 第 1 步）**：输入路径的硬基线（静态系统包集合含 settings 与厂商变体、运行时角色持有者解析、精确包名 `com.psyche.kelivo`）与窗口类型判定（输入允许集 `{TYPE_APPLICATION}`），集中在纯函数 `PackagePolicy`（`mods/phone_agent/plugin/android/src/main/kotlin/com/kelivo/phoneagent/AppBoundary.kt`）与 `WindowState.windowType`。**已实现（M28 第 2 步）**：观察边界 `PackagePolicy.requireObservable`（静态硬基线 + 观察窗口类型 `{TYPE_APPLICATION, TYPE_INPUT_METHOD}`），接入 `readTree()` 与截图路径；异常套件对应的 5 处依赖同批改为宿主 `dumpsys` 确认。**仍为设计提案**：用户白名单与签名校验、`permission_required`、批准交互、审计。`permission_required` 从未返回过。因此**不得**把本节的白名单与批准描述引用为已生效，也不得据此宣称 9.4/10.1 的旧 VLM 结果覆盖了新边界（新边界只影响观察层，VLM 结果仍需重跑才能代表新代码）。
 
 #### 7.5.1 方向
 
@@ -559,7 +562,9 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 
 失败码复用 `system_window_denied`，消息只追加固定标识 `window_type_system` / `window_type_ime` / `window_type_overlay`（与 6.5.1 的 `refresh_failed` 同风格），不含窗口标题、类名或节点内容。第 1 步另外定义了 `window_type_split_divider`（`TYPE_SPLIT_SCREEN_DIVIDER`）与 `window_type_unknown`（其他任何取值，含平台新增类型和匹配失败），两者都按默认拒绝处理；不采用黑名单枚举，因此新类型自动落入 `window_type_unknown` 而不是被放行。
 
-**第 1 步已实现（M27）**：`WindowType`（`AppBoundary.kt`）把 `AccessibilityWindowInfo.TYPE_*` 整数常量映射为枚举，`fromPlatformType` 的 `else` 分支统一返回 `UNKNOWN`；`allowsInput` 只对 `APPLICATION` 为 true。判定在 `PackagePolicy.requireInputAllowed` 内完成，编号与平台常量一致（1/2/3/4/5），有 JVM 断言覆盖 `0` 与 `99` 两个未定义取值。**观察边界（读树/截图）本步尚未接入。**
+**第 1 步已实现（M27）**：`WindowType`（`AppBoundary.kt`）把 `AccessibilityWindowInfo.TYPE_*` 整数常量映射为枚举，`fromPlatformType` 的 `else` 分支统一返回 `UNKNOWN`；`allowsInput` 只对 `APPLICATION` 为 true。判定在 `PackagePolicy.requireInputAllowed` 内完成，编号与平台常量一致（1/2/3/4/5），有 JVM 断言覆盖 `0` 与 `99` 两个未定义取值。
+
+**第 2 步已实现（M28）**：同一 `WindowType` 增加 `allowsObservation`（仅 `APPLICATION` 与 `INPUT_METHOD` 为 true），判定由 `PackagePolicy.requireObservable` 在读树与截图路径各调用一次；观察拒绝消息复用 `denialTag` 的固定标识，对 `INPUT_METHOD` 不产生任何标识（它不在拒绝集内）。`allowsObservation` 与 `allowsInput` 是同一枚举上的两个独立属性，没有“观察允许集 = 输入允许集的补集”这类推导可替代：`INPUT_METHOD` 允许观察、拒绝输入，其余四类（`SYSTEM`、`ACCESSIBILITY_OVERLAY`、`SPLIT_SCREEN_DIVIDER`、`UNKNOWN`）两者都拒绝。
 
 **为什么必须两层都判**：
 
@@ -569,22 +574,66 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 
 **为什么输入拒绝集可以比观察拒绝集大**：输入法窗口经常活动并覆盖在前台应用上。若观察也拒绝 `TYPE_INPUT_METHOD`，读树会直接失败、模型连正在输入的界面都看不到，这是典型反向误伤。反之，对输入法窗口本身做 tap / `set_text` 属于系统输入面操作，超出“操作目标应用”的边界，必须拒绝。
 
-#### 7.5.4 观察边界（读树与截图）
+#### 7.5.4 观察边界（读树与截图，M28 第 2 步已实现）
 
 **观察只判硬基线与窗口类型，不判用户白名单。** 理由：如果未授权应用的读树/截图也被拒绝，模型在未授权应用里看不到任何内容，就无法向用户说明“我需要这个应用的授权”，用户也无从判断要不要批准。批准应当发生在模型已经说明意图之后，而不是发生在模型完全盲视时。
 
+**实现入口**：`PackagePolicy.requireObservable(packageName, windowType)`（`AppBoundary.kt`）。它与 `requireInputAllowed` 共用同一个 `HARD_BASELINE_PACKAGES` 集合与同一个 `kelivoPackage` 精确包名判定，**不接收也不查询 `RoleHolders`**——电话/短信角色是“可操作哪些应用”的输入边界，与“能看到哪些窗口”无关；观察层因此不因角色解析失败而整体封死（那会让 `readTree` 在所有设备上随机失败）。判定顺序固定为：
+
+`no_window` → 静态硬基线（含 Kelivo 精确包名）→ 观察窗口类型 `{APPLICATION, INPUT_METHOD}`。
+
+- 空包名或空白包名返回 `no_window`，与读树原有的“无可访问窗口”语义合并，不新增错误码。
+- 硬基线命中返回 `system_window_denied`，消息带固定标识 `hard_baseline`，含包名（与输入层同格式）。
+- 窗口类型不在观察允许集内返回 `system_window_denied`，消息只追加 `WindowType.denialTag` 的固定标识（`window_type_system` / `window_type_overlay` / `window_type_split_divider` / `window_type_unknown`），**不含窗口标题、类名、节点内容或坐标**。
+- **不判用户白名单**：`requireObservable` 没有 `allowedPackages` 参数，也不返回 `package_not_allowed` 或 `permission_required`。第三方应用（无论是否被批准）的 `TYPE_APPLICATION` 窗口都可观察。
+
+**接入点（两处，各一次）**：
+
+- `PhoneAgentService.readTree()`：在 `rootInActiveWindow` 取到 root 并构造出 `WindowState` 之后、`treeBudget` 扣减与 `registry.beginTree` 之前调用。**分页请求（`offset > 0`）不重复判定**——它们复用已建立的观测，判定已在 `offset == 0` 那次完成，且 `registry.page()` 会用完整 `WindowState` 比较窗口；在分页里再判定一次会让“在同一窗口内翻页”因为一次瞬时类型抖动而失败，且判定本身不提供额外保护。
+- `PhoneAgentService.captureScreenshot()`：见下方顺序约束。
+
 因此必须如实声明能力边界：
 
-- **不承诺读树不泄漏第三方应用自身界面文本。** 应用自身界面内容（消息列表、聊天记录、应用内的通知中心等）仍会进入工具结果（结果继续带 `untrusted_content` 标记与内容边界声明）。本设计只承诺：`TYPE_SYSTEM`（通知栏/状态栏）窗口与硬基线窗口不可被观察，输入法窗口可被观察但不可输入。
+- **不承诺读树不泄漏第三方应用自身界面文本。** 应用自身界面内容（消息列表、聊天记录、应用内的通知中心等）仍会进入工具结果（结果继续带 `untrusted_content` 标记与内容边界声明）。该层只承诺：`TYPE_SYSTEM`（通知栏/状态栏）窗口、`TYPE_ACCESSIBILITY_OVERLAY` 窗口、分屏分隔条、未知类型窗口与硬基线窗口不可被观察；输入法窗口可被观察但不可输入。
 - 这里有个容易误读的地方：通知栏本身被阻断，**不等于**通知内容不会泄漏——同一条通知的文字可能同时出现在第三方应用自己的界面里，而那属于应用自身界面。因此不能把“通知栏不可观察”宣传成“通知内容不会进入模型”。
-- 密码节点文本仍按 7.1 隐藏，密码遮挡仍是“尽力而为”，本设计不把密码防护计入白名单方案的收益。
+- 密码节点文本仍按 7.1 隐藏，密码遮挡仍是“尽力而为”，本实现不把密码防护计入白名单方案的收益。
+- 观察边界同样**不承诺**“输入法窗口一定能被观察到”：类型解析依赖 `windows` 枚举，解析失败落到 `UNKNOWN` 并拒绝（fail closed）。可观察不等于可用——输入仍只允许 `TYPE_APPLICATION`。
 
 **截图的前台判定必须先于且独立于全窗口密码遮挡遍历**：
 
-- 顺序固定为：取前台 `WindowState` → **观察边界判定**（硬基线 + 窗口类型）→ 通过后才执行 `collectPasswordBounds` 全窗口遍历 → 截图。
-- `collectPasswordBounds`（`PhoneAgentService.kt:454`）读的是**所有**窗口的 root，不能因为前台被拒就缩窄遍历范围，也不能把“前台不合格”当成“不用遮挡”。
-- 两者必须在代码上是独立步骤：遮挡遍历只按密码节点与自身 overlay 规则工作，不感知边界策略；边界策略也不读节点内容。
-- 入口判定之后不必再加一次类型判定：既有 `ScreenshotCapture` 的 gate 与 `onSuccess` 回调比较的是**完整 `WindowState`**（`OverlayVisuals.kt:136` 的 `windowChanged(original, latest) = latest != original`，`WindowState` 是 data class，逐字段比较 `windowId`/包名/宽高/旋转），不一致即返回 `stale_observation` 且不发图。把 `windowType` 加入 `WindowState` 后，这处比较会自动覆盖类型变化，因此入口判定之外的补判并非必需。仍需实测的假设收窄为：同一 `windowId` 的窗口类型在正常使用中是否会发生变化；若确实会变，应让比较继续覆盖它，而不是取消入口判定。
+- 顺序固定为：取前台 `WindowState` → **`requireObservable`** → 通过后才执行 `collectPasswordBounds` 全窗口遍历 → 截图。实现为 `captureScreenshot()` 里连续三段代码：`windowState(root)` → `requireObservable(...)` → `collectPasswordBounds(current)`。
+- `collectPasswordBounds`（`PhoneAgentService.kt`）读的是**所有**窗口的 root，不能因为前台被拒就缩窄遍历范围，也不能把“前台不合格”当成“不用遮挡”。前台被拒时**根本不会进入**遮挡遍历（截图直接失败、不发图），遮挡遍历的输入参数与遍历范围保持原样，不因新增判定而收窄。
+- 两者必须在代码上是独立步骤：遮挡遍历只按密码节点与自身 overlay 规则工作，不感知边界策略；边界策略也不读节点内容、不读密码 bounds。
+- 入口判定之后不必再加一次类型判定：既有 `ScreenshotCapture` 的 gate 与 `onSuccess` 回调比较的是**完整 `WindowState`**（`OverlayVisuals.kt` 的 `windowChanged(original, latest) = latest != original`，`WindowState` 是 data class，逐字段比较 `windowId`、包名、宽高、旋转与 `windowType`），不一致即返回 `stale_observation` 且不发图。`windowType` 已在 M27 加入 `WindowState`，这处比较会自动覆盖类型变化，因此入口判定之外的补判并非必需。仍需实测的假设收窄为：同一 `windowId` 的窗口类型在正常使用中是否会发生变化；若确实会变，应让比较继续覆盖它，而不是取消入口判定。
+
+**行为变更（收紧，用户与模型可见）**：
+
+- 通知栏、状态栏、系统无障碍叠加层、分屏分隔条、未知类型窗口、硬基线窗口在前台时，读树与截图从“成功”变为 `system_window_denied`；消息给出固定标识与“请用户返回目标应用”的下一步。
+- 输入法窗口在前台时读树与截图仍成功，这与输入层相反（输入法窗口的输入仍被拒，标识 `window_type_ime`）。
+- `phone_agent_test.dart` 全程在测试应用自身前台（`TYPE_APPLICATION`），行为不变。
+- 权限弹窗不受影响：它在 `rootInActiveWindow == null` 时就以 `no_window` 退出，到不了 `requireObservable`。
+
+**同批的异常测试改造（本步必须一起提交，否则套件必红）**：
+
+观察边界收紧后，`phone_agent_exception_test.dart` 有 5 处依赖“读树能看到非本应用前台”，改法统一为**宿主 `dumpsys` 独立确认前台 + 测试断言错误码**，与权限弹窗用例既有的分工一致（宿主确认是测试前提，不是产品检测能力）：
+
+- （a）服务禁用用例的 settings 树依赖（`:537`、`:549-550`）：改为宿主用 `dumpsys window` 确认前台是 `com.android.settings`（并转到 `PHONE_AGENT_OPEN_DISABLE_DIALOG` 标记）后，测试只等待宿主标记时序，不再读 settings 树判断页面；关闭确认弹窗是否出现由宿主 `dumpsys` 确认。测试侧改为**等待观察层的硬基线拒绝**（`system_window_denied` + `hard_baseline`）作为“宿主确实进了设置页”的证据。
+- **pending 批次的形态（F1 修正，按实现描述）**：不再是“一次性发起 1000 个 `readTree(offset: 1)` 再 `Future.wait`”，而是**分块循环**——每块 `chunkSize = 200` 并发发起、累计结果码，然后检查 `service.status().enabled`，直到服务变为禁用或累计耗时达到 **35 秒上界**（`phone_agent_exception_test.dart:572-586`）。观测仍在**测试应用自身前台**建立（`offset: 1` 分页复用该观测），因为 settings 是硬基线包、`offset 0` 会被拒绝。**为什么改**：旧形态要求“1000 个请求恰好还在队列里”才有意义，宿主点击时机的抖动会让批次提前排空从而失去意义；分块循环改为“持续施压直到服务真的关掉”，断言（35 秒内完成、无 `timeout`、至少一个 `interrupted`/`service_unavailable`）不依赖排空时机。
+
+- （b）叠加层触摸用例（`:195-245`）：宿主用 `dumpsys` 确认通知栏已打开并打印标记；测试的**核心断言是读树轮询**——20 秒截止内必须出现 `system_window_denied`，且消息带 `hard_baseline` **或** `window_type_system`（两者取其一，见下方实测修正：通知栏实际给的是 `hard_baseline`），同时保留叠加层可见性证据（触摸期间叠加层显示、截图无污染等既有断言）。**不再断言 `foreground != null`**（旧写法等“读到非本应用包名”，在 `TYPE_SYSTEM` 被拒后恒为 null）。
+- 这一形态比旧断言**更强**，不是更弱：旧写法只要求“读到的包名不是测试应用”，新写法要求观察边界给出**固定的来源标识**，等于同时验证了“前台确实切换了”和“观察层确实按新边界拒绝”。
+
+- （c）home/recents 用例（`:350-385` 经 `_expectSystemNavigationDenied`，helper 在 `:1010` 起）：**仍然读树**，但改用的是 `_waitForForegroundLeftApp`（`phone_agent_exception_test.dart:1108-1146`）——它轮询 `_tryTreePayload` 并接受三种结果之一：(1) 读树**成功**且 `package_name` 不是测试应用（实测 home/recents 落在启动器时的正常情况）；(2) `no_window`；(3) `system_window_denied` 且带真实观察标识（`hard_baseline` / `window_type_system` / `window_type_overlay` / `window_type_split_divider`）。**`window_type_unknown` 明确不在可接受集合内**，因为它表示窗口列表尚未稳定，把它当证据会吞掉真实时序缺陷。随后直接断言节点 `tap` 与 `back` 的错误码，并按“硬基线集合成员”区分 `system_window_denied` / `package_not_allowed`，要求两次判定一致；无法确定时不得退化成“只要报错就算通过”。
+- **为什么不能写成“不再读树取包名”**：实测 home/recents 后前台是启动器（可观察、读树成功），所以“前台已离开本应用”的**正向证据恰恰来自读树返回的包名**；只有前台不可观察时才退化为标识断言。
+
+
+不受影响、不得顺手改动：`phone_agent_test.dart`、异常套件的其余读树点（均在测试应用自身前台）、权限窗口用例（`no_window` 而非 `system_window_denied`）。
+
+**未验证假设（不得写成已知事实）**：
+
+- 观察允许 `TYPE_INPUT_METHOD` 在真实设备上是否会产生反向误伤：输入法窗口成为 `rootInActiveWindow` 时，读树拿到的是输入法自己的节点树（不是目标应用界面），模型可能只看到候选词与键盘。本步选择“允许观察”是照 7.5.3 的设计，但**输入法窗口的读树结果是否有用、是否会误导模型，尚未实测**。
+- `windows` 枚举在某些 ROM 上能否稳定取到前台窗口类型：取不到或匹配失败即 `UNKNOWN` → 拒绝观察，表现为读树/截图在正常应用上也可能报 `system_window_denied`。M27 只在 API35 模拟器与 MIUI API31 上验证过官方测试路径不触发 `stale_*`，未覆盖所有 ROM。
+
 
 #### 7.5.5 三项已定决策
 
@@ -643,12 +692,22 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 
 - 6.6 与 6.5.1 的既有码与优先级**继续有效**，本节只在其间插入三层判定，并新增 `permission_required`。
 - 硬基线与窗口类型复用 `system_window_denied`，靠固定标识区分来源；不新增 `system_settings_denied` 之类的码，因为集合成员资格已经表达语义，新增码会稀释既有断言。
-- `package_not_allowed` 仅表示构建期硬禁止（当前即“只允许测试包”）；实现运行时白名单后，**不要让同一个码同时表示“用户未批准”**。
+- `package_not_allowed` 仅表示构建期硬禁止（当前即“只允许测试包”），**只用于输入**；实现运行时白名单后，**不要让同一个码同时表示“用户未批准”**。
+- M28 第 2 步起 `system_window_denied` 也由观察层返回。读树/截图侧的 `system_window_denied` 只来自硬基线与观察窗口类型，**不会**来自 `package_not_allowed` 或角色持有者；观察层不查询角色，因此也不会产生 `role_resolution_failed`。
 - 本节不改变 `device_locked`、`no_window`、`stale_handle`、`stale_observation`、`screenshot_blocked` 的含义与范围。
+
+- 前台窗口类型有两个来源，**在同一有界预算内交替尝试**，都只认“就是这个窗口”：
+  1. 节点自己的窗口 `root.window.type`。它与 `windowId`、包名同源，不存在跨读取竞态。
+  2. `windows` 列表按 `windowId` 精确匹配。
+- **实测证据（M28，API35，服务重连后首次截图，两种来源同时不可用）**：当时用临时调试版本打印了 `windowType attempt=0/1/2 rootWin=5902 nodeType=null entries=(5890, 3) resolved=UNKNOWN`（含 `nodeType=` 与 `resolved=`，**交付代码不打印这两个字段**；交付版本只在预算耗尽时打印 `windowType exhausted attempts=N rootWin=... entries=...`，见 `PhoneAgentService.kt:605-612`）。由此确认：`root.window` 返回 **null**，同时 `windows` 只有另一个窗口 id（5890），而 `rootInActiveWindow` 已属于窗口 5902。窗口列表要约 3 秒后才包含目标窗口。因此**既不能只依赖 `windows`，也不能假设 `root.window` 一定可用**；原“3 次 × 25/50ms（共 75ms）”预算在实测滞后面前必然失败，首次读树/截图会返回 `window_type_unknown`。该日志串是判断依据的**历史调试输出**，不能用交付构建复现；能复现的只有上面那行 `exhausted` 格式。
+- 现实现为**总预算 2500ms、每次间隔 40ms** 的有界重试，交替读取两条来源；同时记录 `TYPE_WINDOWS_CHANGED` 到达时间，只有等待期间没有新窗口事件时才累加尝试计数（用于日志区分“平台没变化”与“我们没去读”）。预算刻意取实测滞后的量级，仍远小于读树/截图 35s 通道超时与 15s 排队超时；**只在两条来源都失败时才消耗**，正常路径无额外延迟。
+- 预算内两条来源都拿不到才落 `UNKNOWN` 并由策略层拒绝（fail closed，消息带 `window_type_unknown`）。不放宽任何判定，不按包名、层级顺序或位置猜类型，也不为了让测试变绿延长等待。
+- 该预算只是**缓解**，不是保证：**2500ms 短于实测的约 3 秒滞后**，只覆盖“窗口列表在两秒半内补上”的情形，不覆盖更长的滞后、其他 ROM 或任意极端时序；超过预算仍会返回 `window_type_unknown`，调用方应把它当作“窗口尚未稳定，稍后重试”。
+
 
 ### 7.6 实现前置风险与行为变更
 
-本节列的是**动手前必须处理**的事项。**风险 1（`WindowState.windowType`）已由 M27 第 1 步处理**；风险 2 的观察边界与风险 3–5 的其余部分仍待处理，不是已完成工作。
+本节列的是**动手前必须处理**的事项。**风险 1（`WindowState.windowType`）已由 M27 第 1 步处理**；**风险 2（观察边界的异常测试依赖）已由 M28 第 2 步处理**；风险 3–5 的其余部分（用户白名单、批准交互、审计）仍待处理，不是已完成工作。
 
 **风险 1：`WindowState` 需要新增 `windowType`，波及 `sameWindow()` 与全部构造/调用点（M27 第 1 步已实现）**
 
@@ -659,48 +718,51 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 - 类型解析失败（`windows` 不可读、找不到对应 `windowId`、或返回未知类型）**fail closed**：一律落到 `WindowType.UNKNOWN`，输入拒绝。
 - 测试夹具里的 `WindowState(...)` 构造已同步，并用常量 `TEST_PACKAGE` / `KELIVO_PACKAGE` 取代散落的字符串；策略本身是纯函数，纯 JVM 覆盖，未引入 Robolectric 或新依赖。
 
-**风险 2：`phone_agent_exception_test.dart` 会因观察边界变红，必须同批改宿主 `dumpsys` 确认**
+**风险 2：`phone_agent_exception_test.dart` 因观察边界变红（M28 第 2 步已同批处理）**
 
-观察边界收紧后，异常套件共有 **5 处** 依赖"读树能看到非本应用前台"的地方会失败，实现观察边界时必须同批改掉，否则套件无法变绿：
+观察边界收紧后，异常套件共有 **5 处** 依赖"读树能看到非本应用前台"的地方会失败，必须与产品代码同批改掉，否则套件无法变绿。M28 的处理原则是**统一改为“宿主 `dumpsys` 独立确认前台 + 测试断言错误码/时序”**，与权限弹窗用例既有的分工完全一致：宿主确认是测试前提，不是产品检测能力；测试不得为了变绿而放宽断言，也不得把“只要报错”当作通过。
 
 **（a）settings 树依赖（服务禁用/中断/重启用例）**
 
-- `phone_agent_exception_test.dart:537` 靠读 `com.android.settings` 树判断宿主已打开无障碍详情页，`:549-550` 靠读 settings 树并断言存在 `Turn off` 节点来判断关闭确认弹窗已出现。
-- 同一用例的 pending 批次也在该页面上建立观测：`:557` 的 `_tree(service)` 与随后 1000 个 `readTree(offset: 1)` 都是在无障碍设置页前台时发出的（见 9.3.1 的“先建立 Settings 观测”）。观察边界一收紧，这一步会直接返回 `system_window_denied`，用例在到达禁用断言前就失败。
-- 改法：这三处全部改为**宿主 `dumpsys` 独立确认**（`dumpsys window` / `dumpsys activity` 判断前台是设置页或确认弹窗）；pending 批次改在测试应用自身前台（`TYPE_APPLICATION`）上建立观测，不再依赖 Settings 页面。
+- 原失败点：`phone_agent_exception_test.dart:537` 靠读 `com.android.settings` 树判断宿主已打开无障碍详情页，`:549-550` 靠读 settings 树并断言存在 `Turn off` 节点来判断关闭确认弹窗已出现；`:557` 的 `_tree(service)` 与随后 1000 个 `readTree(offset: 1)` 也在无障碍设置页前台建立观测（见 9.3.1 的“先建立 Settings 观测”）。观察边界收紧后这一步直接 `system_window_denied`，用例在到达禁用断言前就失败。
+- 改法（本步实现）：两处 settings 树轮询删除，改为**宿主 `dumpsys window` 确认前台包名是 `com.android.settings`** 后由宿主推进到 `PHONE_AGENT_OPEN_DISABLE_DIALOG` 标记；测试侧改为等待观察层的**硬基线拒绝**（`system_window_denied` + `hard_baseline`）作为“宿主确实进了设置页”的证据。**pending 批次改在测试应用自身前台**（`TYPE_APPLICATION`）建立观测（`_tree(service)` 一次，`offset: 1` 分页复用该观测），随后按 `chunkSize = 200` **分块反复**发起 `readTree(offset: 1)` 并累计结果码，每块后检查 `service.status().enabled`，直到服务被禁用或达到 35 秒上界。分页请求复用同一观测，因此批次不再依赖 Settings 页面，也不因分页重复判定而失败（见 7.5.4 的“分页不重复判定”）。宿主在批次仍 pending 时切到设置页并关闭服务，断言（35 秒内完成、无 `timeout`、存在 `interrupted`/`service_unavailable`）在分块形态下不变，但不再依赖“1000 个请求恰好排空”的时机运气。
+- 保留下来的含义：该用例仍验证“禁用服务会中断 pending 请求”，只是不再用读树判断宿主停在哪一页。
 
 **（b）`:202-232`「叠加层可见时真实触摸不被拦截」**
 
-- 第 `219` 行 `final tree = await _tryTree(service);` 轮询等待前台包名 `!= _appPackage`（`:221-224`），宿主 `adb shell input swipe` 触摸后打开的是通知栏（`com.android.systemui`，`TYPE_SYSTEM`）。`TYPE_SYSTEM` 拒观察后 `_tryTree`（`:759-773`，`ok != true` 即返回 null）恒为 null，`:228` 的 `expect(foreground, isNotNull)` 必然失败——而且失败点正是"证明叠加层不拦截宿主触摸"这个核心断言。
-- 改法：前台由**宿主 `dumpsys` 确认通知栏已打开**并打印标记，测试侧只保留叠加层可见性证据（叠加层是否在触摸期间显示、截图无污染等既有断言），不再用读树取前台包名。
+- 原失败点：第 `219` 行 `final tree = await _tryTree(service);` 轮询等待前台包名 `!= _appPackage`（`:221-224`）；宿主 `adb shell input swipe` 触摸后打开的是通知栏（`com.android.systemui`，`TYPE_SYSTEM`）。`TYPE_SYSTEM` 拒观察后 `_tryTree`（`ok != true` 即返回 null）恒为 null，`:228` 的 `expect(foreground, isNotNull)` 必然失败。
+- 改法（本步实现）：前台由**宿主 `dumpsys` 确认通知栏已打开**（`mCurrentFocus`/`mFocusedApp` 指向 `com.android.systemui`）并打印标记；测试侧的读树轮询改为“在触摸窗口期内继续读树并记录结果”，**核心证据换成产品能力的正向断言**——同一时段读树必须返回 `system_window_denied` 并带观察边界的固定标识。叠加层可见性证据（触摸期间叠加层显示、随后的截图无污染）保持原样。测试不再要求读到 `com.android.systemui` 的节点树。
+- **设备实测修正（M28，API35）**：API35 上打开通知栏后 `mCurrentFocus` 实测为 `Window{... NotificationShade}` 而**不是** `com.android.systemui/...`，因此宿主确认不能只按 `mCurrentFocus` 精确匹配该包名。更要紧的是标识：`com.android.systemui` 本身就在 `HARD_BASELINE_PACKAGES` 里，而**硬基线判定排在窗口类型判定之前**，所以实际返回的标识是 `hard_baseline`，**`window_type_system` 不可能独立出现**。断言必须接受 `hard_baseline` 或 `window_type_system`，不能只等后者（只等后者会让该用例必然超时）。这一点容易误读，写死“通知栏 → `window_type_system`”是错的。
 
 **（c）`:346-377`「home 与 recents 后输入被包名策略拒绝」**
 
-- 该用例经 `_expectSystemNavigationDenied`（`:1005-1040`）驱动：`:1019` 的 `_waitForTreeWhere`（`:913-928`，内部同样走 `_tryTree`）读树等待前台离开白名单。`home`/`recents` 后前台通常是 systemui，读树被窗口类型拒绝后拿不到 `package_name`，在 `:1025` 的 `expect(foreground, isNotNull)` 处失败，根本到不了 `:1037`/`:1039` 的输入错误码断言。
-- 改法：由**宿主确认前台已离开白名单**，测试直接断言输入与 `back` 的错误码（`system_window_denied` / `package_not_allowed`），不再依赖读树取包名；`_systemPackages` 的期望值改由宿主提供的包名或固定期望给出。
+- 原失败点：该用例经 `_expectSystemNavigationDenied`（`:1005-1040`）驱动，`:1019` 的 `_waitForTreeWhere`（内部同样走 `_tryTree`）读树等待前台离开白名单；`home`/`recents` 后前台通常是 systemui，读树被窗口类型拒绝后拿不到 `package_name`，在 `:1025` 的 `expect(foreground, isNotNull)` 处失败。
+- 改法（本步实现）：读树取包名改为**“前台已不是本应用”的观测断言**，随后直接断言节点输入与 `back` 的错误码。期望值不依赖宿主提供包名：错误码按**硬基线集合成员**区分（systemui 等 → `system_window_denied`，其他包 → `package_not_allowed`），无法确定时只能接受这两种之一并要求两次判定一致。
+- **设备实测修正（M28，API35）**：`home` 与 `recents` 后前台实测**不是** systemui，而是 `com.google.android.apps.nexuslauncher/.NexusLauncherActivity`（`TYPE_APPLICATION`），**读树成功返回包名**。因此“等读树被观察层拒绝”这一写法对 home/recents 会白等到 30 秒超时。正确断言是：读树成功时要求包名不是测试应用，读树被拒时要求带真实观察标识（`hard_baseline` / `window_type_system` / `window_type_overlay` / `window_type_split_divider`）。**`window_type_unknown` 明确不在可接受集合内**——它表示窗口列表尚未稳定，把它当作“已离开前台”的证据会吞掉真实的时序缺陷。
 
 **（d）不受影响的部分（避免过度改动）**
 
-- `phone_agent_test.dart` 不读 settings，不受观察边界影响。
+- `phone_agent_test.dart` 不读 settings，全程测试应用前台，不受观察边界影响。
 - `:116-127`、`:303`、`:334`、`:479` 等读树点都在测试应用自身前台（`TYPE_APPLICATION`），不需要改。
 - 权限窗口用例读树得到 `no_window`（不只是"失败"），与本层无关，保持原样。
 
 **（e）宿主确认是前提不是产品能力**
 
-- 这不是推翻既有分工，而是把它补完整：`mods/phone_agent/README.md` 的故障排查与 9.3.1 的边界本就写明服务开关由宿主在系统界面操作、测试只轮询断言，以及权限弹窗由宿主 `dumpsys` 独立确认；但**没有**规定（a）（b）（c）三类用例的前台也要由宿主独立确认。实现本提案时必须补上，否则测试无法在不读 settings 树、通知栏或系统窗口的前提下知道自己在哪一页。
-- 反过来说：在测试依赖改完之前，不能宣称新边界“已通过异常套件”。
+- 这不是推翻既有分工，而是把它补完整：`mods/phone_agent/README.md` 的故障排查与 9.3.1 的边界本就写明服务开关由宿主在系统界面操作、测试只轮询断言，以及权限弹窗由宿主 `dumpsys` 独立确认；M28 把（a）（b）（c）三类用例的前台确认补进了同一套分工。
+- 反过来说：在测试依赖改完之前，不能宣称新边界“已通过异常套件”。本步的结果与未通过项见 9.3 的新增小节。
 
-**风险 3：行为变更（收紧），不是纯新增**
+**风险 3：行为变更（收紧），不是纯新增（观察层部分 M28 已生效）**
 
-- 读设置页、通知栏、输入法窗口、被其他无障碍层覆盖的前台，将从“成功”变为 `system_window_denied`（输入、观察或两者）。
-- 白名单内应用与非硬基线第三方应用的读树/截图行为不变，但输入从“只看是不是测试包”变为“要用户批准”，这是**用户可见的行为变更**，需要 Mods 页白名单管理页与文案同步。
-- 已安装用户升级后不会自动获得任何白名单条目（默认拒绝），首次调用即返回 `permission_required`。
+- 观察层已生效的部分：通知栏、状态栏、系统无障碍叠加层、分屏分隔条、未知类型窗口与硬基线窗口在前台时，读树与截图从“成功”变为 `system_window_denied`。
+- **输入法窗口不受观察层影响**：`TYPE_INPUT_METHOD` 在观察允许集内，读树与截图仍成功；它只在输入层被拒（`window_type_ime`）。不得把“输入法窗口被拒绝输入”误写成“输入法窗口不可观察”。
+- 白名单内应用与非硬基线第三方应用的读树/截图行为不变，但输入从“只看是不是测试包”变为“要用户批准”，这是**用户可见的行为变更**，需要 Mods 页白名单管理页与文案同步（第 3、4 步，未实现）。
+- 已安装用户升级后不会自动获得任何白名单条目（默认拒绝），首次调用即返回 `permission_required`（第 3 步，未实现）。
 
 **风险 4：历史 VLM 结果不能用于宣称新边界已验证**
 
 - 9.4 与 10.1 的 VLM 固定任务、坐标动作、像素专属确认全部来自**旧代码**（读树/截图无边界、输入限单测试包）。
-- 实现新边界后必须重新跑：API35 官方测试、完整异常套件、物理 MIUI 官方测试，以及至少一轮 VLM 固定任务（含一次 `permission_required` → 批准 → 重试的完整链路）。
-- 在重跑之前，文档只能写“新边界未验证”。
+- 实现新边界后必须重新跑：API35 官方测试、完整异常套件、物理 MIUI 官方测试，以及至少一轮 VLM 固定任务（含一次 `permission_required` → 批准 → 重试的完整链路）。观察层这一步只影响官方测试与异常套件，**VLM 固定任务必须另行重跑**才代表新代码。
+- 在重跑并写入 9.3/9.4 之前，文档只能写“新边界未验证”。
 
 **风险 5：实现前需要设备实测确认的假设**
 
@@ -708,9 +770,11 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 - 替代接口（`TelecomManager.defaultDialerPackage` / `Telephony.Sms.getDefaultSmsPackage`）与 `ROLE_DIALER` / `ROLE_SMS` 的语义等价性在 MIUI 等厂商 ROM 上是否成立，含“`getDefaultSmsPackage` 返回 null 表示系统明确没有默认短信应用”这一区分是否可靠；解析失败必须按最严拒绝。
 - 厂商设置与安装入口变体（如 `com.miui.securitycenter`、`com.miui.packageinstaller`、`com.lbe.security.miui` 之外的实现）是否能被完整覆盖；漏写即等于没有硬基线，且在第 3 步白名单上线后会变成真实缺口。补全流程见 7.5.2。
 - 通知 action + `BroadcastReceiver` 在 API 31–35 的行为（点击回调、进程被杀后重放、幂等）。
-- `WindowState` 增加 `windowType` 后 `sameWindow()` 是否会让正常场景误报 `stale_*`。
+- `WindowState` 增加 `windowType` 后 `sameWindow()` 是否会让正常场景误报 `stale_*`（M27 在两台设备官方测试路径上未出现）。
+- **M28 新增**：观察允许 `TYPE_INPUT_METHOD` 在真实设备上是否会产生反向误伤——输入法窗口成为 `rootInActiveWindow` 时读树拿到的是输入法自己的节点树（键盘与候选词），而非目标应用界面。
+- **M28 新增**：`windows` 枚举在某些厂商 ROM 上能否稳定取到前台窗口类型；取不到或匹配失败即 `UNKNOWN` → 拒绝观察，表现为正常应用上的读树/截图也可能报 `system_window_denied`。
 
-以上均**未实测**；实现前不得在文档中写成“已知可行”。
+以上均**未实测**（除注明 M27 已验证的部分）；实现前不得在文档中写成“已知可行”。
 
 ## 8. 分阶段实施
 
@@ -899,6 +963,38 @@ flutter test integration_test/phone_agent_test.dart -d <android-device-id>
 
 上一轮节点重验修正后的设备结果（历史）：
 
+- **M28 第 2 步（观察边界）设备结果（API35 `emulator-5554`，Android 15）**：合成树 `V:/coding/kelivo-private/.tower/worktrees/wt-28/.build/worktrees/0328aca335a3ceec`（`modsetHash` `0328aca335a3ceec71d00caa8beee688af26d317910ca9dcabcbc8948026fc24`），`flutter test integration_test/phone_agent_test.dart -d emulator-5554` → **`+2`、`All tests passed!`、EXIT=0**（截图 → 读树 → 节点点击 → 坐标滑动 → 节点滚动 → 聚焦后 `set_text` → 二次读树，以及 Mods 页三态选择）。
+- **官方测试在最终树上也跑过（R2 F3 修正）**：`final2_official.log`（22:28）首行即 `loading .../worktrees/c3c760c0d4502878/integration_test/phone_agent_test.dart`，收口 **`+2: All tests passed!`、EXIT=0**。此前“最终树未重跑官方测试”的记录**与日志不符，已更正**。两树差异为 `PhoneAgentService.kt` 一行 KDoc（`WINDOW_TYPE_ATTEMPTS` → `WINDOW_TYPE_BUDGET_MS`）+ 2 条 JVM 用例，不改变行为；`0328aca3` 上那次 `+2` 是更早的独立证据。
+- **M28 第 2 步异常套件结果（API35，如实记录，未取得绿色整轮）**：以下数字**逐条取自 `wt-28/.build/*.log`**，不再用“两次尝试”概括（R2 F1 修正——此前写“两次均为 `+1 -1`”只对上 `exc5.log`，而 `exc5` 跑的不是最终树）：
+
+  | 日志 | 时间 | 运行树 | 结果 | 失败用例（`Failing tests:` 段） |
+  | --- | --- | --- | --- | --- |
+  | `exc5.log` | 21:58 | `e2d50da0`（非最终树） | `+1 -1` | `FLAG_SECURE 截图行为与恢复`（`Expected: 'stale_observation' / Actual: 'screenshot_required'`）+ 余下 **6** 例 `did not complete`（叠加层可见时真实触摸、旋转、home 与 recents、权限窗口、锁屏、服务禁用） |
+  | `exc6.log` | 22:46 | `c3c760c0` | **`+1 -7`** | 叠加层不污染产品截图、叠加层可见时真实触摸不被拦截、旋转后旧句柄与旧截图失效、home 与 recents、权限窗口、锁屏、服务禁用 |
+  | `exc7.log` | 23:01 | `c3c760c0` | **`+2 -6`** | 叠加层可见时真实触摸不被拦截、旋转、home 与 recents、权限窗口输入被拒绝、锁屏 device_locked、服务禁用 |
+  | `exc8.log` | 23:22 | `c3c760c0` | **`+2 -6`** | 同 `exc7` 的 6 条 |
+  | `exc9.log` | 23:50 | `c3c760c0` | **`+1 -7`** | 叠加层不污染产品截图、叠加层可见时真实触摸不被拦截、旋转、home 与 recents、权限窗口输入被拒绝、锁屏 device_locked、服务禁用 |
+
+  - `exc5`（`e2d50da0`，非最终树）的失败**不是**叠加层问题：唯一失败用例 `FLAG_SECURE 截图行为与恢复` 报 `Expected: 'stale_observation' / Actual: 'screenshot_required'`（发生在 `PHONE_AGENT_STALE_WINDOW` 同包夹具切窗之后），另有 **6 例** `did not complete`（叠加层可见时真实触摸、旋转、home 与 recents、权限窗口、锁屏、服务禁用；另有 tearDownAll）。
+  - **但该用例在最终树上是通过的（R4 F3 修正）**：四个最终树轮次 `exc6`/`exc7`/`exc8`/`exc9` 的计数都是 `FLAG_SECURE → +0`、下一条 `叠加层不污染产品截图 → +1`，两次计数之间没有其他用例，因此 `+0 → +1` 只能由 `FLAG_SECURE` 贡献，属**通过的直接计数证据**，不是推断。（`exc6`/`exc9` 的叠加层用例随后在 `+1` 基础上再 `-1` 失败，不影响 `+1` 已到手这一事实。）
+  - **同代码 A/B**：`exc4`（21:43）与 `exc5`（21:58）**跑的是同一棵树 `e2d50da0`**——`exc4` 的 `FLAG_SECURE` 通过（`00:31 +0` → `01:00 +1`），`exc5` 失败（`00:41 +0 -1`）。同一份代码一次通过一次失败，说明 `screenshot_required` **不是 M28 的确定性回归**，更像时序或前置条件抖动。**这是判断（有同树 A/B 旁证），不是根因证据**；错误码优先级是否仍有问题未定位，已单独 file finding。
+  - **失败模式要分开看，不能一律归为宿主时序**：
+  - `exc6`/`exc7` 的多数失败是 `等待 PHONE_AGENT_TAP_TARGET 超时（标记 PHONE_AGENT_RETURN_TO_APP）。最后前台包名：com.psyche.kelivo.phoneagent`——**前台确实是测试应用**，但找不到点击目标节点，属 `_ensureAppForeground` 重 pump 的宿主时序。
+  - `exc8`/`exc9` 的同一句变为 **`最后前台包名：未知`**。该串来自 `_waitForTreeText`（`phone_agent_exception_test.dart:901-916`）在超时后用 **最后一次** `_tryTree` 的结果报告，而 `_tryTree` 对“payload 非 `ok`”和“异常”都返回 `null`（`:766-780`），因此 `未知` 表示**该次读树整体失败**，而不是前台包名取不到的具体错误码——日志没有记录当时的 `error` 字段。**因此不能断言它一定是宿主时序**：它也可能是观察层持续返回 `system_window_denied`（或服务不可用）。同时也要注意反方向的证据：`exc9` 的通知栏用例打印了 `error=system_window_denied ... (com.android.systemui, hard_baseline)`，说明该轮读树路径本身是可用的。**结论：`未知` 的成因未定位，既未证明是产品缺陷，也未证明是宿主时序。**
+  - `叠加层不污染产品截图` 的失败固定是像素断言 `518/409920`（`exc6` 与 `exc9` 均为此值）。
+  - 0.13% 的判定：观察边界改的是**判定入口**（`requireObservable` 与截图前的前台检查），不参与 `_expectOverlayFree` 的像素比较，也没有改动遮挡遍历或叠加层的隐藏握手，因此**不认为由本步引入**。旁证是 M24 轮（未改 `OverlayVisuals`/`PhoneAgentOverlay`/`ScreenshotCapture`）记录的同一断言失败值**也是 `518/409920`**。**但该结论是判断（含历史旁证），不是本步的根因证据**，未进一步定位。
+  - **归因更正（R2 F2）**：此前本节引用 logcat `Force stopping com.psyche.kelivo.phoneagent ... from pid 7541` 作为失败证据。**该串在 `wt-28/.build/*.log` 中零命中**，无法回溯，已删除该引用。第 1 轮“进程被杀”的说法**不再作为本轮证据**；`exc5` 的 `did not complete` 具体成因未留存证据。
+  - 因此**旋转、home/recents、权限窗口、锁屏、服务禁用/重启用这几条用例在本次 M28 中没有取得通过结果**，只能写“未验证/未通过”，不得写成通过。
+- **M28 第 2 步产品 debug APK（R1 返工后为当前产品）**：最终树 `V:/coding/kelivo-private/.tower/worktrees/wt-28/.build/worktrees/f26c1c7ed3238610`（`modsetHash` `f26c1c7ed32386105a763feeb3ea95accdd127b6041941b9f3d75f83abadafa9`，`plan`/`apply`/`verify` 通过），在全部设备测试与 R1 返工之后 `flutter clean` + `flutter pub get` + `flutter pub get --directory tool/l10n --enforce-lockfile` + 显式 `flutter build apk --debug`：**181,410,150 字节**，SHA-256 `a6c2e51b73435af1de4f74d5e95807a9688e95cb3d78be2f47521d715971b70f`；debug merged manifest 含 `SecureWindowFixtureActivity`（1 处）与 `PhoneAgentService`（1 处）。构建后未再运行 integration_test，未构建 release。该 APK **未被设备测试覆盖**（R1 只改了主线程预算判定与文档，未重跑设备），其字节数与 R1 前的 181,409,722 不同是预期的：`windowType()` 增加了主线程零预算分支。
+- **R1 返工前的产品 debug APK（历史）**：树 `c3c760c0d4502878`（`modsetHash` `c3c760c0d45028785f3eb8a9792347cd01bf09be04124f6bb96a9d25a7ee7e93`）在全部设备测试后 `flutter clean` 构建：**181,409,722 字节**，SHA-256 `8cae3cd8ee92eedc1232fb6ffd41602209f6b6a9299707487f1e966991cd9c19`，manifest 含 `SecureWindowFixtureActivity`（1 处）。**可复现性**：该轮曾二次 `flutter clean` 重建并得到**完全相同**的字节数与哈希，可据此复核；期间出现过一次 181,409,334 / `9470004d…` 的中间产物（记录之后被其他流程写入），不作为产品 APK。该 APK 是**实际跑过设备测试的版本**（API35 官方 `+2`；MIUI 为“有通过迹象、无留存日志”，见下一条，**不要**当作已验证）。
+- **M28 第 2 步物理 MIUI（`1960cd68`，Android 12 / API 31）——通过无留存日志（R2 F4 修正）**：对合成树 `c3c760c0d4502878` 的 debug APK 运行 `flutter test integration_test/phone_agent_test.dart -d 1960cd68`。
+  - **唯一留存的日志 `miui_official.log`（23:35）结果是 `+0 -1`、EXIT=1**，失败在 `setUpAll`：`Phone Agent 服务未就绪（supported=true, enabled=false, connected=false, sdk=31）`。配套 `miui_official.log.miui_enable` 显示 `ENTRY_NOT_FOUND` → `BEFORE: null` → `AFTER: null`，即**授权启用本身失败**，一个用例都没有执行。此前把首轮失败写成“设备息屏后 `device_locked`”**与日志不符，已更正**（`device_locked` 发生在更早的一次尝试，不是这条留存日志）。
+  - **之后有通过（`+2`）的设备侧操作，但没有留存日志**。旁证仅是设备侧痕迹：MIUI logcat 在 00:00–00:24 有测试包前台活动（晚于 23:35 的失败轮），且 `settings` 已恢复 `null`/`0`。**因此“MIUI 官方测试 `+2`、EXIT=0”目前无 artifact 支撑，只能写成“有通过迹象、无留存日志”**，不得作为已验证结论引用。
+  - 该设备按既有例外用 `settings put secure` 预配置服务，**本轮真实原值为 `enabled_accessibility_services=null`、`accessibility_enabled=0`，结束时已恢复为该值**（`settings delete` + 置 0），并已 `svc power stayon false`。未在该设备运行异常套件。
+- **M28 第 2 步自检**：Loader `dart format`（0 变更）、`dart analyze tool test` 无问题、`dart test` **165 通过**；插件 Kotlin `:kelivo_phone_agent:testDebugUnitTest --rerun-tasks` **140 通过、0 失败**（`PackagePolicyTest` 新增 2 条覆盖“窗口稍后才出现在列表中”与“`root.window` 为 null 时仍须精确匹配”）；合成树 `dart analyze --fatal-infos lib test integration_test tool` **无问题**；`plan`/`apply`/`verify` 通过。
+- **`window_type_unknown` 的真实根因（M28 实测，API35，服务重连后首次截图）**：临时调试版本打印 `windowType attempt=0/1/2 rootWin=5902 nodeType=null entries=(5890, 3) resolved=UNKNOWN`（**交付代码不打印 `nodeType=`/`resolved=`**，只打印 `windowType exhausted attempts=N rootWin=... entries=...`，见 `PhoneAgentService.kt:605-612`；因此该串是历史调试输出，交付构建不可复现）。即 `root.window` 返回 **null**，同时 `windows` 只有另一个窗口 id（5890），而 `rootInActiveWindow` 已属于 5902；窗口列表约 3 秒后才包含目标窗口。因此“优先读 `root.window.type`”**不足以**修复冷启动，原 75ms 预算差约 40 倍。修正为 **2500ms 有界总预算、40ms 间隔**交替重试两条来源，并在 `onAccessibilityEvent` 记录 `TYPE_WINDOWS_CHANGED` 到达时间。**2500ms 仍短于实测 3 秒**，只是把失败窗口从 75ms 缩到 2.5s，不保证覆盖更长滞后。改后首次截图通过（对应 `final2_official.log` 的 `+2`）。该结果只覆盖这台模拟器的一条冷启动路径，**不承诺**覆盖其他 ROM；超预算仍返回 `window_type_unknown`。
+- **重试预算只在 worker 线程生效（M28 R1 F5 修正）**：`windowType()` 会在**主线程**被一处路径调用——`ScreenshotCapture` 隐藏叠加层后的窗口重校验（`gate.hideForCapture` → `proceed` → `start()` → `currentWindow()` → `windowState()`）。该处若 sleep 2.5 秒会阻塞 UI，并超出文档承诺的约 250ms 有界隐藏握手。因此实现按调用线程决定预算：**主线程一律零预算**（只读一次 `root.window` 与一次 `windows` 快照，不 sleep），worker 线程才使用 2500ms 预算。零预算不会放宽任何判定——该处只做“窗口是否变了”的变更检测，`UNKNOWN` 本身就会让 `WindowState` 与观测不一致，从而返回 `stale_observation`，重试没有收益。主线程零预算路径不写诊断日志，避免每次截图刷噪声。R1 审查指出这是本步新增的最坏情况（可达性窄：需首个 `windowState()` 刚成功、随后列表退化或窗口在手势期间切换），**未见 ANR，属代码路径分析而非实测**；主线程阻塞是否仍会在极慢设备上造成可感 jank 仍未实测。
+- **异常套件两处断言被设备证伪并已修正**：(1) `home`/`recents` 后前台实测是 `com.google.android.apps.nexuslauncher`（`TYPE_APPLICATION`），读树**成功**，旧写法“等观察拒绝”会白等 30 秒；(2) 通知栏 `mCurrentFocus` 是 `NotificationShade`，其包名 `com.android.systemui` 属硬基线，硬基线判定先于窗口类型，标识只会是 `hard_baseline`，不可能出现 `window_type_system`。`window_type_unknown` 已从可接受标识中移除，避免吞掉真实时序缺陷。
 - API 35 模拟器（`emulator-5554`，Android 15；`flutter test --no-uninstall integration_test/phone_agent_test.dart -d emulator-5554`，退出码 0，2 个用例通过）：
   1. 真实截图（图片与屏幕尺寸有效）→ 读树 → 节点点击（回调计数 1）→ 坐标滑动（原生接受并完成手势）→ 节点滚动（`scrollController.offset > 0`，列表真实滚动）→ 聚焦输入框 → 同一观测句柄 `set_text` 成功并写入文本 → 二次读树返回节点。
   2. Mods 页真实服务状态与 Phone Agent 三态选择通过。

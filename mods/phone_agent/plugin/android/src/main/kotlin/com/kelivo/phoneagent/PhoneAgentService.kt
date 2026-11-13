@@ -36,6 +36,20 @@ class PhoneAgentService : AccessibilityService() {
     companion object {
         private const val QUEUE_TIMEOUT_MS = 15_000L
 
+        /**
+         * 窗口类型解析的有界重试预算。实测（M28，API35，服务重连后首次截图）
+         * `root.window` 返回 null，同时 `windows` 只列出别的窗口 id，两条来源
+         * 同时不可用，且窗口列表要滞后约 3 秒才包含目标窗口；原 3 次 × 25/50ms
+         * （共 75ms）在真实滞后面前必然失败，导致首次读树/截图返回
+         * `window_type_unknown`。
+         *
+         * 预算取实测滞后量级，仍远小于读树/截图 35s 通道超时与 15s 排队超时；
+         * 只在两条来源都失败时才消耗，正常路径无额外延迟。预算内拿不到仍是
+         * `UNKNOWN`（fail closed），不无限等待，也不为了让测试变绿而放宽判定。
+         */
+        private const val WINDOW_TYPE_BUDGET_MS = 2_500L
+        private const val WINDOW_TYPE_RETRY_DELAY_MS = 40L
+
         @Volatile
         private var connected: PhoneAgentService? = null
 
@@ -99,6 +113,16 @@ class PhoneAgentService : AccessibilityService() {
     private lateinit var treeBudget: ActionBudget
     private lateinit var overlay: PhoneAgentOverlay
 
+    /** 观察边界策略；输入侧策略由 [NodeActionExecutor] 持有，两者共用同一纯函数实现。 */
+    private val policy = PackagePolicy()
+
+    /**
+     * 最近一次 `TYPE_WINDOWS_CHANGED` 事件的时间戳（`SystemClock.elapsedRealtime`）。
+     * 窗口类型解析失败时用它判断“平台是否刚刚报告过窗口变化”，从而在新事件到达后
+     * 立刻重读，而不是在固定退避里空转。
+     */
+    private val lastWindowsChanged = AtomicLong(0)
+
     override fun onCreate() {
         super.onCreate()
         registry = ObservationRegistry(
@@ -149,6 +173,10 @@ class PhoneAgentService : AccessibilityService() {
         // 观测按需读取，不保留窗口内容；只在其他应用窗口状态变化时清理残留可视化，
         // 避免旧动作图形画到权限窗口或新前台应用上。自身 overlay 不触发清理。
         val change = event ?: return
+        if (change.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
+            lastWindowsChanged.set(SystemClock.elapsedRealtime())
+            return
+        }
         if (change.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
         val foreground = change.packageName?.toString() ?: return
         if (foreground != packageName && this::overlay.isInitialized) {
@@ -296,6 +324,14 @@ class PhoneAgentService : AccessibilityService() {
         val root = rootInActiveWindow ?: throw noAccessibleWindowError()
         val current = windowState(root)
         if (offset == 0) {
+            // 观察边界只在这一处判定：分页请求复用同一观测，registry.page 仍会比较
+            // 完整 WindowState，重复判定只会让窗口内翻页被一次类型抖动打断。
+            try {
+                policy.requireObservable(current.packageName, current.windowType)
+            } catch (error: PhoneAgentError) {
+                root.recycle()
+                throw error
+            }
             if (!treeBudget.tryConsume()) {
                 root.recycle()
                 throw PhoneAgentError(
@@ -345,6 +381,10 @@ class PhoneAgentService : AccessibilityService() {
         } finally {
             root.recycle()
         }
+        // 顺序固定：前台窗口 → 观察边界 → 全窗口密码遮挡遍历 → 截图。
+        // 边界判定只读 WindowState，不读节点内容；遮挡遍历不感知边界策略，
+        // 前台被拒时直接失败，不会因此缩窄遍历范围。
+        policy.requireObservable(current.packageName, current.windowType)
         val passwordBounds = collectPasswordBounds(current)
         pendingScreenshot = reply
         screenshots.capture(current, passwordBounds) { outcome ->
@@ -522,41 +562,102 @@ class PhoneAgentService : AccessibilityService() {
             width = width,
             height = height,
             rotation = rotation(),
-            windowType = windowType(root.windowId),
+            windowType = windowType(root),
         )
     }
 
     /**
-     * 按 `windowId` 从 `windows` 匹配窗口类型。`AccessibilityNodeInfo` 不提供类型，
-     * 只能在这里与前台窗口用同一次读取取得；匹配失败或取到未知类型都落到
-     * [WindowType.UNKNOWN]，由策略层默认拒绝，不在策略层另读一次 `windows`。
+     * 解析前台窗口类型。两个来源按顺序尝试，都只认“就是这个窗口”：
+     *
+     * 1. **节点自己的窗口** `root.window.type`。它直接就是持有该 root 的窗口，
+     *    与 `windowId`、包名同源，不存在跨读取的竞态。
+     * 2. **`windows` 列表按 `windowId` 精确匹配**。实测 `windows` 会在服务刚连接、
+     *    切窗或键盘起落时短暂（甚至持续）只列出 systemui，而 `rootInActiveWindow`
+     *    已经是目标应用；这时按 id 查不到，不能退回“列表里唯一的那个窗口”。
+     *    匹配失败时在总预算内重试两条来源（见 [WINDOW_TYPE_BUDGET_MS]）。
+     *
+     * 两条来源都拿不到才落到 [WindowType.UNKNOWN]，由策略层默认拒绝。不放宽任何
+     * 判定，也不按包名、层级顺序或位置猜类型。
      */
-    private fun windowType(windowId: Int): WindowType {
-        val windowList = try {
-            windows.orEmpty()
-        } catch (error: Exception) {
-            return WindowType.UNKNOWN
-        }
-        // 记录命中结果后统一返回，保证列表里每个窗口都被 recycle（与 collectPasswordBounds 一致）。
-        var resolved = WindowType.UNKNOWN
-        var found = false
-        for (window in windowList) {
-            try {
-                if (!found && window.id == windowId) {
-                    found = true
-                    resolved = try {
-                        WindowType.fromPlatformType(window.type)
-                    } catch (error: Exception) {
-                        WindowType.UNKNOWN
-                    }
+    private fun windowType(root: AccessibilityNodeInfo): WindowType {
+        // 实测（M28，API35 服务重连后首次截图）：root.window 返回 null，同时
+        // windows 只列出别的窗口 id，两条路径同时不可用。因此在总预算内交替
+        // 重试两条来源，而不是只重读列表。预算用尽仍是 UNKNOWN（fail closed）。
+        //
+        // 主线程调用一律零预算：截图隐藏握手后的窗口重校验
+        // （ScreenshotCapture.start → currentWindow → windowState）在主线程执行，
+        // 那里 sleep 2.5 秒会阻塞 UI 并超出文档承诺的约 250ms 有界握手。该处只做
+        // “窗口是否变了”的变更检测，UNKNOWN 已足以产生 stale_observation，
+        // 重试没有收益，因此不 sleep、只读一次。
+        val onMainThread = Looper.myLooper() == Looper.getMainLooper()
+        val deadline = SystemClock.elapsedRealtime() +
+            if (onMainThread) 0L else WINDOW_TYPE_BUDGET_MS
+        var attempt = 0
+        while (true) {
+            val fromNode = nodeWindowType(root)
+            if (fromNode != null && fromNode != WindowType.UNKNOWN) return fromNode
+            val entries = readWindowEntries()
+            val resolved = WindowType.resolveFromSnapshot(root.windowId, entries)
+            if (resolved != WindowType.UNKNOWN) return resolved
+            val remaining = deadline - SystemClock.elapsedRealtime()
+            if (remaining <= 0) {
+                // 只在真有重试预算时才记录：主线程零预算路径每次截图都会走这里，
+                // 无条件打日志会变成噪声。日志只含窗口 id 与平台类型整数，
+                // 不含包名、节点文本、窗口标题或截图内容。
+                if (!onMainThread) {
+                    android.util.Log.d(
+                        "PhoneAgentDiag",
+                        "windowType exhausted attempts=$attempt rootWin=${root.windowId} " +
+                            "entries=${entries.joinToString()}",
+                    )
                 }
-            } catch (error: Exception) {
-                // 读取 id 失败时无法确认是不是目标窗口，继续找；找不到即 fail closed。
+                return WindowType.UNKNOWN
+            }
+            // 优先等平台的 TYPE_WINDOWS_CHANGED：窗口列表刚变化时重读才有意义，
+            // 纯固定退避会在列表尚未更新时反复读到同一份旧快照。
+            val seen = lastWindowsChanged.get()
+            try {
+                Thread.sleep(minOf(WINDOW_TYPE_RETRY_DELAY_MS, remaining))
+            } catch (error: InterruptedException) {
+                Thread.currentThread().interrupt()
+                return WindowType.UNKNOWN
+            }
+            // 只有“等待期间没有新窗口变化事件”才计数；有事件说明列表可能已更新。
+            if (lastWindowsChanged.get() == seen) attempt++
+        }
+    }
+
+    /** 节点自己的窗口类型；取不到返回 null（与“平台给了未知类型”区分）。 */
+    private fun nodeWindowType(root: AccessibilityNodeInfo): WindowType? = try {
+        root.window?.let { window ->
+            try {
+                WindowType.fromPlatformType(window.type)
             } finally {
                 window.recycle()
             }
         }
-        return resolved
+    } catch (error: Exception) {
+        null
+    }
+
+    /** 读一次 `windows` 的 (id, 平台类型) 快照，并回收每一个窗口。 */
+    private fun readWindowEntries(): List<Pair<Int, Int>> {
+        val windowList = try {
+            windows.orEmpty()
+        } catch (error: Exception) {
+            return emptyList()
+        }
+        val entries = ArrayList<Pair<Int, Int>>(windowList.size)
+        for (window in windowList) {
+            try {
+                entries += window.id to window.type
+            } catch (error: Exception) {
+                // 读取失败时该窗口不参与匹配；全部失败即 fail closed。
+            } finally {
+                window.recycle()
+            }
+        }
+        return entries
     }
 
     /**
