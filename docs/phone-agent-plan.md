@@ -969,13 +969,15 @@ flutter test integration_test/phone_agent_test.dart -d <android-device-id>
 
   | 日志 | 时间 | 运行树 | 结果 | 失败用例（`Failing tests:` 段） |
   | --- | --- | --- | --- | --- |
-  | `exc5.log` | 21:58 | `e2d50da0`（非最终树） | `+1 -1` | `FLAG_SECURE 截图行为与恢复`（`Expected: 'stale_observation' / Actual: 'screenshot_required'`）+ 余下 3 例 `did not complete` |
+  | `exc5.log` | 21:58 | `e2d50da0`（非最终树） | `+1 -1` | `FLAG_SECURE 截图行为与恢复`（`Expected: 'stale_observation' / Actual: 'screenshot_required'`）+ 余下 **6** 例 `did not complete`（叠加层可见时真实触摸、旋转、home 与 recents、权限窗口、锁屏、服务禁用） |
   | `exc6.log` | 22:46 | `c3c760c0` | **`+1 -7`** | 叠加层不污染产品截图、叠加层可见时真实触摸不被拦截、旋转后旧句柄与旧截图失效、home 与 recents、权限窗口、锁屏、服务禁用 |
-  | `exc7.log` | 23:01 | `c3c760c0` | **`+2 -6`** | 叠加层可见时真实触摸不被拦截、旋转、home 与 recents、服务禁用 |
-  | `exc8.log` | 23:22 | `c3c760c0` | **`+2 -6`** | 同 `exc7` 的 4 条 |
-  | `exc9.log` | 23:50 | `c3c760c0` | **`+1 -7`** | 叠加层不污染产品截图、叠加层可见时、旋转、home 与 recents、权限窗口、锁屏、服务禁用 |
+  | `exc7.log` | 23:01 | `c3c760c0` | **`+2 -6`** | 叠加层可见时真实触摸不被拦截、旋转、home 与 recents、权限窗口输入被拒绝、锁屏 device_locked、服务禁用 |
+  | `exc8.log` | 23:22 | `c3c760c0` | **`+2 -6`** | 同 `exc7` 的 6 条 |
+  | `exc9.log` | 23:50 | `c3c760c0` | **`+1 -7`** | 叠加层不污染产品截图、叠加层可见时真实触摸不被拦截、旋转、home 与 recents、权限窗口输入被拒绝、锁屏 device_locked、服务禁用 |
 
-  - `exc5`（`e2d50da0`，非最终树）的失败**不是**叠加层问题：唯一失败用例 `FLAG_SECURE 截图行为与恢复` 报 `Expected: 'stale_observation' / Actual: 'screenshot_required'`（发生在 `PHONE_AGENT_STALE_WINDOW` 同包夹具切窗之后），另有 3 例 `did not complete`。**成因未定位**——可能是截图观测被提前清理导致的错误码优先级问题（产品），也可能是“前一步截图观测仍在”的测试前提不成立（测试）。该用例在最终树各轮里没有单独失败，但也**没有任何一轮**证明它在最终树上通过；已作为待查项单独记录，不在此处猜测归因。
+  - `exc5`（`e2d50da0`，非最终树）的失败**不是**叠加层问题：唯一失败用例 `FLAG_SECURE 截图行为与恢复` 报 `Expected: 'stale_observation' / Actual: 'screenshot_required'`（发生在 `PHONE_AGENT_STALE_WINDOW` 同包夹具切窗之后），另有 **6 例** `did not complete`（叠加层可见时真实触摸、旋转、home 与 recents、权限窗口、锁屏、服务禁用；另有 tearDownAll）。
+  - **但该用例在最终树上是通过的（R4 F3 修正）**：四个最终树轮次 `exc6`/`exc7`/`exc8`/`exc9` 的计数都是 `FLAG_SECURE → +0`、下一条 `叠加层不污染产品截图 → +1`，两次计数之间没有其他用例，因此 `+0 → +1` 只能由 `FLAG_SECURE` 贡献，属**通过的直接计数证据**，不是推断。（`exc6`/`exc9` 的叠加层用例随后在 `+1` 基础上再 `-1` 失败，不影响 `+1` 已到手这一事实。）
+  - **同代码 A/B**：`exc4`（21:43）与 `exc5`（21:58）**跑的是同一棵树 `e2d50da0`**——`exc4` 的 `FLAG_SECURE` 通过（`00:31 +0` → `01:00 +1`），`exc5` 失败（`00:41 +0 -1`）。同一份代码一次通过一次失败，说明 `screenshot_required` **不是 M28 的确定性回归**，更像时序或前置条件抖动。**这是判断（有同树 A/B 旁证），不是根因证据**；错误码优先级是否仍有问题未定位，已单独 file finding。
   - **失败模式要分开看，不能一律归为宿主时序**：
   - `exc6`/`exc7` 的多数失败是 `等待 PHONE_AGENT_TAP_TARGET 超时（标记 PHONE_AGENT_RETURN_TO_APP）。最后前台包名：com.psyche.kelivo.phoneagent`——**前台确实是测试应用**，但找不到点击目标节点，属 `_ensureAppForeground` 重 pump 的宿主时序。
   - `exc8`/`exc9` 的同一句变为 **`最后前台包名：未知`**。该串来自 `_waitForTreeText`（`phone_agent_exception_test.dart:901-916`）在超时后用 **最后一次** `_tryTree` 的结果报告，而 `_tryTree` 对“payload 非 `ok`”和“异常”都返回 `null`（`:766-780`），因此 `未知` 表示**该次读树整体失败**，而不是前台包名取不到的具体错误码——日志没有记录当时的 `error` 字段。**因此不能断言它一定是宿主时序**：它也可能是观察层持续返回 `system_window_denied`（或服务不可用）。同时也要注意反方向的证据：`exc9` 的通知栏用例打印了 `error=system_window_denied ... (com.android.systemui, hard_baseline)`，说明该轮读树路径本身是可用的。**结论：`未知` 的成因未定位，既未证明是产品缺陷，也未证明是宿主时序。**
@@ -984,7 +986,7 @@ flutter test integration_test/phone_agent_test.dart -d <android-device-id>
   - **归因更正（R2 F2）**：此前本节引用 logcat `Force stopping com.psyche.kelivo.phoneagent ... from pid 7541` 作为失败证据。**该串在 `wt-28/.build/*.log` 中零命中**，无法回溯，已删除该引用。第 1 轮“进程被杀”的说法**不再作为本轮证据**；`exc5` 的 `did not complete` 具体成因未留存证据。
   - 因此**旋转、home/recents、权限窗口、锁屏、服务禁用/重启用这几条用例在本次 M28 中没有取得通过结果**，只能写“未验证/未通过”，不得写成通过。
 - **M28 第 2 步产品 debug APK（R1 返工后为当前产品）**：最终树 `V:/coding/kelivo-private/.tower/worktrees/wt-28/.build/worktrees/f26c1c7ed3238610`（`modsetHash` `f26c1c7ed32386105a763feeb3ea95accdd127b6041941b9f3d75f83abadafa9`，`plan`/`apply`/`verify` 通过），在全部设备测试与 R1 返工之后 `flutter clean` + `flutter pub get` + `flutter pub get --directory tool/l10n --enforce-lockfile` + 显式 `flutter build apk --debug`：**181,410,150 字节**，SHA-256 `a6c2e51b73435af1de4f74d5e95807a9688e95cb3d78be2f47521d715971b70f`；debug merged manifest 含 `SecureWindowFixtureActivity`（1 处）与 `PhoneAgentService`（1 处）。构建后未再运行 integration_test，未构建 release。该 APK **未被设备测试覆盖**（R1 只改了主线程预算判定与文档，未重跑设备），其字节数与 R1 前的 181,409,722 不同是预期的：`windowType()` 增加了主线程零预算分支。
-- **R1 返工前的产品 debug APK（历史）**：树 `c3c760c0d4502878`（`modsetHash` `c3c760c0d45028785f3eb8a9792347cd01bf09be04124f6bb96a9d25a7ee7e93`）在全部设备测试后 `flutter clean` 构建：**181,409,722 字节**，SHA-256 `8cae3cd8ee92eedc1232fb6ffd41602209f6b6a9299707487f1e966991cd9c19`，manifest 含 `SecureWindowFixtureActivity`（1 处）。**可复现性**：该轮曾二次 `flutter clean` 重建并得到**完全相同**的字节数与哈希，可据此复核；期间出现过一次 181,409,334 / `9470004d…` 的中间产物（记录之后被其他流程写入），不作为产品 APK。该 APK 是**实际跑过设备测试的版本**（API35 官方 `+2`、MIUI `+2`）。
+- **R1 返工前的产品 debug APK（历史）**：树 `c3c760c0d4502878`（`modsetHash` `c3c760c0d45028785f3eb8a9792347cd01bf09be04124f6bb96a9d25a7ee7e93`）在全部设备测试后 `flutter clean` 构建：**181,409,722 字节**，SHA-256 `8cae3cd8ee92eedc1232fb6ffd41602209f6b6a9299707487f1e966991cd9c19`，manifest 含 `SecureWindowFixtureActivity`（1 处）。**可复现性**：该轮曾二次 `flutter clean` 重建并得到**完全相同**的字节数与哈希，可据此复核；期间出现过一次 181,409,334 / `9470004d…` 的中间产物（记录之后被其他流程写入），不作为产品 APK。该 APK 是**实际跑过设备测试的版本**（API35 官方 `+2`；MIUI 为“有通过迹象、无留存日志”，见下一条，**不要**当作已验证）。
 - **M28 第 2 步物理 MIUI（`1960cd68`，Android 12 / API 31）——通过无留存日志（R2 F4 修正）**：对合成树 `c3c760c0d4502878` 的 debug APK 运行 `flutter test integration_test/phone_agent_test.dart -d 1960cd68`。
   - **唯一留存的日志 `miui_official.log`（23:35）结果是 `+0 -1`、EXIT=1**，失败在 `setUpAll`：`Phone Agent 服务未就绪（supported=true, enabled=false, connected=false, sdk=31）`。配套 `miui_official.log.miui_enable` 显示 `ENTRY_NOT_FOUND` → `BEFORE: null` → `AFTER: null`，即**授权启用本身失败**，一个用例都没有执行。此前把首轮失败写成“设备息屏后 `device_locked`”**与日志不符，已更正**（`device_locked` 发生在更早的一次尝试，不是这条留存日志）。
   - **之后有通过（`+2`）的设备侧操作，但没有留存日志**。旁证仅是设备侧痕迹：MIUI logcat 在 00:00–00:24 有测试包前台活动（晚于 23:35 的失败轮），且 `settings` 已恢复 `null`/`0`。**因此“MIUI 官方测试 `+2`、EXIT=0”目前无 artifact 支撑，只能写成“有通过迹象、无留存日志”**，不得作为已验证结论引用。
