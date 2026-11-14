@@ -947,6 +947,74 @@ flutter build apk --debug
 flutter test integration_test/phone_agent_test.dart -d <android-device-id>
 ```
 
+## 9.3.0 M30（M28 设备回归补测）的测试侧诊断改动
+
+M30 只验证与记录，不改产品代码、不放宽任何断言。为让失败可归因，`phone_agent_exception_test.dart` 增加了**只记录、不断言**的诊断：
+
+- `_TreeProbe`（常量与 `_tryTree`/`_tryTreePayload` 附近）：记录最近一次读树的真实结果——包名、错误码、消息、节点数、是否含同包夹具文本、是否抛异常。`_waitForTreeText` 的失败消息从「最后前台包名：X」扩为「读树 N 次，最后前台包名：X，最后错误码：Y，最后消息：Z」。**轮询次数、超时、`fail` 条件、错误码断言全部不变。**
+  理由：旧消息只拼包名，`_tryTree` 又把「被拒绝」和「抛异常」都折叠成 `null`，于是旧日志里 `exc8`/`exc9` 的「最后前台包名：未知」无法区分「读树被拒（什么错误码）」「调用异常」「读树成功但包名不符」。
+- `PHONE_AGENT_STALE_COORDINATES`：在 secure 同包夹具切窗后的坐标输入处打印实际 `type`/`error`/`message`。历史 `exc5` 在此处实得 `screenshot_required`，而断言仍要求 `stale_observation`；先记录、后断言，不修改期望值。
+- `PHONE_AGENT_RESTART_STALE_HANDLE`：服务重启后旧句柄输入的实际错误码与消息。
+- 旋转用例补 `repump: () => _pumpHarness(tester)`（与锁屏用例同一机制，第 311 行附近）。这是**测试夹具**的既有兜底手段，不新增等待语义，也不改变任何断言。
+- 服务重启用例在旧句柄输入前加入 `_waitForStableWindow`：用**截图**（只写 screenshot 观测，不触碰树观测）做有界前置等待（30 秒），并有独立断言「有界等待内无法取得前台窗口则失败」。**不重读树**（会重置 registry 里的旧句柄），**不循环重试输入**，`stale_handle` 的精确断言保持不变。可继续等待的错误码限定为 `no_window`、`rate_limited`、`stale_observation`（窗口已取得但截图期间切换，属瞬态）以及观察边界拒绝 `hard_baseline`/`window_type_*`（宿主还在设置页）；其他错误立即停止并打印 `PHONE_AGENT_RESTART_WAIT_STOPPED`。
+- `PHONE_AGENT_SERVICE_DISABLED_STATUS` 与有界状态等待：宿主确认关闭后，`status().enabled` 仍会短暂为 true（run10 `elapsed=1979ms` 时读不到 false，run5/run9 `≈6000ms` 时可读到）。因此 `disabledStatus` 读取前加**只读状态查询**的有界等待（20 秒、500ms 间隔、仅当 `enabled` 仍为 true 时继续），不重发输入、不重试动作，`enabled isFalse` / `ready isFalse` 断言不变。
+
+## 9.3.0.1 M30 设备结果（API35 `emulator-5554`，2026-11-14/15）
+
+运行树分两棵，**产品代码零改动**（合成树内产品源码未手改，测试文件来自 wt-30 overlay）：
+
+- `f26c1c7ed3238610`（`modsetHash` `f26c1c7ed3238610…`，与 M28 最终树同哈希）：`run17`/`run18` 两轮异常套件与 `official_api35.log` 官方测试。
+- `8a44ec55a023185e`（`modsetHash` `8a44ec55a023185e58c89f4c7b40d4aa62cee2a6c402f22eebb8870f7a410102`，`plan`/`apply`/`verify` 通过）：**最终交付树**（测试文件行尾为仓库要求的 LF）。`run20` 异常套件与 `official_lf.log` 官方测试在这棵树上跑。
+- 中间树 `b9ed56f89b3146c9` 的 `run19`/`official_final.log` 只作历史：该树上的测试文件当时被编辑工具写成 CRLF，与仓库 LF 约定不一致，因此不作为交付基线；其代码与断言与 `8a44ec55` 逐字节相同（仅行尾不同），结果方向一致（同为 `+8` 与 `+2`）。
+
+Android 15 / API 35。
+
+**异常套件 `phone_agent_exception_test.dart`：三轮 `+8`、`All tests passed!`、EXIT=0**——`run17.log`（477s）、`run18.log`（490s）在 `f26c1c7ed3238610`，`run20.log`（574s）在**最终交付树** `8a44ec55a023185e`。这是 M28 系列第一次取得绿色整轮，且在四棵不同树上连续复现。
+
+| 用例 | 结果 | 设备证据 |
+| --- | --- | --- |
+| FLAG_SECURE 截图行为与恢复 | ✅ 通过 | `PHONE_AGENT_SECURE_PLATFORM_BLACK_IMAGE`（secure 夹具返回成功黑图，符合契约） |
+| 叠加层不污染产品截图 | ✅ 通过 | 中心 60% 逐像素一致、强调色增量 < 50 |
+| 叠加层可见时真实触摸不被拦截 | ✅ 通过 | `OVERLAY_HOST_TOUCH_RESULT: package=com.android.systemui error=system_window_denied`，消息含 `hard_baseline` |
+| 旋转后旧句柄与旧截图失效 | ✅ 通过 | 旧句柄 `stale_handle`、旧坐标 `stale_observation`，转回竖屏后重新找到目标 |
+| home 与 recents 后输入被包名策略拒绝 | ✅ 通过 | `SYSTEM_NAVIGATION_FOREGROUND: action=home/recents package=com.google.android.apps.nexuslauncher`，两种输入错误码一致 |
+| 权限窗口输入被拒绝 | ✅ 通过 | `PERMISSION_TREE: package=null type=tool_error error=no_window`；宿主独立确认 `com.google.android.permissioncontroller/...GrantPermissionsActivity`，`POST_NOTIFICATIONS` 仍为 false |
+| 锁屏 device_locked 与解锁恢复 | ✅ 通过 | 树/截图/输入三处均 `device_locked`；解锁后旧句柄 `stale_handle` |
+| 服务禁用中断与重新启用恢复 | ✅ 通过 | `PENDING_BATCH: size=200 elapsed=5265ms/6572ms codes=interrupted,stale_observation`；`DISABLED_STATUS: enabled=false connected=false ready=false`；`RESTART_STALE_HANDLE: error=stale_handle message=No current tree observation` |
+
+**官方 `phone_agent_test.dart`：`+2`、`All tests passed!`、EXIT=0**（`official_api35.log` elapsed 334s，运行树 `f26c1c7ed3238610`；`official_lf.log`，运行树**最终交付树** `8a44ec55a023185e`）。覆盖截图 → 读树 → 节点点击 → 坐标滑动 → 节点滚动 → 聚焦后 `set_text` → 二次读树，以及 Mods 页三态选择。
+
+**`exc5` 的 `screenshot_required` vs `stale_observation` 归因**：`PHONE_AGENT_STALE_COORDINATES` 在 run10/11/12/13/17/18 六轮一致给出 `error=stale_observation`、消息 `The screen changed since the screenshot`。产品侧的判定是 `ObservationRegistry.requireScreenshot` 里的两个**确定性分支**（同一把 `@Synchronized` 锁内顺序判断）：screenshot 槽位为 `null` → `screenshot_required`；槽位存在但 TTL 过期或窗口/包名/尺寸/旋转/窗口类型变化 → `stale_observation`（并清空槽位）。
+
+- **已确认**：两个错误码语义不同，优先级由该 if 顺序固定；`exc5` 报 `screenshot_required` 说明进入那一刻**槽位已经是 null**，而不是「窗口变化被误判」。因此这不是错误码优先级缺陷，断言期望值本身没有过期。
+- **槽位被清空的可能来源**（读代码确认存在，但 `exc5` 未留存是哪一条）：`ensureUnlocked()` 在锁屏/息屏时调 `invalidateAll()`（同时清树与截图，且它是**每个动作前**的 `beforeAction`）；`interruptPending()` 调 `invalidateAll()`；`executeNode` 在任意节点动作后调 `clearScreenshot()`。
+- **未定性**：`exc5` 当轮究竟是「协作时序（息屏/服务中断/前一个节点动作）」还是「产品在无前置动作时自行清空」，**没有留存证据**（旧日志不含槽位状态与前置动作序列）。按 tower 的要求，**同树 `exc4` 通过、`exc5` 失败这一旁证不足以排除竞态回归**，本结论不据此断言「非缺陷」；要定性需要一轮在坐标输入前直接记录槽位状态与中间动作日志的复跑，尚未做。
+
+## 9.3.0.2 M30 的关键归因：`最后前台包名：未知` 与两个用例的失败机制
+
+### 已确认（有原始日志）
+
+1. **`未知` 的直接成因是诊断缺失，不是产品缺陷**：`_waitForTreeText` 的失败句只拼 `last?['package_name']`，而 `_tryTree` 把「被观察边界拒绝」「payload 非 ok」「抛异常」都折叠成 `null`。加入 `_TreeProbe` 后，`run1.log` 记录到该轮**连续 77 次读树全部为** `system_window_denied` + 消息 `(com.android.systemui, hard_baseline)`，`package_name` 为 null。产品判定正确：前台确实是通知栏。
+2. **`run1` 那一轮通知栏占据前台是宿主驱动缺陷**：旧驱动的 `open_shade()` 是固定 13 秒循环，`PHONE_AGENT_OVERLAY_HOST_TOUCH_RECOVER` 之后它仍在继续 `input swipe`，`keyevent 4` + `am start` 抵不过持续手势。修复为「检测到 `NotificationShade` 即停止 + 可取消 + `cmd statusbar collapse`」后，`run3` 起再未出现该模式。**该结论只解释 run1 这一轮，不能外推旧 `exc8`/`exc9`**——那两份原始日志已不在磁盘，其错误码无留存证据。
+3. **旋转用例在 run9 的失败源自驱动误发 BACK**：`recover_from_shade()` 里有一句无条件 `keyevent 4`。`run9` 时 `cmd statusbar collapse` 已关闭通知栏，这一下 BACK 落到 `MainActivity` 并把它 finish（设备 logcat：`Transition requested (#819) ... type = CLOSE ... Task{... com.psyche.kelivo.phoneagent/com.psyche.kelivo.MainActivity}`，紧随 `START ... LAUNCH_SINGLE_TASK`）。重启任务后产品约 2 分钟无法解析窗口类型，诊断日志 `D/PhoneAgentDiag: windowType exhausted attempts=51 rootWin=10619 entries=(10536, 3)` 连续 30 条（`entries=` 为空时亦然），读树全部返回 `window_type_unknown`。`run9` 该标识 30 次、`run5` 0 次。改为**绝不发 BACK**后，`run10`–`run18` 该标识恒为 0；`run19` 在夹具→应用切窗的过渡中出现 **1 次瞬态**（下一轮读树即恢复、该轮仍通过），`run20` 为 0。说明它并非绝对不出现，只是不再成批出现。
+4. **服务重启用例的多轮失败逐一归因到驱动或测试夹具**：`hard_baseline (com.android.settings)`（设置页在过渡中回到前台 / `ENABLE_SERVICE_NOW` 重新打开设置页）、前台确认过慢把 `am start` 拖到约 14 秒（超出测试自身 5 秒窗口）、`stale_observation`（窗口已取得但截图期间切换）、`status().enabled` 短暂抖动。修完后 `run17`/`run18` 稳定给出 `stale_handle`。
+
+### 属于假设或未验证
+
+- `window_type_unknown` 那次迟滞的具体成因（任务重启触发的窗口列表重建，还是模拟器时序）**没有独立证据**；只能确认它由驱动 finish 任务后出现、且不再出现于修正后的轮次。产品侧 2500ms 有界预算短于实测约 3 秒滞后，这一已知限制未变。
+- `run16` 的 `am start` 耗时约 14 秒被归因到驱动的 3×0.8s 稳定确认，**属时间相关性推断**，不是直接剖面证据。
+
+## 9.3.0.3 M30 物理 MIUI（`1960cd68`，Android 12 / API 31）
+
+**官方 `phone_agent_test.dart`：`+2`、`All tests passed!`、EXIT=0**（`official_miui.log`，elapsed 107s）。这是 M28 遗留的「MIUI 官方测试只有通过迹象、无留存日志」一项的补齐：本次有留存日志。
+
+- 运行树同 API35（`f26c1c7ed3238610`，产品代码零改动）。测试 APK 先用 `adb install -r` 预装（含 17 个 `arm64-v8a` 库），随后 `flutter test` 覆盖安装。
+- 授权路径使用本机例外：`settings put secure enabled_accessibility_services` + `accessibility_enabled=1`，`dumpsys` 确认 `bound=True`。**当轮真实原值**：`enabled_accessibility_services=null`、`accessibility_enabled=0`、`stay_on_while_plugged_in=0`，运行结束后已逐一恢复为原值（`Deleted 1 rows`，`get` 复核 `null`/`0`/`0`）。
+- 运行期间用 `svc power stayon true` 保持常亮（原值 `0`，已恢复）。此前一轮因 MIUI 中途休眠而得到 `device_locked`（截图用例），产品判定正确；该失败记录在 `official_miui.log` 历史轮次中，不当作产品缺陷。
+- **未在 MIUI 上运行异常套件**：该设备未安装 `com.kelivo.phoneagent.securefixture`，而异常套件依赖 `SecureWindowFixtureActivity` 与跨 UID 安全窗口夹具。这是设备准备缺口，不是产品结论；异常套件只在 API35 有结果。
+- 环境记录：MIUI 构建曾两次因 native-assets hook 下载预编译产物失败（`ClientException with SocketException ... address = github.com`），改用合成树中已构建的 APK 后正常。这与产品无关。
+
+
 真机前置：
 
 - Android 设备；截图与坐标手势需要 API 30 或更高；API 29 服务可 ready 并验证读树和节点输入，截图返回 `unsupported_os`，页面显示截图限制；

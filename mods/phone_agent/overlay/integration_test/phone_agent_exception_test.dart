@@ -40,6 +40,77 @@ const Duration _pollInterval = Duration(milliseconds: 1500);
 const Duration _screenshotInterval = Duration(milliseconds: 2200);
 const Duration _hostTimeout = Duration(seconds: 120);
 
+/// 读树诊断：`_tryTree` 把「被观察边界拒绝」和「调用抛异常」都折叠成 null，
+/// 早期失败句因此只能打印「最后前台包名：未知」，丢掉了真实错误码。这里只记录
+/// 最近一次读树的原始结果，供失败消息引用；不改变任何断言或轮询行为。
+class _TreeProbe {
+  int attempts = 0;
+  String? packageName;
+  int nodeCount = 0;
+  bool fixtureText = false;
+  String? error;
+  String? message;
+  String? exception;
+
+  void reset() {
+    attempts = 0;
+    packageName = null;
+    nodeCount = 0;
+    fixtureText = false;
+    error = null;
+    message = null;
+    exception = null;
+  }
+
+  void recordPayload(Map<String, dynamic> payload) {
+    attempts++;
+    final tree = payload['result'];
+    packageName = tree is Map ? tree['package_name'] as String? : null;
+    if (tree is Map) {
+      final nodes = tree['nodes'];
+      // 只记节点数量和测试自己定义的夹具标记，不记录界面文本内容。
+      nodeCount = nodes is List ? nodes.length : 0;
+      fixtureText = _nodeForText(Map<String, dynamic>.from(tree), _fixtureText) != null;
+    }
+    error = payload['error'] as String?;
+    message = payload['message'] as String?;
+    exception = null;
+  }
+
+  void recordException(Object error) {
+    attempts++;
+    packageName = null;
+    nodeCount = 0;
+    fixtureText = false;
+    this.error = null;
+    message = null;
+    exception = error.toString();
+  }
+
+  /// 失败消息后缀：区分「读树被拒（带错误码）」「调用抛异常」「读树成功但包名不符」
+  /// 「同包夹具 Activity 仍在栈顶」「读到了树但没有目标节点」。
+  String describe() {
+    final parts = <String>['读树 $attempts 次', '最后前台包名：${packageName ?? '未知'}'];
+    if (exception != null) {
+      parts.add('最后调用异常：$exception');
+    } else if (error != null) {
+      parts.add('最后错误码：$error');
+    }
+    if (nodeCount > 0) {
+      parts.add('最后节点数：$nodeCount');
+    }
+    if (fixtureText) {
+      parts.add('最后一棵树含同包夹具文本');
+    }
+    if (message != null && message!.isNotEmpty) {
+      parts.add('最后消息：$message');
+    }
+    return parts.join('，');
+  }
+}
+
+final _TreeProbe _treeProbe = _TreeProbe();
+
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
@@ -125,6 +196,15 @@ void main() {
       'x': 0.5,
       'y': 0.5,
     });
+    // 历史 `exc5` 在此处实得 `screenshot_required` 而非 `stale_observation`。
+    // 两者都表示「没有可用的截图坐标观测」，区别只在 screenshot 槽位是空
+    // （`requireScreenshot` 的第一个分支）还是被窗口变化/TTL 清空。旧日志没有
+    // 记录当时的截图槽位，所以这里先记录实际错误码与消息，断言保持不变。
+    debugPrint(
+      'PHONE_AGENT_STALE_COORDINATES: type=${_payload(staleCoordinates)['type']} '
+      'error=${_payload(staleCoordinates)['error']} '
+      'message=${_payload(staleCoordinates)['message']}',
+    );
     _expectToolError(
       staleCoordinates,
       'stale_observation',
@@ -256,7 +336,14 @@ void main() {
       () => SystemChrome.setPreferredOrientations(DeviceOrientation.values),
     );
     await _pumpHarness(tester);
-    await _ensureAppForeground(service);
+    // M30：该用例此前没传 repump（锁屏用例传了）。上一用例把前台交给夹具/
+    // 通知栏后，单纯 pump 一次的语义树可能还没刷新，`_ensureAppForeground`
+    // 只能看到「包名对但没有目标节点」。补上与锁屏用例相同的重 pump 兜底，
+    // 不新增等待语义、不改任何断言。
+    await _ensureAppForeground(
+      service,
+      repump: () => _pumpHarness(tester),
+    );
 
     final before = await _tree(service);
     expect(
@@ -610,7 +697,21 @@ void main() {
       reason: '禁用前启动的 pending 请求没有以 interrupted/service_unavailable 完成。',
     );
 
-    final disabledStatus = await service.status();
+    // M30 实测（run10）：宿主确认关闭后，第一块 pending 请求立刻以
+    // `service_unavailable` 完成（`size=200 elapsed=1979ms`），但紧接着读到的
+    // `status().enabled` 仍为 true——无障碍开关的系统状态在确认弹窗关闭后还会
+    // 短暂抖动。这里是**只读状态查询**的有界等待，不重发输入、不重试动作，
+    // 断言仍是 `enabled isFalse` / `ready isFalse`。
+    var disabledStatus = await service.status();
+    final settleDeadline = DateTime.now().add(const Duration(seconds: 20));
+    while (disabledStatus.enabled && DateTime.now().isBefore(settleDeadline)) {
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+      disabledStatus = await service.status();
+    }
+    debugPrint(
+      'PHONE_AGENT_SERVICE_DISABLED_STATUS: enabled=${disabledStatus.enabled} '
+      'connected=${disabledStatus.connected} ready=${disabledStatus.ready}',
+    );
     expect(disabledStatus.enabled, isFalse);
     expect(disabledStatus.ready, isFalse);
 
@@ -621,10 +722,29 @@ void main() {
     await _waitForService(service);
     await _waitForAppScreenshot(service);
 
+    // 旧句柄必须在服务重启后失效。产品 `input()` 先取 `currentWindow()`
+    // （`PhoneAgentService.kt:464`），`rootInActiveWindow` 为 null 时返回
+    // `no_window`，这**先于**句柄校验，是文档化优先级；因此不能把
+    // `no_window` 当成 `stale_handle`。这里只做有界前置等待，判定信号用
+    // **截图**（截图只写 screenshot 观测，不触碰树观测，不会重置 registry），
+    // 不重读树、也不循环重试输入。等待超时与最终错误码各自有明确断言。
+    final rootReady = await _waitForStableWindow(service);
+    expect(
+      rootReady,
+      isTrue,
+      reason: '服务重启后有界等待内无法取得前台窗口（截图持续 no_window），'
+          '旧句柄失效无法验证。',
+    );
+
     final staleHandle = await _input(service, <String, dynamic>{
       'action': 'tap',
       'node_id': tapNode!['node_id'],
     });
+    debugPrint(
+      'PHONE_AGENT_RESTART_STALE_HANDLE: type=${_payload(staleHandle)['type']} '
+      'error=${_payload(staleHandle)['error']} '
+      'message=${_payload(staleHandle)['message']}',
+    );
     _expectToolError(staleHandle, 'stale_handle', step: '服务重启后旧句柄');
     final newTree = await _tree(service);
     expect(_nodeForText(newTree, _tapTarget), isNotNull);
@@ -772,11 +892,13 @@ Future<Map<String, dynamic>?> _tryTree(PhoneAgentService service) async {
       <String, dynamic>{'offset': 0},
     );
     final payload = _payload(result);
+    _treeProbe.recordPayload(payload);
     if (payload['ok'] != true) return null;
     final tree = payload['result'];
     if (tree is! Map) return null;
     return Map<String, dynamic>.from(tree);
-  } catch (_) {
+  } catch (error) {
+    _treeProbe.recordException(error);
     return null;
   }
 }
@@ -788,8 +910,11 @@ Future<Map<String, dynamic>?> _tryTreePayload(PhoneAgentService service) async {
       PhoneAgentToolNames.tree,
       <String, dynamic>{'offset': 0},
     );
-    return _payload(result);
-  } catch (_) {
+    final payload = _payload(result);
+    _treeProbe.recordPayload(payload);
+    return payload;
+  } catch (error) {
+    _treeProbe.recordException(error);
     return null;
   }
 }
@@ -906,16 +1031,16 @@ Future<Map<String, dynamic>> _waitForTreeText(
 }) async {
   _hostStep(marker, instruction);
   final deadline = DateTime.now().add(timeout);
+  _treeProbe.reset();
   Map<String, dynamic>? last;
   while (DateTime.now().isBefore(deadline)) {
     last = await _tryTree(service);
     if (last != null && _nodeForText(last, text) != null) return last;
+    // 只打印轮询诊断，不含节点文本；用于区分「被拒」「抛异常」「包名不符」。
+    debugPrint('PHONE_AGENT_TREE_PROBE: ${_treeProbe.describe()}');
     await Future<void>.delayed(_pollInterval);
   }
-  fail(
-    '等待 $text 超时（标记 $marker）。最后前台包名：'
-    '${last?['package_name'] ?? '未知'}',
-  );
+  fail('等待 $text 超时（标记 $marker）。${_treeProbe.describe()}');
 }
 
 Future<Map<String, dynamic>?> _waitForTreeWhere(
@@ -962,6 +1087,48 @@ Future<bool> _waitForViewOrientation(
     await tester.pump(const Duration(milliseconds: 200));
     await Future<void>.delayed(const Duration(milliseconds: 300));
   }
+  return false;
+}
+
+/// 服务重启后的有界前置等待：用**截图**（只写 screenshot 观测，不触碰树观测）
+/// 确认前台窗口可取得，避免把 `no_window` 的瞬时状态误判成句柄缺陷。
+/// 不重读树（会重置 registry 里的旧句柄），不重试输入。
+Future<bool> _waitForStableWindow(
+  PhoneAgentService service, {
+  Duration timeout = const Duration(seconds: 30),
+}) async {
+  final deadline = DateTime.now().add(timeout);
+  String? lastError;
+  while (DateTime.now().isBefore(deadline)) {
+    final payload = _payload(await _screenshot(service));
+    if (payload['ok'] == true && payload['package_name'] == _appPackage) {
+      return true;
+    }
+    lastError = payload['error'] as String?;
+    final lastMessage = payload['message'] as String? ?? '';
+    // 值得继续等的都是「前台窗口暂时不可用/未就绪/正在变化」这一类：
+    // - `no_window`：还没拿到 root；
+    // - `rate_limited`：截图限频；
+    // - `stale_observation`：**窗口已经取得**，只是截图期间发生了切换
+    //   （服务重启会让窗口重建、叠加层收起、输入法起落），属瞬态；
+    // - 宿主还在设置页时的观察边界拒绝（`hard_baseline` / `window_type_*`）。
+    // 这里只是把同一有界预算用在等待上，不放宽任何断言——超时仍失败，
+    // 旧句柄的 `stale_handle` 断言也保持不变。
+    final windowNotReady = lastError == 'no_window' ||
+        lastError == 'rate_limited' ||
+        lastError == 'stale_observation' ||
+        (lastError == 'system_window_denied' &&
+            (lastMessage.contains('hard_baseline') ||
+                lastMessage.contains('window_type_')));
+    if (!windowNotReady) {
+      debugPrint(
+        'PHONE_AGENT_RESTART_WAIT_STOPPED: error=$lastError message=$lastMessage',
+      );
+      return false;
+    }
+    await Future<void>.delayed(_screenshotInterval);
+  }
+  debugPrint('PHONE_AGENT_RESTART_WAIT_TIMEOUT: error=$lastError');
   return false;
 }
 
