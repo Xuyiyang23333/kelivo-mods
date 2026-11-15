@@ -236,13 +236,13 @@ dart tool/mod_loader.dart clean --modset <完整哈希或 16 位前缀>
 
 坐标一律为 `[0, 1]` 归一化值，原点为截图左上角。模型不需要计算截图像素、物理像素或缩放比。坐标动作必须存在最近一次截图，否则返回 `screenshot_required`；截图与输入之间发生包名、窗口、尺寸或旋转变化时返回 `stale_observation`，不静默重试。secure 窗口可能产生黑图；不要用黑图坐标，改用 `phone_agent_tree` 的节点句柄。
 
-输入错误码优先级固定为：空包名 `no_window` → 系统包 `system_window_denied` → 非白名单包 `package_not_allowed` → 白名单内句柄/截图校验（`stale_handle` / `stale_observation`）。因此系统窗口或非白名单应用在前台时，即使句柄已失效，也先返回包名策略错误。`home`/`recents` 执行后前台会离开白名单，后续输入（包括 `back`）会被拒绝，模型无法自行回到测试应用，需要用户或宿主把应用切回前台。
+**当前实现**的输入错误码优先级固定为：空包名 `no_window` → 系统包 `system_window_denied` → 非白名单包 `package_not_allowed` → 白名单内句柄/截图校验（`stale_handle` / `stale_observation`）。因此系统窗口或非白名单应用在前台时，即使句柄已失效，也先返回包名策略错误。`home`/`recents` 执行后前台会离开白名单，后续输入（包括 `back`）会被拒绝，模型无法自行回到测试应用，需要用户或宿主把应用切回前台。
 
 权限弹窗在 API35 实测没有可访问 root：活动/聚焦弹窗窗口 `hasRoot=false`、`pkg=null`，`AccessibilityWindowInfo` 没有包名字段，服务也收不到 `permissioncontroller` 的 `TYPE_WINDOW_STATE_CHANGED`（M20/M21 已证伪窗口 root 与事件来源包名两种识别机制）。因此该场景读树、截图和输入保持 `no_window`，错误消息只做条件式人工提示（“如果看到系统权限弹窗，请人工处理/取消，再返回测试应用”），不声称识别具体权限弹窗；可取得系统包名的窗口仍返回 `system_window_denied`。该保守收尾不改变错误优先级、读树/截图密码遮挡或输入边界。
 
 插件把原生结构化错误映射为 `PhoneAgentException(code, message)`。`phone_control_disabled` 已不再使用，统一改为 `phone_agent_disabled`。首版文档明确使用的错误码包括 `phone_agent_disabled`、`screenshot_required`、`stale_observation`、`stale_handle`、`rate_limited`、`screenshot_blocked`、`image_input_unsupported`、`unsupported_platform`、`timeout`、`plugin_unavailable`、`package_not_allowed`、`system_window_denied`、`device_locked` 和 `budget_exceeded`。其余错误码以适配层和插件返回为准。错误信息应给出可执行的下一步，例如重新截图、重新读树、在 Mods 页重新选择工具或请用户检查无障碍服务。
 
-`package_not_allowed` 只表示**构建期**硬禁止（当前 build 只允许测试包）；**当前实现**它只用于输入，M32 已定契约（未实现）把它扩到输入与观察并排在用户白名单之前；`system_window_denied` 表示硬基线或不允许的窗口类型，**输入与观察（读树/截图）都会返回**。已定契约中的 `permission_required` 表示“这个应用还没被用户批准”，**当前版本不会返回该码**；M32 起它的契约范围是**输入与观察都返回**（观察侧只带应用身份，不带树节点或截图），详见下文「应用白名单与批准（已定契约，尚未实现）」。
+`package_not_allowed` 只表示**构建期**硬禁止：**当前实现**是「只允许测试包」（allowlist），批准上线后改为只拒绝**明确不支持的 deny 成员**（见契约小节的说明）；**当前实现**它只用于输入，M32 已定契约（未实现）把它扩到输入与观察并排在用户白名单之前；`system_window_denied` 表示硬基线或不允许的窗口类型，**输入与观察（读树/截图）都会返回**。已定契约中的 `permission_required` 表示“这个应用还没被用户批准”，**当前版本不会返回该码**；M32 起它的契约范围是**输入与观察都返回**（观察侧只带应用身份，不带树节点或截图），详见下文「应用白名单与批准（已定契约，尚未实现）」。
 
 ## 测试包白名单
 
