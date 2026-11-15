@@ -32,9 +32,13 @@ final Map<String, dynamic> result = await agent.input({
   'action': 'tap',
   'node_id': 'n3',
 });
+
+final List<PhoneAgentApprovedApp> approved = await agent.approvedApps();
+await agent.approveApp('com.example.app', sourceAssistantId: 'assistant-a');
+await agent.revokeApp('com.example.app');
 ```
 
-`PhoneAgentScreenshot` 字段：`bytes`、`imageWidth`、`imageHeight`、`screenWidth`、`screenHeight`、`packageName`。
+`PhoneAgentScreenshot` 字段：`bytes`、`imageWidth`、`imageHeight`、`screenWidth`、`screenHeight`、`packageName`。`PhoneAgentApprovedApp` 字段：`packageName`、`signingPrefix`、`approvedAt`、`lastApprovedAt`、`sourceAssistantId`。
 
 `PhoneAgentException(code, message)` 映射原生结构化错误。`PhoneAgentClient` 不对外导出，Kelivo 适配层只依赖 `KelivoPhoneAgent`。
 
@@ -50,6 +54,14 @@ final Map<String, dynamic> result = await agent.input({
 | `clearScreenshot` | 无 | `{cleared: true}` |
 | `readTree` | `{offset, max_nodes, interactive_only}` | `{offset, next_offset, total, truncated, text_truncated, package_name, width, height, nodes}` |
 | `input` | `{action, node_id?, text?, x?, y?, end_x?, end_y?, duration_ms?, direction?}` | `{success, action, message}` |
+| `approvedApps` | 无 | `{apps: [{package_name, signing_prefix, approved_at, last_approved_at, source_assistant_id}]}` |
+| `approveApp` | `{package_name, source_assistant_id?, expected_signing_sha256?}` | `{package_name, signing_prefix, approved_at, outcome: "approved"}` |
+| `revokeApp` | `{package_name}` | `{package_name, revoked}` |
+
+`approvedApps` / `approveApp` / `revokeApp` 是应用白名单的原生通道面（M33），**不依赖无障碍服务是否连接**：`AppApprovals` 与其存储由插件进程持有，Mods 页在服务关闭时也必须能撤销。三者只处理身份元数据，不返回节点文本、截图或界面内容；完整签名哈希不离开原生侧，对外只给前 8 位十六进制字符。
+
+- `approveApp` 写入幂等：同一 `(包名, 签名集合)` 重复批准只更新最后批准时间并保留首次来源，不产生第二条记录。写入前**重新解析当前签名**——解析失败返回 `signing_unavailable`，与 `expected_signing_sha256` 不一致返回 `signing_mismatch`，两者都**不写入**（fail closed）。不传 `expected_signing_sha256` 表示“按当前签名写入”。
+- `revokeApp` 立即生效：下一次判定即重新读存储。撤销阻止新的读树（`offset == 0`）、全部截图与全部输入；但它不撤回已发出的动作，也不清理已建立的树观测——已建立观测在 TTL 内 `offset > 0` 分页仍会回放撤销前的旧树（见下方原生行为的分页条目）。
 
 节点字段：`node_id`、`bounds`、`class`、`parent_id?`、`text?`、`description?`、`hint?`、`state_description?`、`resource_id?`、`enabled`、`clickable?`、`long_clickable?`、`editable?`、`supports_set_text?`、`scrollable?`、`checkable?`、`checked?`、`focused?`、`selected?`、`password?`。密码节点不输出文本、描述、提示和状态描述，也不遍历子树。
 
@@ -57,7 +69,9 @@ final Map<String, dynamic> result = await agent.input({
 
 ### 错误码
 
-`service_unavailable`、`unsupported_platform`、`unsupported_os`、`device_locked`、`no_window`、`invalid_argument`、`stale_observation`、`stale_handle`、`screenshot_required`、`screenshot_blocked`、`screenshot_failed`、`rate_limited`、`busy`、`interrupted`、`gesture_failed`、`gesture_timeout`、`gesture_cancelled`、`gesture_rejected`、`action_unavailable`、`action_failed`、`password_node_denied`、`package_not_allowed`、`system_window_denied`、`budget_exceeded`、`timeout`、`internal_error`。
+`service_unavailable`、`unsupported_platform`、`unsupported_os`、`device_locked`、`no_window`、`invalid_argument`、`stale_observation`、`stale_handle`、`screenshot_required`、`screenshot_blocked`、`screenshot_failed`、`rate_limited`、`busy`、`interrupted`、`gesture_failed`、`gesture_timeout`、`gesture_cancelled`、`gesture_rejected`、`action_unavailable`、`action_failed`、`password_node_denied`、`package_not_allowed`、`permission_required`、`system_window_denied`、`budget_exceeded`、`timeout`、`internal_error`；白名单通道另有写入失败码 `signing_unavailable`、`signing_mismatch`。
+
+`package_not_allowed` 只表示**构建期**硬禁止：M33 起构建期范围是 deny 清单（`DENY_PACKAGES`，初始为空），它同时约束输入与观察、并排在用户白名单之前。`permission_required` 表示“这个应用还没被用户批准”，输入与观察都返回该码；观察侧只带应用身份（包名 + 签名前 8 位），不带树节点、截图或图片 metadata，且该次调用**不建立观测、不占读树预算、不调用 `takeScreenshot`**。`system_window_denied` 表示硬基线或不允许的窗口类型，输入与观察都会返回，与 `permission_required`（“可以批准”）语义严格区分。
 
 错误消息包含下一步建议，例如重新读树、重新截图、解锁手机或启用服务。
 
@@ -66,7 +80,7 @@ final Map<String, dynamic> result = await agent.input({
 - 单 worker 串行执行；手势和截图完成前，后续请求返回 `busy`。
 - 每次调用和实际执行前检查锁屏、息屏和服务代次。
 - 服务断开、`onInterrupt`、`onUnbind` 和 `onDestroy` 会完成所有 pending 请求并清空观测。
-- 树观测 TTL 120 秒。`offset == 0` 创建新观测并重新编号；`offset > 0` 只切片当前观测，不重新遍历。
+- 树观测 TTL 120 秒。`offset == 0` 创建新观测并重新编号；`offset > 0` 只切片当前观测，不重新遍历。**授权门控只在 `offset == 0` 判定**（门控发生在 `treeBudget` 扣减与 `beginTree` 之前）：未批准时新建观测直接返回 `permission_required` 且不建立观测，而分页请求复用该观测，只比较完整 `WindowState`。由此**撤销的生效范围是**：下一次 `offset == 0` 读树、全部截图路径、全部输入动作都会重新判定并立即反映撤销；但**已建立的观测在 TTL 到期或窗口变化之前，`offset > 0` 分页仍会成功回放撤销前读出的旧树**（既不返回 `permission_required`，也不返回 `stale_observation`）。这不构成绕过——分页只回放撤销前已读到的内容，新的读树、截图与任何输入都会被拒绝——但文档不得把撤销写成“下一次调用一定 `permission_required`”。
 - 句柄只在当前观测内有效。动作后保留树句柄；每次使用前执行 `refresh()`、可见性、可用性和指纹校验。指纹不包含 `isFocused` 和动作集合 `actions`，因此点击或聚焦后同一已刷新节点仍可继续输入，动作可用性由执行层按当前节点校验；`isSelected`、内容、稳定能力字段、窗口、包名、尺寸、旋转和 TTL 变化仍失效。目标失效返回 `stale_handle`（附带变化字段名，不含内容），不会按文本或 bounds 重新解析到另一个节点。前置重验失败按 `refresh()` → 可见性 → 可用性短路，消息只追加固定诊断标识 `refresh_failed`、`not_visible`、`not_enabled`，不含节点文本、类名或 viewId；诊断不改变通过条件。
 - 截图使用独立观测。动作后清空截图观测，坐标输入必须重新截图；窗口、包名、尺寸或旋转变化返回 `stale_observation`。截图位图与捕获前屏幕宽高比不一致时同样返回 `stale_observation`，不发出错位遮挡的图片。
 - 前台可视化叠加层：服务内新增 `TYPE_ACCESSIBILITY_OVERLAY` 窗口（`FLAG_NOT_TOUCHABLE | FLAG_NOT_FOCUSABLE`），不需要普通悬浮窗权限。读树显示无文本边缘脉冲；截图成功后显示短暂完成脉冲；节点动作在刷新后的 `bounds` 中心显示圆环；坐标手势按同一物理起点/终点和真实 `duration_ms` 显示移动圆点；系统动作显示无文本方向图形。只在 `perform`/`dispatchGesture`/`performGlobalAction` 返回 true 后显示，拒绝路径不产生动画；动画只表示系统接受动作，不代表业务成功或用户审批。不显示输入文本、密码、节点文本、包名或坐标数值。
@@ -74,7 +88,7 @@ final Map<String, dynamic> result = await agent.input({
 - 截图前在主线程移除叠加层并等待两帧加约 48ms 合成周期再调用 `takeScreenshot`；没有窗口时零等待，隐藏失败、附着状态未知或约 250ms 有界等待超时返回 `screenshot_failed`，不发送图片或图片 metadata。等待可被服务中断解除，迟到的帧回调不会触发第二次截图。隐藏等待结束后、`takeScreenshot` 前重新读取当前窗口并比较 `windowId`/包名/宽高/旋转，变化返回 `stale_observation` 且不发图；异步 `takeScreenshot` 回调后再次比较，不一致同样返回 `stale_observation` 且不处理、不发送图片。窗口为 null 按 `stale_observation`，读取抛异常按 `screenshot_blocked` fail closed。同一活动窗口内新出现密码字段、非活动分屏窗口变化和同窗口分屏 resize 不保证遮挡。读树不隐藏叠加层。
 - 截图前遍历 `service.windows` 中所有可访问窗口的 root 收集密码 bounds；任一窗口 root 无法读取时截图失败，不在漏遮挡的情况下发出图片。遍历只跳过能可靠确认属于本服务自己的 `TYPE_ACCESSIBILITY_OVERLAY` 窗口（root 存在且 root 包名等于自身包）；root 包名未知或其他包名的窗口继续参与遮挡，不屏蔽其他服务或应用的窗口。
 - 坐标手势的视觉 travel 复用真实 `duration_ms`（50–2000ms），尾段另算，不把真实时长改成更慢的视觉时长。
-- 输入白名单初期只有 `com.psyche.kelivo.phoneagent`。系统窗口（`com.android.systemui`、权限控制器、安装器等）一律拒绝。系统导航动作与节点、坐标动作使用同一白名单。
+- **构建期范围是 deny 清单，应用访问由用户白名单决定**（M33）：`DENY_PACKAGES` 初始为空，只有 deny 成员返回 `package_not_allowed`；其余第三方应用走用户白名单，未批准返回 `permission_required`。构建配置的预批准条目（`com.psyche.kelivo.phoneagent` 恒预批准；`com.kelivo.phoneagent.securefixture` 仅 debuggable 构建预批准）直接放行，**不写用户白名单、不产生批准提示、不可撤销**。系统窗口（`com.android.systemui`、权限控制器、安装器、证书安装器、设置及厂商变体等硬基线包）一律返回 `system_window_denied`，用户无法通过批准绕过。输入与读树/截图使用同一套判定（观察层不查询电话/短信角色持有者）。
 - 动作预算：输入 120 次/分钟，读树 60 次/分钟，截图约 1 次/秒且最多 30 次/分钟。
 - 截图失败映射：系统限频为 `rate_limited`；平台明确返回的无效窗口/截图错误为 `screenshot_blocked`；窗口读取、位图处理或遮挡准备失败为 `screenshot_failed`。整屏 `takeScreenshot` 不保证对 `FLAG_SECURE` 报错，secure 内容可能以黑色区域出现在成功截图中；不根据像素猜 secure，不承诺不发送黑图，正常黑色页面保留。
 - `clearScreenshot` 只清空原生截图坐标观测，供适配层在图片落盘或尺寸校验失败时调用。
@@ -120,7 +134,7 @@ flutter test
 ./gradlew :kelivo_phone_agent:testDebugUnitTest
 ```
 
-Dart 测试覆盖通道参数、默认值、错误映射、超时、`clearScreenshot` 和 `snapshot_id` 拒绝。Kotlin 测试覆盖有界 DFS、密码子树、文本预算、分页、TTL、窗口失效、句柄重验、清空截图后句柄复用、坐标换算、白名单、预算、截图限频、涂黑坐标、宽高比校验、多窗口密码收集和截图错误映射。
+Dart 测试覆盖通道参数、默认值、错误映射、超时、`clearScreenshot`、`snapshot_id` 拒绝，以及白名单通道 `approvedApps` / `approveApp` / `revokeApp`（含畸形载荷、可选参数、本地校验与 `signing_mismatch` 映射）。Kotlin 测试覆盖有界 DFS、密码子树、文本预算、分页、TTL、窗口失效、句柄重验、清空截图后句柄复用、坐标换算、边界策略（硬基线、窗口类型两层、deny 清单、用户白名单、预批准）、签名身份与白名单存储（多签名、幂等、撤销即时、损坏行丢弃）、预算、截图限频、涂黑坐标、宽高比校验、多窗口密码收集和截图错误映射。
 
 ## 未验证项与限制
 
@@ -133,8 +147,9 @@ Dart 测试覆盖通道参数、默认值、错误映射、超时、`clearScreen
 - 整屏 `AccessibilityService.takeScreenshot(Display.DEFAULT_DISPLAY)` 不保证对 `FLAG_SECURE` 报错：官方 `TakeScreenshotCallback.onFailure` 文档列出的错误码不含 `ERROR_TAKE_SCREENSHOT_SECURE_WINDOW`；该码是 API 34+ 窗口级 `takeScreenshotOfWindow` 的错误，AOSP 整屏路径没有 secure 检查。API35 模拟器实测同 UID/不同 UID 的 secure 夹具曾返回成功黑图，也观察到成功内容图；插件不根据像素猜 secure，不承诺不发送黑图，正常黑色页面保留；平台明确报错时仍映射为 `screenshot_blocked`，不发送图片。
 - secure 窗口的树在 API35 夹具上可读，但不是绝对保证；密码字段、自定义 View 和窗口变化仍会影响树。
 - 密码遮挡依赖应用正确标记 `isPassword`；自定义 View 和 WebView 可能遗漏，只能称为尽力而为。
-- 白名单只限制输入，不限制读树和截图；白名单应用内部仍可能发生不可逆业务操作。
+- **白名单同时限制输入与观察**（M33 起）：未批准应用的读树与截图返回 `permission_required` 且只回应用身份，不建立观测、不截图；批准后可以读树、截图并输入，同一 `(包名, 签名集合)` 一次批准覆盖这三种能力。已批准应用内部仍可能发生不可逆业务操作。
 - 手势 `onCompleted` 只代表系统接受并完成手势，不代表业务成功。
 - 后台悬浮胶囊可能出现在截图中或拦截坐标手势，首版不处理。
 - 前台可视化叠加层是 `TYPE_ACCESSIBILITY_OVERLAY` 窗口，`addView` 在部分厂商 ROM 上可能失败；失败时只禁用本会话可视化，工具行为不变。叠加层无法隐藏上游胶囊，截图隐藏握手会增加约两帧等待并可能返回 `screenshot_failed`；动画不代表业务成功或用户审批。
+- 白名单通道（M33）的签名解析能力**未在设备上验证**：`QUERY_ALL_PACKAGES` 声明后交付服务进程能否解析任意前台包签名，只在 M29 用探针 APK 验证过；解析失败的形态按 fail closed 处理（`permission_required`），但真实失败形态未实测。
 - 本插件不提供绝对安全保证，也不识别“发送、购买、删除”等业务语义。

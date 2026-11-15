@@ -562,7 +562,7 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
   - 证书安装器 `com.android.certinstaller`（`android.credentials.INSTALL`）；
   - 设置与变体 `com.android.settings`、`com.google.android.settings`、`com.samsung.android.settings`、`com.miui.securitycenter`、`com.xiaomi.misettings`、`com.coloros.settings`、`com.coloros.safecenter`、`com.oplus.settings`、`com.oplus.safecenter`、`com.vivo.settings`、`com.bbk.settings`、`com.huawei.systemmanager`、`com.hihonor.systemmanager`。
 - **厂商枚举的补全流程（不是“尽力而为”就完了）**：新增厂商支持时必须在该机型的真机上用只读命令实测，把解析到安装、卸载、权限授予、证书安装或设置的包名逐个补进集合——`adb shell cmd package resolve-activity --brief -a android.intent.action.INSTALL_PACKAGE`、`-a android.intent.action.DELETE`、`-a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n <settings>`、`-a android.credentials.INSTALL`，以及 `adb shell dumpsys package <pkg> | grep -i -E 'GrantPermissions|ReviewPermissions|InstallStart|UninstallStart|INSTALL'`。**只凭厂商命名习惯猜包名不算补全**。
-- **风险要写醒目**：漏写一个入口 = 该入口在该构建里按普通应用处理。**当前实现**下构建期范围仍是 allowlist（只有 `TEST_PACKAGE`），所以漏写暂时仍被 `package_not_allowed` 拒绝；而**已补进集合的入口返回的是 `system_window_denied`**（硬基线判定排在构建期判定之前），两者错误码不同、语义也不同。**批准上线时构建期范围转为 deny 清单**（见 7.5.1），届时漏写的入口不再被 `package_not_allowed` 拦住，而是**直接变成真实缺口**（用户批准该厂商设置包后即可被读树、截图与输入）。因此批准上线前必须先按上述流程把目标机型补全，并把已补包名列成清单——这件事的紧迫性属于上线前置条件，不是“以后再说”。
+- **风险要写醒目**：漏写一个入口 = 该入口在该构建里按普通应用处理。**M33 起构建期范围已是 deny 清单**（`DENY_PACKAGES` 初始为空），所以漏写的入口**今天不会**被 `package_not_allowed` 拒绝，而是落到用户白名单判定、返回 `permission_required`；已补进集合的入口返回 `system_window_denied`（硬基线判定排在构建期判定之前），两者错误码不同、语义也不同。而 `approveApp` 通道**已经上线**，因此这是一个**当下可达**的缺口：用户批准该厂商设置包后，它就能被读树、截图与输入——不是“等批准 UI 上线才出现”。批准 UI（M34）只是把这个缺口变得用户可操作、更容易踩到，不是它的起点。因此按上述流程把目标机型补全、并把已补包名列成清单，是**批准 UI 上线前必须完成的前置条件**，不是“以后再说”。
 - 角色持有者按 `RoleHolders` 建模，只有 `Resolved(packages)` 与 `Unavailable` 两种。`PhoneAgentService.resolveRoleHolders()` **在所有 API 版本统一使用**公共等价接口 `TelecomManager.defaultDialerPackage`（对应 `ROLE_DIALER`）与 `Telephony.Sms.getDefaultSmsPackage(this)`（对应 `ROLE_SMS`），没有 `RoleManager` 分支，也没有版本分支。原因：`RoleManager.getRoleHolders` 是 @SystemApi（`MANAGE_ROLE_HOLDERS` 签名权限），公共 SDK 无法编译（实测 `Unresolved reference 'getRoleHolders'`）。
 - 区分两种失败：查询抛异常或 `TelecomManager` 服务缺失表示“不知道”，返回 `Unavailable`，策略层据此**拒绝全部输入**（`system_window_denied`，消息标识 `role_resolution_failed`）；查询返回 null 表示系统明确回答“没有该角色的默认应用”（例如无短信能力的平板），归入 `Resolved(emptySet())`，不封死这类设备。不把“解析失败”当成“没有持有者”。
 - Kelivo 自身按 `KELIVO_PACKAGE = "com.psyche.kelivo"` 精确比较，测试包 `TEST_PACKAGE = "com.psyche.kelivo.phoneagent"` 独立常量；有专门用例断言测试包不被前缀/contains 规则误伤。
@@ -623,7 +623,8 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 - **不降级**：不返回空树、不返回“仅根节点”、不返回黑图或占位图。模型必须能从错误码区分“可以批准”（`permission_required`）与“永远不行”（`system_window_denied`）。
 - **判定顺序（观察路径，M33 已实现）**：`device_locked` → `no_window` → 硬基线 → 窗口类型 → 构建期 deny 清单 → **用户白名单（未批准即 `permission_required`）**。硬基线与窗口类型命中时仍返回 `system_window_denied`，不会因为“用户没批准”而改报 `permission_required`——否则用户会以为批准就能看系统窗口。权限弹窗仍是 `no_window`（`rootInActiveWindow == null`，走不到白名单层），不得改成 `permission_required` 或 `system_window_denied`。
 - **输入法窗口**：观察允许集仍含 `TYPE_INPUT_METHOD`，白名单门控对输入法窗口同样生效（按输入法自身包名判）。未批准时读树返回 `permission_required` 而不是输入法的键盘/候选词树；批准后行为与 M28 一致。**这条仍未实测**——输入法窗口成为 `rootInActiveWindow` 时读树结果是否有用仍未知（见本节末未验证假设）。
-- **分页（`offset > 0`）：M33 实现为不重复判定**（沿用 M28 的接入点：门控只在 `offset == 0` 那次执行）。M32 曾把它列为「设计提案：分页也执行一次」，但**未定稿为契约**；M33 的实现选择沿用了既有接入点并保持 `registry.page()` 的完整 `WindowState` 比较。代价是：未批准时不存在可复用观测，`offset > 0` 会落到 `stale_observation`（“No current tree observation”）而不是 `permission_required`；因为 `offset == 0` 已经给出 `permission_required`，模型不会通过翻页绕过门控。等 M34 之后若要改成分页也判定，需要同时改本节与 JVM 断言。
+- **分页（`offset > 0`）：M33 实现为不重复判定**（沿用 M28 的接入点：门控只在 `offset == 0` 那次执行）。M32 曾把它列为「设计提案：分页也执行一次」，但**未定稿为契约**；M33 的实现选择沿用了既有接入点并保持 `registry.page()` 的完整 `WindowState` 比较。未批准时不存在可复用观测，所以 `offset > 0` 会落到 `stale_observation`（“No current tree observation”）而不是 `permission_required`；因为 `offset == 0` 已经给出 `permission_required`，模型不会通过翻页绕过门控。等 M34 之后若要改成分页也判定，需要同时改本节与 JVM 断言。
+- **撤销的生效范围（必须先读清，不得写成“下一次调用一定 `permission_required`”）**：因为门控只在 `offset == 0`，撤销后的实际效果是——**`offset == 0` 的新读树、全部截图路径、全部输入动作**都会在下一次判定重新读存储并立即返回 `permission_required`；但**撤销前已建立的树观测，在 120 秒 TTL 到期或窗口变化之前，`offset > 0` 分页仍会成功回放那份旧树**（既不 `permission_required` 也不 `stale_observation`）。这不构成绕过：分页只回放撤销前已经读到的内容，不会读到撤销后的新内容，任何新的读树、截图或输入都会被拒。JVM 层未专门断言该分页路径（门控不在分页分支，属既有 M28 行为），已验证的是“撤销后 `offset == 0` 与输入立即 `permission_required`”。
 - **截图顺序（已实现）**：取前台 `WindowState` → `requireObservable`（硬基线/窗口类型 → deny 清单 → 白名单）→ `collectPasswordBounds` 全窗口遍历 → 截图。遮挡遍历的范围与规则不因白名单门控改变；门控不读节点内容、不读密码 bounds，遮挡遍历也不感知白名单。
 
 **实现事实（M33）**：
@@ -724,8 +725,8 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 - 不做一次性：一次性等于每动作都问，等于否定整个授权方向。
 - **不做定时过期**：定时过期会让长任务在不可预期时刻（例如半夜）失败，比“授权沉底”更糟；用户也无法预知何时到期。
 - 代价：授权沉底、长期无人复习。
-- 缓解：Mods 页白名单管理页显示包名、签名哈希（可只显示前缀）、批准时间、最后使用时间、来源助手，并提供撤销；撤销立即生效（下一次调用重新判定，不缓存放行结果）。
-- 撤销不撤销“已发出的动作”：撤销只影响后续调用。
+- 缓解：Mods 页白名单管理页显示包名、签名哈希（可只显示前缀）、批准时间、最后使用时间、来源助手，并提供撤销；撤销立即生效（下一次判定重新读存储，不缓存放行结果）。**生效范围的准确表述**：撤销阻止**新的读树（`offset == 0`）、全部截图与全部输入**；但撤销前已建立的树观测在 120 秒 TTL 或窗口变化之前，**`offset > 0` 分页仍会成功回放那份旧树**（见 7.5.4「撤销的生效范围」）。不得把撤销写成“下一次调用一定返回 `permission_required`”。
+- 撤销不撤销“已发出的动作”：撤销只影响后续判定，不撤回已派发的点击、输入或手势。
 
 **（3）审计 = 落盘元数据，滚动保留**
 
@@ -803,7 +804,7 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 - **签名变化或无法解析 → 重新批准（已定契约，早期设计；M33 已实现）**：签名变化（覆盖安装为另一签名的包、卸载重装为不同来源）视为未批准；签名解析失败（`PackageManager` 抛异常、包已被卸载、`GET_SIGNING_CERTIFICATES` 拿不到结果、返回空证书集）也视为未批准，**fail closed**，不因为“读不到”而放行。批准写入前同样重新解析一次，解析失败或与批准请求保存的签名不一致都**不写入**（标识 `signing_unavailable` / `signing_mismatch`）。
 - **授权不随聊天备份迁移（已定契约，早期设计；M33 已实现）**：白名单是本地设备状态，不进聊天备份/同步；换设备或用聊天备份恢复后需要重新批准。实现落在 `context.noBackupFilesDir/phone_agent_whitelist.tsv`，文件格式是带表头的制表符分隔文本，损坏行被忽略而不是被信任。
 - **应用分身 / 工作资料首版明确不支持（已定契约，早期设计；M33 未适配）**：Android 的 profile（工作资料、`user 10/11`）与厂商应用分身会给出同一包名的另一份签名或另一份用户空间。首版**明确不支持**，不为它们做多用户 `PackageManager` 查询（M33 的签名解析即 `PackageManager.getPackageInfo(packageName, …)`，天然作用于默认用户）；这类前台在首版视为未批准（或按其实际包名解析失败则 fail closed）。**不得写成“已适配分身”**。
-- **批准/撤销/查询的原生通道面（M33 已实现，UI 未实现）**：`kelivo/phone_agent` 通道新增 `approvedApps`、`approveApp`、`revokeApp`。三者**不依赖无障碍服务连接**（Mods 页在服务关闭时也必须能撤销）。`approveApp` 幂等：同一 `(包名, 签名集合)` 重复批准只更新最后批准时间并保留首次来源；`revokeApp` 立即生效（下一次判定即重新返回 `permission_required`）；`approvedApps` 只回包名、签名前 8 位、批准时间与来源助手 id。
+- **批准/撤销/查询的原生通道面（M33 已实现，UI 未实现）**：`kelivo/phone_agent` 通道新增 `approvedApps`、`approveApp`、`revokeApp`。三者**不依赖无障碍服务连接**（Mods 页在服务关闭时也必须能撤销）。`approveApp` 幂等：同一 `(包名, 签名集合)` 重复批准只更新最后批准时间并保留首次来源；`revokeApp` 立即生效（下一次判定即重新读存储，返回 `permission_required`；**范围见 7.5.4「撤销的生效范围」**——阻止新的读树、全部截图与全部输入，已建立观测的 `offset > 0` 分页在 TTL 内仍回放旧树）；`approvedApps` 只回包名、签名前 8 位、批准时间与来源助手 id。
 - **`QUERY_ALL_PACKAGES` 的实际能力仍未设备验证（设计提案，未验证）**：M29 在 API35 与物理 MIUI 上实测了“无声明 → `NameNotFound`、声明后 → `ok`”，但那是**探针 APK 的结论**：M33 的实现（无障碍服务进程内解析任意前台包签名）**尚未在设备上跑过**。Google Play 对该权限有政策限制，本 Mod 是私有、自用与朋友间交付，**不走 Play 分发**；这条只作说明，不构成对分发的承诺。
 - **签名哈希的展示口径（M33 部分实现）**：`permission_required` 消息、`approvedApps` 结果与本地存储都只使用前 8 位十六进制字符；完整哈希只在本地存储与比较时使用，不进入工具结果、不进入聊天、不发往 provider。Mods 页白名单列表与批准卡片**尚未实现**。
 
@@ -964,12 +965,12 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 3. **实现顺序**：应用身份与签名解析（7.5.9，✅ M33）→ 白名单门控接入观察与输入（7.5.4/7.5.2，✅ M33）→ 批准交互与终态（7.5.13/7.5.6，未实现）→ 首次隐私确认（7.5.14，未实现）→ 任务控制与恢复（7.5.10，未实现）→ 结果未知语义（7.5.11，未实现）→ 审计（7.5.5，未实现）。前一步不稳定不要开始后一步。
 4. **重跑要求（未完成）**：见风险 4；另需为“未批准 → 只回身份”“批准 → 重新观察”“撤销 → 下轮重新 `permission_required`”三条链路各写设备断言，不能只靠单元测试。M33 **未跑任何设备**。
 
-**M33 自检记录（2026-11-15，仅单元与静态检查，无设备证据）**：
+**M33 自检记录（2026-11-15/16，仅单元与静态检查，无设备证据）**：
 
 - Loader：`dart format --output=none --set-exit-if-changed tool test`（0 变更）、`dart analyze tool test` 无问题、`dart test` **165 通过**。
-- 插件 Kotlin：`:kelivo_phone_agent:testDebugUnitTest --rerun-tasks` **170 通过、0 失败**（其中 `PackagePolicyTest` 34 项、新增 `AppWhitelistTest` 16 项）。
+- 插件 Kotlin：`:kelivo_phone_agent:testDebugUnitTest --rerun-tasks` **170 通过、0 失败**（其中 `PackagePolicyTest` 51 项、新增 `AppWhitelistTest` 16 项）。
 - 合成树：`dart analyze --fatal-infos lib test integration_test tool` **No issues found**；插件 Dart `flutter test` **25 通过**（新增 `approvedApps`/`approveApp`/`revokeApp` 用例）。
-- 最终合成树 `V:/coding/kelivo-private/.tower/worktrees/wt-33/.build/worktrees/0c7e320a7b47d901`，`modsetHash` `0c7e320a7b47d901e40fb272bd2ea9018c3ffa5aa56abf54db6147d30652f61a`，`plan`/`apply`/`verify` 通过。**未构建 APK、未接设备、未跑 integration_test**，因此没有新的 APK 大小或 SHA-256 记录。
+- 最终合成树 `V:/coding/kelivo-private/.tower/worktrees/wt-33/.build/worktrees/57d1793ddb8bb89e`，`modsetHash` `57d1793ddb8bb89e86577fc526f1572b582ec9761a7602569307c6bf8d029167`，`plan`/`apply`/`verify` 通过。R1 返工（`p2-4items`）只改文档，其中 `mods/phone_agent/plugin/README.md` 属 modset 内容，因此哈希由 `0c7e320a7b47d901…` 经 R1 返工两次变为本值；代码与测试逻辑未改。**未构建 APK、未接设备、未跑 integration_test**，因此没有新的 APK 大小或 SHA-256 记录。
 - 本机建树需要 `core.longpaths`：Loader 的 `git worktree add` 只传 `-c core.autocrlf=false`，而上游仓有超长路径（`ThreadedInputConnectionProxyAdapterView.java`），未开 `core.longpaths` 时 `apply` 会以 `Filename too long` + `Could not reset index file` 失败。M33 用一次性的进程级 `GIT_CONFIG_*` 环境变量绕过，**未修改上游或本仓库的 git 配置**；这是 Loader 侧缺口，已作为 finding 记录，不属于本 mission 的改动范围。
 
 ## 8. 分阶段实施
