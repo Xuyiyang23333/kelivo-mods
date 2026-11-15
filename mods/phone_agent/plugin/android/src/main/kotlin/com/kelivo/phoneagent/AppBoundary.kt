@@ -53,7 +53,7 @@ internal enum class WindowType {
     }
 }
 
-/** 私有测试应用的包名，也是当前构建期输入白名单的唯一成员。 */
+/** 私有测试应用的包名，也是构建配置的预批准条目（不写用户白名单）。 */
 internal const val TEST_PACKAGE = "com.psyche.kelivo.phoneagent"
 
 /**
@@ -64,9 +64,9 @@ internal const val KELIVO_PACKAGE = "com.psyche.kelivo"
 
 /**
  * 静态硬基线：系统 UI、权限控制器、包安装器、证书安装器与设置（含常见厂商变体）。
- * 这些包是“用现有权限扩大权限”的入口，输入一律拒绝，用户不可覆盖。
+ * 这些包是“用现有权限扩大权限”的入口，输入与观察一律拒绝，用户不可覆盖。
  *
- * **漏写即等于该入口没有硬基线，且第 3 步白名单上线后会变成真实缺口。**
+ * **漏写即等于该入口没有硬基线，且用户白名单上线后会变成真实缺口。**
  * 厂商变体必须按真机 `cmd package resolve-activity` / `dumpsys package` 实测补全，
  * 不能只靠记忆枚举；当前集合是实测过的部分清单，不是完整清单。
  */
@@ -113,20 +113,27 @@ internal fun roleHolderSet(values: Iterable<String?>): Set<String> =
     values.filterNotNull().filter { it.isNotBlank() }.toSet()
 
 /**
- * 应用边界策略。纯函数式判定：只读入参，不读 Android 状态、不持有状态，
- * 判定集中在这一处。首版不实现用户白名单，未命中构建期集合仍返回
- * `package_not_allowed`（构建期硬禁止），不与运行时白名单混用。
+ * 应用边界策略。纯函数式判定：只读入参，不读 Android 状态，判定集中在这一处。
  *
  * 输入顺序固定：`no_window` → 静态硬基线 → 角色解析失败 → 角色持有者 →
- * 窗口类型 → 构建期白名单。调用方必须在每个输入动作前用**当前**窗口调用，
- * 不能缓存判定结果。
+ * 窗口类型 → 构建期 deny 清单 → 用户白名单。
  *
- * 观察顺序固定：`no_window` → 静态硬基线 → 观察窗口类型。观察层不查询角色
- * （角色是输入边界，观察层依赖它会在角色解析失败时让所有设备的读树失败），
- * 也不判构建期白名单与用户白名单。
+ * 观察顺序固定：`no_window` → 静态硬基线 → 观察窗口类型 → 构建期 deny 清单 →
+ * 用户白名单。观察层不查询角色（角色是输入边界，观察层依赖它会让角色解析失败的
+ * 设备上读树整体失败）。
+ *
+ * 构建期范围是 **deny 清单**（不是 allowlist）：`package_not_allowed` 只对
+ * [denyPackages] 成员出现，其余第三方包走用户白名单，未批准返回
+ * `permission_required`。构建配置的预批准条目（测试包、debug 构建的跨 UID 夹具包）
+ * 直接视为已批准，不写用户白名单、不产生批准提示、不可撤销。
  */
 internal class PackagePolicy(
-    private val allowedPackages: Set<String> = setOf(TEST_PACKAGE),
+    private val approvals: AppApprovals = AppApprovals(
+        resolver = SigningResolver { null },
+        store = WhitelistStore(InMemoryWhitelistStorage()),
+    ),
+    private val denyPackages: Set<String> = DENY_PACKAGES,
+    private val preApprovedPackages: Set<String> = setOf(TEST_PACKAGE),
     private val hardBaselinePackages: Set<String> = HARD_BASELINE_PACKAGES,
     private val kelivoPackage: String = KELIVO_PACKAGE,
 ) {
@@ -137,7 +144,7 @@ internal class PackagePolicy(
     ) {
         val foreground = requireForeground(
             packageName,
-            "No foreground app is available. Ask the user to open the test app, then retry.",
+            "No foreground app is available. Ask the user to open the app, then retry.",
         )
         requireNotHardBaseline(foreground)
         val holders = when (roleHolders) {
@@ -150,7 +157,7 @@ internal class PackagePolicy(
         if (foreground in holders) {
             throw PhoneAgentError(
                 "system_window_denied",
-                "The foreground app is the default phone or SMS app ($foreground, role_holder). Ask the user to return to the test app, then retry.",
+                "The foreground app is the default phone or SMS app ($foreground, role_holder). Ask the user to return to the app, then retry.",
             )
         }
         if (!windowType.allowsInput) {
@@ -159,17 +166,14 @@ internal class PackagePolicy(
                 "Input into this window type is not allowed (${windowType.denialTag}). Ask the user to return to the app, then retry.",
             )
         }
-        if (foreground !in allowedPackages) {
-            throw PhoneAgentError(
-                "package_not_allowed",
-                "Input is limited to ${allowedPackages.joinToString()} in this build. The foreground app is $foreground.",
-            )
-        }
+        requireBuildAllowed(foreground, "Input is")
+        requireApproved(foreground, observation = false)
     }
 
     /**
-     * 观察边界：读树与截图共用的入口判定。刻意不接收 [RoleHolders] 与白名单：
-     * 未批准应用也必须在模型能看到之后才能向用户解释为什么需要授权。
+     * 观察边界：读树与截图共用的入口判定。未批准时同输入一样立即失败，且**不**
+     * 进入读树或截图：调用方据此不建立观测、不占用 `treeBudget`、不调用
+     * `takeScreenshot`，也不返回空树或黑图占位。
      */
     fun requireObservable(
         packageName: String?,
@@ -186,6 +190,8 @@ internal class PackagePolicy(
                 "This window type cannot be observed (${windowType.denialTag}). Ask the user to return to the app, then retry.",
             )
         }
+        requireBuildAllowed(foreground, "Observing")
+        requireApproved(foreground, observation = true)
     }
 
     private fun requireForeground(packageName: String?, message: String): String {
@@ -199,8 +205,48 @@ internal class PackagePolicy(
         if (packageName == kelivoPackage || packageName in hardBaselinePackages) {
             throw PhoneAgentError(
                 "system_window_denied",
-                "The foreground window belongs to the system or a protected app ($packageName, hard_baseline). Ask the user to dismiss it and return to the test app, then retry.",
+                "The foreground window belongs to the system or a protected app ($packageName, hard_baseline). Ask the user to dismiss it and return to the app, then retry.",
             )
+        }
+    }
+
+    /**
+     * 构建期硬禁止（deny 清单语义）。排在用户白名单之前：本次构建明确不支持的包
+     * 不应产生批准提示，否则用户会批准一个“批准了也操作不了”的应用。
+     */
+    private fun requireBuildAllowed(packageName: String, subject: String) {
+        if (packageName in denyPackages) {
+            throw PhoneAgentError(
+                "package_not_allowed",
+                "$subject not supported for this app in this build ($packageName, build_denied). Use another app.",
+            )
+        }
+    }
+
+    /**
+     * 用户白名单。未批准时结果只有应用身份（包名、签名 SHA-256 前 8 位、可选显示名）
+     * 与 `permission_required`；解析不到签名时标 `signing_unavailable` 但同样拒绝
+     * （fail closed），绝不因“读不到”而放行。
+     */
+    private fun requireApproved(packageName: String, observation: Boolean) {
+        if (packageName in preApprovedPackages) return
+        when (val decision = approvals.decide(packageName)) {
+            is ApprovalDecision.Approved -> return
+            is ApprovalDecision.Required -> {
+                val identity = decision.identity
+                val identityText = if (identity == null) {
+                    "$packageName, signing_unavailable"
+                } else {
+                    val name = identity.displayName?.let { " ($it)" }.orEmpty()
+                    "$packageName (signing cert ${identity.signingPrefix})$name"
+                }
+                val message = if (observation) {
+                    "Reading $identityText needs the user's approval. No screenshot or UI text was captured or sent. Ask the user to approve this app in Kelivo, then re-observe before acting. Do not retry the same call repeatedly."
+                } else {
+                    "Input into $identityText needs the user's approval. The action was not executed and is not queued. Ask the user to approve this app in Kelivo, then decide whether to retry. Do not retry the same call repeatedly."
+                }
+                throw PhoneAgentError("permission_required", message)
+            }
         }
     }
 }

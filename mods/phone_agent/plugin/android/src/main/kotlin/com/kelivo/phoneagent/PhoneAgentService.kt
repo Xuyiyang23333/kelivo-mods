@@ -6,6 +6,7 @@ import android.app.KeyguardManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Point
 import android.hardware.display.DisplayManager
@@ -23,6 +24,8 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityManager
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
+import java.io.File
+import java.security.MessageDigest
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.atomic.AtomicBoolean
@@ -52,6 +55,76 @@ class PhoneAgentService : AccessibilityService() {
 
         @Volatile
         private var connected: PhoneAgentService? = null
+
+        private val approvalsLock = Any()
+
+        @Volatile
+        private var approvalsOrNull: AppApprovals? = null
+
+        /**
+         * 进程级批准入口。批准/撤销/查询不依赖无障碍服务是否连接，因此放在
+         * companion：Mods 页在服务关闭时也必须能撤销授权。
+         *
+         * 白名单落在 `noBackupFilesDir`（应用私有、不进聊天备份、不上传），
+         * 每次判定都重新解析当前签名，不做正缓存，因此撤销与签名变化立即生效。
+         */
+        internal fun approvals(context: Context): AppApprovals = synchronized(approvalsLock) {
+            approvalsOrNull ?: AppApprovals(
+                resolver = SigningResolver { packageName -> signingIdentity(context, packageName) },
+                store = WhitelistStore(
+                    FileWhitelistStorage(
+                        File(context.noBackupFilesDir, "phone_agent_whitelist.tsv"),
+                    ),
+                ),
+            ).also { approvalsOrNull = it }
+        }
+
+        private fun signingIdentity(context: Context, packageName: String): SigningIdentity? {
+            val manager = context.packageManager
+            val info = try {
+                if (Build.VERSION.SDK_INT >= 28) {
+                    manager.getPackageInfo(packageName, PackageManager.GET_SIGNING_CERTIFICATES)
+                } else {
+                    @Suppress("DEPRECATION")
+                    manager.getPackageInfo(packageName, PackageManager.GET_SIGNATURES)
+                }
+            } catch (error: Exception) {
+                return null
+            }
+            val certificates: List<ByteArray> = try {
+                if (Build.VERSION.SDK_INT >= 28) {
+                    info.signingInfo?.apkContentsSigners?.map { it.toByteArray() }.orEmpty()
+                } else {
+                    @Suppress("DEPRECATION")
+                    info.signatures?.map { it.toByteArray() }.orEmpty()
+                }
+            } catch (error: Exception) {
+                return null
+            }
+            val hashes = SigningIdentity.normalizeSha256(certificates.map(::sha256Hex))
+            if (hashes.isEmpty()) return null
+            val displayName = try {
+                manager.getApplicationInfo(packageName, 0).loadLabel(manager)?.toString()
+            } catch (error: Exception) {
+                null
+            }
+            return SigningIdentity(packageName, hashes, displayName?.takeIf { it.isNotBlank() })
+        }
+
+        private fun sha256Hex(value: ByteArray): String =
+            MessageDigest.getInstance("SHA-256").digest(value)
+                .joinToString("") { byte -> (byte.toInt() and 0xff).toString(16).padStart(2, '0') }
+
+        /** 构建配置的预批准条目：测试包恒预批准，debuggable 构建额外预批准跨 UID 夹具包。 */
+        internal fun preApprovedPackages(context: Context): Set<String> {
+            val debuggable = try {
+                context.applicationInfo.flags and
+                    android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0
+            } catch (error: Exception) {
+                false
+            }
+            return buildPreApprovedPackages(debuggable)
+        }
 
         fun status(context: Context): Map<String, Any> {
             val manager = context.getSystemService(AccessibilityManager::class.java)
@@ -113,8 +186,11 @@ class PhoneAgentService : AccessibilityService() {
     private lateinit var treeBudget: ActionBudget
     private lateinit var overlay: PhoneAgentOverlay
 
-    /** 观察边界策略；输入侧策略由 [NodeActionExecutor] 持有，两者共用同一纯函数实现。 */
-    private val policy = PackagePolicy()
+    /**
+     * 应用边界策略（硬基线 + 窗口类型 + 构建期 deny 清单 + 用户白名单）。
+     * 输入侧与观察侧共用同一实例与同一份白名单存储。
+     */
+    private lateinit var policy: PackagePolicy
 
     /**
      * 最近一次 `TYPE_WINDOWS_CHANGED` 事件的时间戳（`SystemClock.elapsedRealtime`）。
@@ -125,6 +201,10 @@ class PhoneAgentService : AccessibilityService() {
 
     override fun onCreate() {
         super.onCreate()
+        policy = PackagePolicy(
+            approvals = approvals(this),
+            preApprovedPackages = preApprovedPackages(this),
+        )
         registry = ObservationRegistry(
             now = { SystemClock.elapsedRealtime() },
             rootProvider = { rootInActiveWindow?.let(::AndroidPhoneNode) },
@@ -138,6 +218,7 @@ class PhoneAgentService : AccessibilityService() {
         executor = NodeActionExecutor(
             service = this,
             registry = registry,
+            policy = policy,
             beforeAction = {
                 ensureUnlocked()
                 ensureActive()
@@ -324,8 +405,9 @@ class PhoneAgentService : AccessibilityService() {
         val root = rootInActiveWindow ?: throw noAccessibleWindowError()
         val current = windowState(root)
         if (offset == 0) {
-            // 观察边界只在这一处判定：分页请求复用同一观测，registry.page 仍会比较
-            // 完整 WindowState，重复判定只会让窗口内翻页被一次类型抖动打断。
+            // 观察门控只在这一处判定：分页请求复用同一观测，registry.page 仍会比较
+            // 完整 WindowState。未批准时这里直接抛出 permission_required，因此不会
+            // 扣减 treeBudget、不会 beginTree、也不会产生节点句柄。
             try {
                 policy.requireObservable(current.packageName, current.windowType)
             } catch (error: PhoneAgentError) {
@@ -381,9 +463,9 @@ class PhoneAgentService : AccessibilityService() {
         } finally {
             root.recycle()
         }
-        // 顺序固定：前台窗口 → 观察边界 → 全窗口密码遮挡遍历 → 截图。
-        // 边界判定只读 WindowState，不读节点内容；遮挡遍历不感知边界策略，
-        // 前台被拒时直接失败，不会因此缩窄遍历范围。
+        // 顺序固定：前台窗口 → 硬基线/窗口类型 → 构建期 deny 清单 → 用户白名单
+        // → 全窗口密码遮挡遍历 → 截图。门控不读节点内容、不读密码 bounds，
+        // 未批准或前台被拒时直接失败，遮挡遍历的范围与规则不受影响。
         policy.requireObservable(current.packageName, current.windowType)
         val passwordBounds = collectPasswordBounds(current)
         pendingScreenshot = reply

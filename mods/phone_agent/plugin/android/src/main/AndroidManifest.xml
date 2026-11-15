@@ -1,4 +1,13 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!--
+        M33：一次声明 QUERY_ALL_PACKAGES，用它解析任意前台包当前签名证书的 SHA-256。
+        不加 <queries> 时无障碍服务没有任何包可见性豁免（M29 实测 API35 无声明 88 个
+        可见包、声明后 244；服务读得到 Chrome 窗口却解析不到签名 NameNotFound）。
+        声明在插件自己的 manifest，不改上游宿主 manifest。包可见性只用于签名解析与
+        批准记录，本构建不公开分发；一旦上架 Play 需按 high-risk 权限提交声明。
+    -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+
     <application>
         <service
             android:name="com.kelivo.phoneagent.PhoneAgentService"
