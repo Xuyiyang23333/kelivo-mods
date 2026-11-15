@@ -23,7 +23,7 @@ dart tool/mod_loader.dart clean --modset <完整哈希或 16 位前缀>
 ```
 
 - `plan` 只读打印基线、`modsetHash`、合成目录、Loader overlay、接缝补丁、Mod 顺序、补丁和复制目标，不写文件。
-- `apply` 在 `.build/worktrees/<modsetHash 前 16 位>/` 创建或复用 detached worktree，创建时显式使用 `git -c core.autocrlf=false worktree add`，保证按仓库存储的 LF 检出。随后复制 `overlay/`，应用 `patches/tool_mod_seams.patch`，再按顺序应用各 Mod 补丁和 copy，生成 `lib/modding/mod_registry.g.dart` 与 `MOD_BUILD.json`。相同 `modsetHash` 且状态一致时幂等复用。
+- `apply` 在 `.build/worktrees/<modsetHash 前 16 位>/` 创建或复用 detached worktree，创建时显式使用 `git -c core.longpaths=true -c core.autocrlf=false worktree add`，保证按仓库存储的 LF 检出并支持 Windows 超长路径。随后复制 `overlay/`，应用 `patches/tool_mod_seams.patch`，再按顺序应用各 Mod 补丁和 copy，生成 `lib/modding/mod_registry.g.dart` 与 `MOD_BUILD.json`。相同 `modsetHash` 且状态一致时幂等复用。
 - `verify` 校验 worktree 状态、HEAD、暂存区补丁哈希、`MOD_BUILD.json`、注册表、复制文件和补丁结果，不执行 Flutter 构建。只允许 `pubspec.lock` 和根项目 Flutter 生成注册文件变化，其他已跟踪漂移失败。
 - `rebase-drill` 在 `.build/drills/` 下的独立临时 worktree 验证新 commit，不修改 `mods.json` 或主合成树；结束后清理临时 worktree。
 - `clean` 必须显式提供 `--modset`，只删除 `.build/worktrees/` 下带 Loader 状态记录的精确目标；缺少参数时不删除任何内容。

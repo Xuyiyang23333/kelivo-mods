@@ -244,9 +244,22 @@ class WorktreeManager {
       );
       return handle;
     } catch (error) {
-      _markFailed(stateFile, modsetHash, relativePath, error.toString());
+      final needsClean = await _recordFailure(
+        stateFile: stateFile,
+        path: path,
+        modsetHash: modsetHash,
+        relativePath: relativePath,
+        error: error,
+      );
       if (error is WorktreeException) rethrow;
-      throw WorktreeCreationException(path, '创建或合成 worktree 失败：$error', error);
+      final hint = needsClean
+          ? '\n重试前请执行 dart tool/mod_loader.dart clean --modset $modsetHash'
+          : '';
+      throw WorktreeCreationException(
+        path,
+        '创建或合成 worktree 失败：$error$hint',
+        error,
+      );
     }
   }
 
@@ -683,6 +696,47 @@ class WorktreeManager {
       '${const JsonEncoder.withIndent('  ').convert(state.toJson())}\n',
       flush: true,
     );
+  }
+
+  /// 记录失败结果，并在失败没有留下任何痕迹时撤销本次写入的状态文件。
+  ///
+  /// `git worktree add` 失败（例如 Windows 超长路径）通常既不留目标目录，
+  /// 也不留 Git 的 worktree 登记；此时把刚写入的 `creating` 状态一并删除，
+  /// 处理完根因后直接重试 `apply` 即可，不需要先 `clean`。
+  /// 只要目标目录存在（检出中途失败）或 Git 仍登记该路径，就保留 `failed`
+  /// 记录，避免把半成品当成就绪树复用。
+  ///
+  /// 返回是否保留了需要 `clean` 才能恢复的状态记录。
+  Future<bool> _recordFailure({
+    required File stateFile,
+    required String path,
+    required String modsetHash,
+    required String relativePath,
+    required Object error,
+  }) async {
+    if (FileSystemEntity.typeSync(path, followLinks: false) ==
+            FileSystemEntityType.notFound &&
+        !await _registeredAsWorktree(path)) {
+      try {
+        if (stateFile.existsSync()) stateFile.deleteSync();
+        return false;
+      } on FileSystemException {
+        // 删除失败时退回失败记录，按需要 clean 的路径处理。
+      }
+    }
+    _markFailed(stateFile, modsetHash, relativePath, error.toString());
+    return true;
+  }
+
+  /// Git 是否仍登记该路径；查询失败时按“已登记”处理，保留失败记录。
+  Future<bool> _registeredAsWorktree(String path) async {
+    final List<GitWorktreeEntry> entries;
+    try {
+      entries = await _git.worktreeList();
+    } on GitException {
+      return true;
+    }
+    return entries.any((entry) => samePath(entry.path, path));
   }
 
   void _markFailed(

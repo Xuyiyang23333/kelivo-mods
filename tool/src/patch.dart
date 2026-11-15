@@ -163,6 +163,8 @@ class PatchApplier {
     _requireWorktree(spec);
 
     final check = await _runProcess(_gitExecutable, <String>[
+      '-c',
+      'core.longpaths=true',
       '-C',
       worktree,
       'apply',
@@ -181,6 +183,8 @@ class PatchApplier {
     }
 
     final applied = await _runProcess(_gitExecutable, <String>[
+      '-c',
+      'core.longpaths=true',
       '-C',
       worktree,
       'apply',

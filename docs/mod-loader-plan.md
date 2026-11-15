@@ -167,8 +167,10 @@ Flutter 构建直接在合成 worktree 中执行，不再包装一套 Loader 专
 创建方式：
 
 ```bash
-git -C V:/coding/kelivo -c core.autocrlf=false worktree add --detach <合成目录> <固定commit>
+git -C V:/coding/kelivo -c core.longpaths=true -c core.autocrlf=false worktree add --detach <合成目录> <固定commit>
 ```
+
+Loader 的所有 git 进程都带 `-c core.longpaths=true`（见 6.3），上面的命令是等价的手工写法。
 
 规则：
 
@@ -177,7 +179,7 @@ git -C V:/coding/kelivo -c core.autocrlf=false worktree add --detach <合成目�
 3. 同一 `modsetHash` 已存在且状态、哈希均一致时，`apply` 幂等返回。
 4. 发现手工改动或状态不一致时拒绝覆盖，提示先 `clean` 指定合成树。
 5. 不使用 `git reset --hard`、`git clean -fd` 或自动检出覆盖已有工作。
-6. 失败目录不标记为 ready，再次使用前必须显式清理。
+6. 创建失败且没有留下目录和 Git 登记时，Loader 撤销这次写入的状态文件，修好根因后直接重试 `apply` 即可；只有留下了目录或 Git 登记才标记 `failed`，那类记录必须显式 `clean` 才能复用。
 7. `clean` 只处理 `.build/worktrees/` 下且存在 Loader 状态记录的目录。
 8. Windows 文件锁导致清理失败时报告路径，不扩大删除范围。
 9. Git 调用全部使用参数数组，支持路径含空格，不拼接 shell 命令。
@@ -195,6 +197,36 @@ git -C V:/coding/kelivo -c core.autocrlf=false worktree add --detach <合成目�
 - `windows/flutter/generated_plugins.cmake`
 
 `verify` 只把上述精确路径和任意嵌套包的 `pubspec.lock` 视为构建产物；其他已跟踪文件的意外变化仍然失败。依赖目录中的示例工程注册文件不在允许范围内。已跟踪变更以 `git diff` / `git diff --cached` 的实际差异路径为准，因此 Flutter 在 Windows 上造成的纯 CRLF 行尾重写不会误报，真实内容、删除和重命名仍会失败。
+
+### 6.3 Windows 超长路径
+
+上游含长到接近 Windows 路径上限的绝对路径。当前已知最长项是
+`dependencies/flutter_inappwebview_android/android/src/main/java/com/pichillilorenzo/flutter_inappwebview_android/webview/in_app_webview/ThreadedInputConnectionProxyAdapterView.java`，相对路径 180 字符。合成目录 `.build/worktrees/<16 位哈希>` 本身又占几十个字符，因此私有仓所在绝对路径稍长，检出就会达到 Windows 的 260 字符上限（`MAX_PATH`，含终止符）。
+
+处理方式：Loader 在**每个** git 进程上追加 `-c core.longpaths=true`。这是进程级参数，只对那一次 git 调用生效：
+
+- 不写仓库、全局或上游 git 配置，不改用户环境变量；
+- 不需要 `git config core.longpaths true`，不改动上游工作树；
+- 对 `worktree add`、`worktree remove`、`diff` 等所有 Loader 发起的 git 命令一致生效；`status` 若被调用也同样生效（当前 Loader 代码不调用它，见下文）；
+- `patch.dart` 的 `git apply --check` / `git apply --index` 走独立进程助手，同样带该参数。
+
+只改 `worktree add` 不够。在同一棵超长路径的合成树（深层文件绝对路径 260 字符起）上：
+
+- `git worktree remove` 会以 `error: failed to delete '<路径>': Filename too long` 失败并残留目录，`clean` 因此失败；
+- `git apply --check` 直接以 `Filename too long` 失败，补丁层无法应用；
+- `git diff --name-status` 对长路径文件**静默漏报**：退出码 0 但 stdout 为空。人为修改长路径文件后，不带 longpaths 的 `diff` 输出 0 条，带 longpaths 输出 1 条——这是会让 `verify` 对真实漂移误判通过的**决定性**证据（Loader 的 `trackedChanges()` 与 `cachedDiff()` 都走 `git diff`）；
+- 不带 longpaths 的 `git status` 对同一批长路径文件给出**错误状态**：260 字符起多为 ` M`（误报已修改），更长路径上又出现 ` D`（误报已删除），具体形态随长度和平台 stat 行为变化，不能当作固定阈值。Loader 代码本身不调用 `git status`（上游干净检查与漂移检查都走 `git diff`），因此这条只作为「其他 git 子命令同样受该限制影响」的旁证，不作为漂移判据。
+
+`git worktree add` 失败且 stderr 含 `Filename too long` 时，Loader 不再裸抛 Git 的
+`fatal: Could not reset index file to revision 'HEAD'`（这句只是检出中途失败后的收尾报错，不是索引或上游损坏），改为给出明确提示：说明是 Windows 路径长度限制、Loader 已传 `-c core.longpaths=true`、给出可执行处理方式（把私有仓或合成目录换到更短的绝对路径），并明确注册表 `LongPathsEnabled` 不能修复 Git 的这条失败。
+
+`LongPathsEnabled` 实测无法代替 `core.longpaths`：本机该值为 `1`，不带 `-c core.longpaths=true` 的 `git worktree add` 仍在同一路径上失败。因此 Loader 只依赖进程级 `-c core.longpaths=true`，不检测、不修改该注册表项；注册表项只对声明了 `longPathAware` 的程序生效，与 Git 无关。
+
+已知边界：
+
+- Loader 不校验最终路径长度，也不做路径映射或缩短；git 在 `core.longpaths=true` 下能处理就能合成。
+- 长度阈值实测：深层文件绝对路径 259 字符时，不带 flag 的 `git status`/`git diff` 仍正确；260 字符起开始出错（与该路径含终止符的 `MAX_PATH=260` 语义一致）。我覆盖到 320 字符（此处不带 flag 的 `status` 报 ` D`）；审查者在 305–350 也观察到 ` D`，说明 ` M`→` D` 的转折点随平台 stat 行为浮动，未精确定位。
+- 本机 git 2.55 在约 400 字符时 `worktree add` 自身即失败（`'$GIT_DIR' too big`，由 R1 审查者实测），与 `core.longpaths` 无关；更长的路径、厂商 Git 构建与非 Windows 环境未验证。
 
 ## 7. 补丁、复制与注册表
 
@@ -321,6 +353,9 @@ dart test
 - overlay 不覆盖已有文件，排除构建目录和密钥；
 - 重复工具名、空 Mod 注册表、生成代码格式正确；
 - 非 ready worktree 不复用，`clean` 不越界；
+- 每个 git 进程都带 `-c core.longpaths=true`，`worktree add` 同时保留 `core.autocrlf=false`；
+- `Filename too long` 失败给出可执行提示，其他 `worktree add` 失败保持通用文案；
+- 创建失败未留目录和 Git 登记时撤销状态文件（可直接重试），留下目录时保留 `failed`（需 `clean`）；
 - 新基线演练不影响当前合成树；
 - 恢复旧配置可重建旧合成树。
 
