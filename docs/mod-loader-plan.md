@@ -207,7 +207,7 @@ Loader 的所有 git 进程都带 `-c core.longpaths=true`（见 6.3），上面
 
 - 不写仓库、全局或上游 git 配置，不改用户环境变量；
 - 不需要 `git config core.longpaths true`，不改动上游工作树；
-- 对 `worktree add`、`worktree remove`、`diff`、`status` 等所有 Loader 发起的 git 命令一致生效；
+- 对 `worktree add`、`worktree remove`、`diff` 等所有 Loader 发起的 git 命令一致生效；`status` 若被调用也同样生效（当前 Loader 代码不调用它，见下文）；
 - `patch.dart` 的 `git apply --check` / `git apply --index` 走独立进程助手，同样带该参数。
 
 只改 `worktree add` 不够。在同一棵超长路径的合成树（深层文件绝对路径 260 字符起）上：

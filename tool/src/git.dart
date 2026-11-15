@@ -13,18 +13,17 @@ const String _longPathMarker = 'Filename too long';
 
 /// `git worktree add` 失败时把 Git 的裸报错转成可执行提示。
 ///
-/// 超长路径失败时 Git 会先报 `Filename too long`，再补一句
-/// `fatal: Could not reset index file to revision 'HEAD'`；后者容易
-/// 被误判为上游仓库损坏，因此在提示里指明真实原因。
+/// 深层文件绝对路径达到 260 字符（`MAX_PATH` 含终止符）时 Git 会先报
+/// `Filename too long`，再补一句 `fatal: Could not reset index file to
+/// revision 'HEAD'`；后者容易被误判为上游仓库损坏，因此在提示里指明真实原因。
 String worktreeAddFailureMessage(GitResult result) {
   final stderrText = result.stderr;
   if (stderrText.contains(_longPathMarker)) {
     return 'worktree add 失败（退出码 ${result.exitCode}）：'
-        'Windows 路径超过 260 字符，Git 无法检出上游文件'
+        'Windows 路径达到 260 字符上限，Git 无法检出上游文件'
         '（$_longPathMarker）。\n'
         'Loader 已对该 git 进程传入 -c core.longpaths=true；'
-        '仍然失败说明该进程级设置未覆盖到出错的文件操作'
-        '（例如外部工具或系统调用链）。\n'
+        '仍失败通常是绝对路径过长，超出 Git 能处理的范围。\n'
         '处理方式：把私有仓或合成目录移到更短的绝对路径。\n'
         '注意：修改系统注册表 LongPathsEnabled 只影响声明了 '
         'longPathAware 的程序，实测不能修复 Git 的这条失败，'

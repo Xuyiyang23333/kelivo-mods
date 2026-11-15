@@ -609,6 +609,8 @@ void main() {
         );
         expect(message, contains('Filename too long'));
         expect(message, contains('core.longpaths=true'));
+        expect(message, contains('达到 260 字符上限'));
+        expect(message, contains('超出 Git 能处理的范围'));
         expect(message, contains('更短的绝对路径'));
         expect(message, contains('不能修复 Git'));
         expect(message, contains('不是上游仓库损坏'));
