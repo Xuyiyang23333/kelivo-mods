@@ -70,7 +70,8 @@ class _TreeProbe {
       final nodes = tree['nodes'];
       // 只记节点数量和测试自己定义的夹具标记，不记录界面文本内容。
       nodeCount = nodes is List ? nodes.length : 0;
-      fixtureText = _nodeForText(Map<String, dynamic>.from(tree), _fixtureText) != null;
+      fixtureText =
+          _nodeForText(Map<String, dynamic>.from(tree), _fixtureText) != null;
     }
     error = payload['error'] as String?;
     message = payload['message'] as String?;
@@ -340,10 +341,7 @@ void main() {
     // 通知栏后，单纯 pump 一次的语义树可能还没刷新，`_ensureAppForeground`
     // 只能看到「包名对但没有目标节点」。补上与锁屏用例相同的重 pump 兜底，
     // 不新增等待语义、不改任何断言。
-    await _ensureAppForeground(
-      service,
-      repump: () => _pumpHarness(tester),
-    );
+    await _ensureAppForeground(service, repump: () => _pumpHarness(tester));
 
     final before = await _tree(service);
     expect(
@@ -719,7 +717,11 @@ void main() {
       'PHONE_AGENT_ENABLE_SERVICE_NOW',
       '在系统无障碍设置中重新启用 Kelivo Phone Agent',
     );
-    await _waitForService(service);
+    // 只触发一次启用：`_hostStep` 已打印 `PHONE_AGENT_ENABLE_SERVICE_NOW`，
+    // 宿主据此完成启用并等待绑定；这里改为等待状态就绪，不再调用会重复打印
+    // `PHONE_AGENT_WAITING_FOR_SERVICE` 的 [_waitForService]（后者只用于
+    // setUpAll 的首次授权，两处同时触发会让宿主并发执行启用动作）。
+    await _waitForReady(service);
     await _waitForAppScreenshot(service);
 
     // 旧句柄必须在服务重启后失效。产品 `input()` 先取 `currentWindow()`
@@ -732,8 +734,11 @@ void main() {
     expect(
       rootReady,
       isTrue,
-      reason: '服务重启后有界等待内无法取得前台窗口（截图持续 no_window），'
-          '旧句柄失效无法验证。',
+      reason:
+          '服务重启后有界等待内无法取得可稳定截图的前台窗口；'
+          '逐次错误见 PHONE_AGENT_RESTART_WAIT_STOPPED/TIMEOUT '
+          '（实测出现过 no_window、hard_baseline、stale_observation），'
+          '旧句柄失效在该前提下无法验证。',
     );
 
     final staleHandle = await _input(service, <String, dynamic>{
@@ -782,6 +787,31 @@ Future<void> _waitForService(PhoneAgentService service) async {
         'Phone Agent 服务未就绪（supported=${status.supported}, '
         'enabled=${status.enabled}, connected=${status.connected}, '
         'sdk=${status.androidSdkInt}）。请解锁设备并在系统无障碍设置中启用服务。',
+  );
+}
+
+/// 等待服务就绪，**不打印任何宿主标记**。
+///
+/// 用于「宿主已被告知重新启用」之后的等待：`_hostStep` 已经发出唯一一次启用
+/// 请求，这里若再打印 `PHONE_AGENT_WAITING_FOR_SERVICE`，宿主会并发执行第二
+/// 条启用动作（M31 与 P2-4 都点到过这一点）。
+Future<void> _waitForReady(
+  PhoneAgentService service, {
+  Duration timeout = const Duration(seconds: 120),
+}) async {
+  final deadline = DateTime.now().add(timeout);
+  var status = await service.status();
+  while (!status.ready && DateTime.now().isBefore(deadline)) {
+    await Future<void>.delayed(const Duration(milliseconds: 500));
+    status = await service.status();
+  }
+  expect(
+    status.ready,
+    isTrue,
+    reason:
+        'Phone Agent 服务未就绪（supported=${status.supported}, '
+        'enabled=${status.enabled}, connected=${status.connected}, '
+        'sdk=${status.androidSdkInt}）。宿主需在系统无障碍设置中重新启用服务。',
   );
 }
 
@@ -1114,12 +1144,12 @@ Future<bool> _waitForStableWindow(
     // - 宿主还在设置页时的观察边界拒绝（`hard_baseline` / `window_type_*`）。
     // 这里只是把同一有界预算用在等待上，不放宽任何断言——超时仍失败，
     // 旧句柄的 `stale_handle` 断言也保持不变。
-    final windowNotReady = lastError == 'no_window' ||
+    final windowNotReady =
+        lastError == 'no_window' ||
         lastError == 'rate_limited' ||
         lastError == 'stale_observation' ||
         (lastError == 'system_window_denied' &&
-            (lastMessage.contains('hard_baseline') ||
-                lastMessage.contains('window_type_')));
+            _isRetryableObservationDenial(lastMessage));
     if (!windowNotReady) {
       debugPrint(
         'PHONE_AGENT_RESTART_WAIT_STOPPED: error=$lastError message=$lastMessage',
@@ -1305,6 +1335,17 @@ Future<_ForegroundProbe?> _waitForForegroundLeftApp(
   }
   return null;
 }
+
+/// 观察边界拒绝中「前台还没回到应用」这一可重试子集。
+///
+/// **刻意排除 `window_type_unknown`**：它表示窗口列表还没稳定、类型解析失败，
+/// 把它当作「稍后会好」的等待理由会让真实的时序缺陷静默通过——这与
+/// [_isObservationBoundaryMessage] 的取值规则必须一致。
+bool _isRetryableObservationDenial(String message) =>
+    message.contains('hard_baseline') ||
+    message.contains('window_type_system') ||
+    message.contains('window_type_overlay') ||
+    message.contains('window_type_split_divider');
 
 /// 只接受观察边界实际会产生的固定标识，不接受任意 system_window_denied。
 /// 特别地，`window_type_unknown` 不在此列：它表示窗口列表还没稳定，

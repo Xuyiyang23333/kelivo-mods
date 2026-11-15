@@ -1,0 +1,106 @@
+# Phone Agent 宿主测试脚本
+
+本目录放**宿主侧**（操作设备的那一端）测试脚本，仅用于复现 `phone_agent` 的
+集成测试结果。它不是产品代码：
+
+- 不被 `mod.json` 的 `patches` / `copy` 引用，不进合成树，不参与 APK 构建；
+- 不修改通用 Kelivo 接缝，也不 import 任何 `package:Kelivo/...`；
+- 只能执行测试文档已经要求的宿主动作（启动夹具、注入真实触摸、开关无障碍、
+  切前台），**不能绕过系统 UI 授予无障碍权限**（见下文的 MIUI 例外）。
+
+`app` 侧的 `integration_test/phone_agent_exception_test.dart` 会打印
+`PHONE_AGENT_*` 标记，脚本按标记执行对应动作。这是「测试打印、宿主执行」的
+既定分工，不是产品能力。
+
+## 文件
+
+| 文件 | 用途 |
+| --- | --- |
+| `driver.py` | 异常套件（`phone_agent_exception_test.dart`）的宿主驱动 |
+| `run_official.py` | 官方测试（`phone_agent_test.dart`）的最小宿主包装，只负责授权 |
+| `_runs/` | 运行日志与 UI dump 输出目录（已 gitignore） |
+
+## 用法
+
+```bash
+# 异常套件（需要已通过 Loader 合成的树）
+APP_TREE=/path/to/.build/worktrees/<modsetHash> \
+SERIAL=emulator-5554 \
+python3 mods/phone_agent/host/driver.py
+
+# 官方测试（API35：授权走系统 UI）
+APP_TREE=... SERIAL=emulator-5554 \
+python3 mods/phone_agent/host/run_official.py
+
+# 官方测试（物理 MIUI 例外设备：允许 settings put secure）
+APP_TREE=... SERIAL=1960cd68 USE_SETTINGS_PUT=1 \
+python3 mods/phone_agent/host/run_official.py
+```
+
+环境变量：`APP_TREE`（必填）、`SERIAL`、`DRIVER_LOG`、`OUT_DIR`、
+`FLUTTER_BIN`、`TEST_ARGS`（正则测试名要放这里，多个 `--plain-name` 是 AND
+语义）、`TEST_FILE`、`USE_SETTINGS_PUT`。
+
+## 六处行为修正（都是宿主侧，产品未改）
+
+这些是让 M30 拿到绿色轮次的实际修正。每一条都对应过一次真实失败；改的都是
+脚本行为，**没有放宽任何测试断言或观察边界**。
+
+1. **通知栏循环可取消，且检测到即停**（`open_shade` / `recover_from_shade` /
+   `_shade_stop`）。旧的固定 13 秒 swipe 循环在测试打印
+   `PHONE_AGENT_OVERLAY_HOST_TOUCH_RECOVER` 之后仍在继续滑，`keyevent 4` +
+   `am start` 抵不过持续手势，通知栏被重新拉下；随后每次读树都
+   `system_window_denied (com.android.systemui, hard_baseline)`，失败句只剩
+   「最后前台包名：未知」。现在达到焦点即停、可被取消，恢复改用
+   `cmd statusbar collapse`。
+
+2. **恢复路径绝不发 BACK**（`recover_from_shade`）。旧实现无条件 `keyevent 4`；
+   当通知栏已被 `cmd statusbar collapse` 关闭时，这一下落在 `MainActivity` 上把
+   它 finish 掉，随后的 `am start` 建了新任务。任务重启之后产品有一段时间无法
+   解析窗口类型，读树连续返回 `window_type_unknown`（可留存旁证：`run9` 该标识
+   30 次，`run5` 为 0 次）。现在只用 `cmd statusbar collapse`。
+
+3. **标记精确匹配**（`scan_line`）。只接受两种形状：整行等于标记，或行首是
+   `标记:`。测试自己的失败文本里含标记名（`等待 ... 超时（标记
+   PHONE_AGENT_RETURN_TO_APP）`），旧实现会在行内任意位置匹配，于是在测试仍在
+   运行时误发一次 `am start`。
+
+4. **`HOME` / `RECENTS` 等纯信息标记不进入有序动作队列**（`_NOOP`）。它们是产品
+   自己执行的动作，标记只是通知宿主。旧实现把它排进 FIFO 队列占了一个时间槽，
+   排在 `am start` 之后执行，反而把应用又踢回后台。
+
+5. **重新启用不重开设置页**（`wait_for_binding`）。`PHONE_AGENT_ENABLE_SERVICE_NOW`
+   时期望开关已经是打开状态，脚本只等绑定 + 确认前台，不再 `am start` 设置页。
+   旧实现会在测试已经回到应用之后重新打开设置页并把它留在最上层，产品紧接着的
+   调用就返回 `hard_baseline (com.android.settings)`。
+
+6. **确认关闭后立即回应用**（`confirm_disable`）。点掉确认按钮后直接
+   `am start` 主 Activity，不把设置页留在前台——否则产品下一次调用读到的前台
+   仍是被硬基线拒绝的设置页。
+
+另外两个较小但相关的处理：`enable_service` 结束后一律确认前台（应用被后台化会
+被系统冻结，用例会静默卡住）；`_find_service_entry` 先把设置列表滚回顶部再逐屏
+查找（列表会保留上次滚动位置，条目可能在视野外被误判为「不存在」）。
+
+## 已知边界
+
+- 脚本**不是阶段握手**：它按标记串行执行动作，但测试侧仍有固定等待
+  （例如禁用确认前的 8 秒）。M31 survey 指出真正需要的是带 ACK 的阶段握手，
+  本轮未实现（测试侧已先消除 `ENABLE_SERVICE_NOW` / `WAITING_FOR_SERVICE`
+  的双触发，见下）。
+- `confirm_disable()` 会自己 `am start` 回应用，属宿主动作，不是产品的系统导航。
+- `open_permission_dialog()` 只用 `dumpsys window` 确认权限弹窗出现，作为宿主的
+  独立确认；测试本身不声称能识别权限弹窗。
+- **MIUI 例外**：只有 AGENTS.md 明确记录的物理设备（Redmi K30 5G，`1960cd68`）
+  允许用 `settings put secure` 预配置服务，且必须保存并恢复**当轮真实原值**。
+  该例外不改变产品自动授权边界，不适用于模拟器或其他设备。
+
+## 与测试侧的对应关系
+
+- 测试侧只保留一个「要求启用」的来源：`setUpAll` 的
+  `PHONE_AGENT_WAITING_FOR_SERVICE`，服务重启用例使用
+  `PHONE_AGENT_ENABLE_SERVICE_NOW` 并在之后改调不打印标记的 `_waitForReady`。
+  因此本脚本的两条启用路径（导航 vs 只等绑定）不会并发。
+- 测试侧刻意区分「可重试的观察边界拒绝」（`hard_baseline`、
+  `window_type_system`/`overlay`/`split_divider`）与 `window_type_unknown`；
+  后者表示窗口列表尚未稳定，不会被当作「稍后会好」而继续等待。

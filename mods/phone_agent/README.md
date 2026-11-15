@@ -15,7 +15,7 @@
 >
 > 上一轮 M19（权限窗口真实验证，API35 模拟器）：真实 `com.google.android.permissioncontroller` 弹窗已出现；上一轮 90 秒未出现的原因是设备息屏时 `am start` 不获前台焦点，唤醒后立即出现。弹窗期间服务 `rootInActiveWindow` 为 null，读树实测返回 `no_window`，输入按 `currentWindow` 前置 guard 推导为 `no_window`（M19 未执行 tap/back），`system_window_denied` 未产生，输入仍被拒绝、权限未授予；历史记录见 `docs/phone-agent-plan.md` 9.3.3。
 >
-> 本轮物理 MIUI API31 验收（`llama-cpp/llama-cpp` 与 magpie `mistral/deepseek-v4-1-flash-1017`）：真实截图/读树/节点输入/滚动、物理 `FLAG_SECURE`（成功黑图，清除后恢复）、旋转失效均通过；`llama-cpp/llama-cpp` 用归一化坐标 tap 打开抽屉/Settings/Search，1017 用归一化坐标 swipe 让 Sponsor 从不可见变为可见，并完成图片请求与像素专属视觉确认；官方测试一次 `+1 -1`、EXIT=1（聚焦后 `set_text` `stale_handle`），一次 `+2`、EXIT=0，属间歇性、根因未确认；`llama-cpp/llama-cpp` 的完整坐标 swipe 仍未验证。M22 当前交付的合成树、`modsetHash`、APK 大小/SHA-256 和 manifest 检查记录在 `docs/phone-agent-plan.md` 9.3.6 与 `docs/next-session-handoff.md`；本段物理 MIUI 验收历史见 9.3.2/9.4.2。本 README 不参与 Mod treeHash（`tool/src/config.dart` 只散列 `mod.json`、声明的 patches 和 copy 源，根 README 不在 copy 列表），参与的是 `plugin/README.md`（`copy[7]/README.md`）；因此本文件不写当前数字只为避免与 docs 重复，而改动 plugin README 会改变交付哈希。
+> 本轮物理 MIUI API31 验收（`llama-cpp/llama-cpp` 与 magpie `mistral/deepseek-v4-1-flash-1017`）：真实截图/读树/节点输入/滚动、物理 `FLAG_SECURE`（成功黑图，清除后恢复）、旋转失效均通过；`llama-cpp/llama-cpp` 用归一化坐标 tap 打开抽屉/Settings/Search，1017 用归一化坐标 swipe 让 Sponsor 从不可见变为可见，并完成图片请求与像素专属视觉确认；官方测试一次 `+1 -1`、EXIT=1（聚焦后 `set_text` `stale_handle`），一次 `+2`、EXIT=0，属间歇性、根因未确认；`llama-cpp/llama-cpp` 的完整坐标 swipe 仍未验证。M22 当前交付的合成树、`modsetHash`、APK 大小/SHA-256 和 manifest 检查记录在 `docs/phone-agent-plan.md` 9.3.6 与 `docs/next-session-handoff.md`；本段物理 MIUI 验收历史见 9.3.2/9.4.2。本 README 不参与 Mod treeHash（`tool/src/config.dart` 只散列 `mod.json`、声明的 patches 和 copy 源；根 README 和 `host/` 都不在 copy 列表），参与的是 `plugin/README.md`（`copy[7]/README.md`）；因此本文件不写当前数字只为避免与 docs 重复，而改动 plugin README 会改变交付哈希。
 >
 > 上一轮 M10（API35 FLAG_SECURE/异常路径）：完整异常套件 `+5 ~1`、EXIT=0；权限窗口未验证。整屏 `takeScreenshot` 不保证对 `FLAG_SECURE` 报错，可能返回成功黑图或内容图；不保证检测、不承诺不发送黑图。记录见 `docs/phone-agent-plan.md` 9.3.1。
 >
@@ -467,6 +467,24 @@ flutter test integration_test/phone_agent_exception_test.dart -d <android-device
 
 ## 验证状态
 
+### M28 观察边界 + M30 设备回归补齐（API35 模拟器 + 物理 MIUI API31）
+
+**M28 实现了观察边界**：`PackagePolicy.requireObservable(packageName, windowType)`（`plugin/android/src/main/kotlin/com/kelivo/phoneagent/AppBoundary.kt`）的判定顺序是 `no_window` → 静态硬基线 → 观察窗口类型 `{APPLICATION, INPUT_METHOD}`，**不判用户白名单、不查询角色**；接入点是 `readTree`（仅 `offset == 0`）与 `captureScreenshot`（取前台窗口 → 边界 → 全窗口密码遮挡遍历 → 截图，三段独立）。因此读设置页、通知栏、输入法窗口的行为自 M28 起与 M27 不同。
+
+**M30 只补齐设备回归与文档，未改任何产品代码**（分支改动仅测试与文档）。结果：
+
+- API35（`emulator-5554`，Android 15）异常套件 **3 棵树 / 4 轮 `+8`、`All tests passed!`、EXIT=0**（`run17`/`run18` 在 `f26c1c7ed3238610`，`run19` 在 `b9ed56f89b3146c9`，`run20` 在最终交付树 `8a44ec55a023185e`）。可复现基线是 `run17`/`run18`（同树同文件）与 `run20`（最终树）。
+- API35 官方 `phone_agent_test.dart` **`+2`、EXIT=0**（`official_api35.log` 与最终树上的 `official_lf.log` 各一次）。
+- 物理 MIUI（`1960cd68`）官方 `phone_agent_test.dart` **`+2`、EXIT=0**（`official_miui.log`，107s）。这是 M28 遗留的「有通过迹象、无留存日志」一项的补齐。
+- 复跑这两套测试需要宿主脚本：`mods/phone_agent/host/driver.py` 与 `run_official.py`（见该目录 README 的六处行为修正）。M30 的绿色轮次依赖这些宿主动作，缺少它们无法复现。
+
+**证明边界（必须连同上面的 ✅ 一起读）**：
+
+- **「服务禁用中断与重新启用恢复」是组合用例，不能证明「服务重启清除了树」**。用例最后那句 `stale_handle / No current tree observation` 与三种机制完全兼容：① 用例自己发的分页请求在宿主进入设置页后就会清树（`ObservationRegistry.page()` → `requireTreeValid()` → `clearTreeLocked()`，`ObservationRegistry.kt:213-225`）；② `ObservationRegistry` 的 120 秒 TTL（从建旧树到旧句柄输入远超）；③ 服务中断的 `invalidateAll()`（正是想验证的那条）。已确证的只有：**禁用与中断行为已验证、重启后旧句柄不可用已验证**。窗口 id 变化同样能失效，也不能排除。真正独立证明需要把重启拆成有 ACK 握手的独立子场景（设计见 M31 survey），本轮未做。
+- **MIUI 未运行异常套件**：该设备没有安装跨 UID 的安全窗口夹具包 `com.kelivo.phoneagent.securefixture`，而异常套件依赖它。这是设备准备缺口，不是产品结论。
+- **`exc5` 的 `screenshot_required` 与 `stale_observation` 差异只定性到分支语义**：两者是 `requireScreenshot` 的确定性分支（槽位为 null vs 槽位存在但窗口/TTL 变化），不是优先级缺陷；但 M28 当轮究竟是哪条路径清空了截图槽位**没有留存证据**，同树一过一败不足以排除竞态回归。
+- **`window_type_unknown` 并非绝对不出现**：它是窗口列表尚未稳定时的 fail-closed 结果。M30 修正宿主驱动后它从成批出现（一轮 30 次）降到 0–1 次，仍有单次瞬态（`run19` 一次，下一轮读树即恢复）。测试侧刻意**不把它当作可重试的就绪信号**。
+
 ### 本轮 M24 `stale_handle` 复现与路径重解析（API35 模拟器 + 物理 MIUI API31）
 
 本轮处理「聚焦后同一句柄 `set_text` 返回 `stale_handle`」：自然循环未复现（API35 278 次迭代、MIUI 80 次、MIUI 官方测试 4 轮全绿），改用受控夹具确认机制——Flutter 重建输入框语义子树会让持有的 `AccessibilityNodeInfo` 无法 `refresh()`。
@@ -494,7 +512,7 @@ flutter test integration_test/phone_agent_exception_test.dart -d <android-device
 
 ### 本轮物理 MIUI API31 验收（magpie `mistral/deepseek-v4-1-flash-1017`）
 
-本轮在用户提供的物理设备上完成 Phone Agent 的物理验收。M22 当前交付的合成树、`modsetHash`、APK 大小/SHA-256 和 manifest 隔离记录在 `docs/phone-agent-plan.md` 9.3.6 与 `docs/next-session-handoff.md`；本段物理 MIUI 验收历史见 9.3.2/9.4.2。本 README 不参与 Mod treeHash（`tool/src/config.dart` 只散列 `mod.json`、声明的 patches 和 copy 源，根 README 不在 copy 列表）；参与的是 `plugin/README.md`（`copy[7]/README.md`），改动它会改变交付哈希。
+本轮在用户提供的物理设备上完成 Phone Agent 的物理验收。M22 当前交付的合成树、`modsetHash`、APK 大小/SHA-256 和 manifest 隔离记录在 `docs/phone-agent-plan.md` 9.3.6 与 `docs/next-session-handoff.md`；本段物理 MIUI 验收历史见 9.3.2/9.4.2。本 README 不参与 Mod treeHash（`tool/src/config.dart` 只散列 `mod.json`、声明的 patches 和 copy 源；根 README 和 `host/` 都不在 copy 列表）；参与的是 `plugin/README.md`（`copy[7]/README.md`），改动它会改变交付哈希。
 
 - 设备：Redmi K30 5G（`1960cd68`，picasso），Android 12 / API 31，1080x2400，density 440，MIUI V13.0.3.0.SGICNXM。用户提供该测试设备并授权安装应用、操作界面。
 - 授权边界：用户明确授权仅在该测试设备上用 `settings put secure` 预配置 Phone Agent 服务；M16 历史轮原始 `enabled_accessibility_services` 为空串、`accessibility_enabled=0`，M17 轮原始值为 Phone Agent 组件 + `accessibility_enabled=1`。每轮必须记录并恢复当轮真实原值，不能按历史空串+0 强制关闭。该例外只适用于本设备与 Phone Agent，不改变产品自动授权边界，其他设备默认仍禁止自动写系统授权。
@@ -512,7 +530,7 @@ flutter test integration_test/phone_agent_exception_test.dart -d <android-device
 
 ### API35 FLAG_SECURE/异常路径（上一轮）
 
-- 该轮交付的合成树、`modsetHash`、APK 大小/SHA-256 和 manifest 隔离记录在 `docs/phone-agent-plan.md` 9.3.1 与 `docs/next-session-handoff.md`。本 README 不参与 Mod treeHash（根 README 不在 `mod.json` 的 copy 列表）；参与的是 `plugin/README.md`（`copy[7]/README.md`）。
+- 该轮交付的合成树、`modsetHash`、APK 大小/SHA-256 和 manifest 隔离记录在 `docs/phone-agent-plan.md` 9.3.1 与 `docs/next-session-handoff.md`。本 README 不参与 Mod treeHash（根 README 与 `host/` 都不在 `mod.json` 的 copy 列表）；参与的是 `plugin/README.md`（`copy[7]/README.md`）。
 - 契约：整屏 `takeScreenshot` 不保证对 `FLAG_SECURE` 报错；API35 实测 secure 夹具该轮返回成功黑图（平均 RGB 约 2,0,2），更早一轮也曾返回成功内容图（平均亮度约 191）；契约只承诺“可能黑化”，不保证黑图或检测；不做像素启发式；平台明确报错时 `screenshot_blocked` 且无图片。
 - API35 完整异常套件：**`+5 ~1`，`All tests passed!`，EXIT=0**；通过 secure、旋转、home/recents、锁屏、服务禁用/重启；权限窗口明确跳过（未验证）。
 - 服务禁用：禁用前启动 1000 个只读 pending 请求，日志 `PHONE_AGENT_SERVICE_PENDING_BATCH: size=1000 elapsed=3252ms codes=interrupted,ok`，原 Future 在超时前以 `interrupted` 完成。
