@@ -23,7 +23,15 @@ class KelivoPhoneAgent {
       _client.openAccessibilitySettings();
 
   /// 截取当前屏幕。仅 Android API 30+ 可用。
-  Future<PhoneAgentScreenshot> screenshot() => _client.screenshot();
+  ///
+  /// [assistantId] / [conversationId] 只用于原生侧审计元数据，拿不到时传 null。
+  Future<PhoneAgentScreenshot> screenshot({
+    String? assistantId,
+    String? conversationId,
+  }) => _client.screenshot(
+    assistantId: assistantId,
+    conversationId: conversationId,
+  );
 
   /// 清空原生侧最近一次截图坐标观测。
   ///
@@ -31,19 +39,34 @@ class KelivoPhoneAgent {
   Future<void> clearScreenshot() => _client.clearScreenshot();
 
   /// 读取当前窗口节点。`offset == 0` 创建新观测并重新编号。
+  ///
+  /// [assistantId] / [conversationId] 只用于原生侧审计元数据，拿不到时传 null。
   Future<Map<String, dynamic>> readTree({
     int offset = 0,
     int maxNodes = 120,
     bool interactiveOnly = false,
+    String? assistantId,
+    String? conversationId,
   }) => _client.readTree(
     offset: offset,
     maxNodes: maxNodes,
     interactiveOnly: interactiveOnly,
+    assistantId: assistantId,
+    conversationId: conversationId,
   );
 
   /// 执行节点、坐标或系统输入。参数使用工具 schema 的 snake_case 键。
-  Future<Map<String, dynamic>> input(Map<String, dynamic> arguments) =>
-      _client.input(arguments);
+  ///
+  /// [assistantId] / [conversationId] 只用于原生侧审计元数据，拿不到时传 null。
+  Future<Map<String, dynamic>> input(
+    Map<String, dynamic> arguments, {
+    String? assistantId,
+    String? conversationId,
+  }) => _client.input(
+    arguments,
+    assistantId: assistantId,
+    conversationId: conversationId,
+  );
 
   /// 已获用户批准的应用列表（不含构建配置的预批准条目）。
   Future<List<PhoneAgentApprovedApp>> approvedApps() => _client.approvedApps();

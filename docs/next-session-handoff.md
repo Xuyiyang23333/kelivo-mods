@@ -1,12 +1,14 @@
 # 下一次会话交接：Phone Agent 前台可视化叠加层
 
+> **M35（2026-11-16，实现，无设备证据）**：审计元数据已落地——新增 `mods/phone_agent/plugin/android/src/main/kotlin/com/kelivo/phoneagent/AuditLog.kt`（`AuditRecord` 七字段、`AuditAction` 固定 token、`AuditIdentity` 从不抛错、`AuditLog` 30 天/2000 条滚动、`AuditStorage`/`FileAuditStorage`、`AuditRecorder`）。`PhoneAgentService.execute` 在 `reply` 收口处记录一次（成功 `ok`、失败写既有结构化错误码），包名只在真正取到前台窗口处写入；助手/会话 id 由通道可选参数 `assistant_id` / `conversation_id` 从 Dart 侧传入，缺失记 null。审计失败静默计数、**不阻断工具主路径**。存储 `noBackupFilesDir/phone_agent_audit.tsv`，**没有读取通道、没有界面**。自检：插件 Kotlin `--rerun-tasks` **194 通过**（新增 `AuditLogTest` 14 + `AuditRecorderTest` 10）、插件 Dart **30 通过**、合成树 `dart analyze --fatal-infos lib test integration_test tool` **No issues found**（树 `0073b68d56863418`，`modsetHash` `0073b68d568634186819f8b16bbd49ce836bca5b1d45662faaa02355d599fffa`）；**未构建 APK、未接设备、未跑 integration_test**。批准卡片/通知（M34）、首次隐私确认、任务控制与恢复仍未实现。
+
 > **M33（2026-11-15，实现）**：应用批准契约的**第 2、3 步已落地**——插件 manifest 一次声明 `QUERY_ALL_PACKAGES`；新增 `AppWhitelist.kt`（`SigningIdentity`、`WhitelistStore`+`FileWhitelistStorage`、`SigningResolver`、`AppApprovals`、`buildPreApprovedPackages`、`DENY_PACKAGES`）；`PackagePolicy` 从 allowlist 改为 **deny 清单＋用户白名单**，观察与输入两条路径都判，未批准只回应用身份与 `permission_required`（不建立观测、不占 `treeBudget`、不截图）；通道新增 `approvedApps`/`approveApp`/`revokeApp`（幂等、写入前重解析签名、撤销立即生效、不依赖服务连接）。**批准卡片/通知、Mods 页白名单页、审计、首次隐私确认、任务控制与恢复仍未实现**；**未跑任何设备**，异常套件只做了断言同步（helper 接受集合、`permission_required` 身份解析、重启等待的可重试子集）。详见 `docs/phone-agent-plan.md` 7.5.4/7.5.9 与 7.6 的 M33 自检记录。本节以下各节的设备与 APK 记录仍对应 M33 之前的代码。
 
 > **M32（2026-11-15，仅文档）**：应用批准契约已修订为「批准 = 读＋操作一体」（未批准应用的读树/截图只返回应用身份与 `permission_required`），并新增应用身份（`QUERY_ALL_PACKAGES`）、批准后恢复与任务控制、结果未知语义、多窗口首版不支持、批准终态与防自我批准、首次隐私确认（方案 B）；观察侧也判 `package_not_allowed`，且构建期范围在批准上线时转为 deny 清单（两项均为 tower 定论，用户可推翻）。来源分层：用户拍板项、已定契约（早期设计）、tower 定论与设计提案（tower 建议）四档，不要把设计提案读成用户已同意。第 8 节是实现入口，含三项仍未定稿的取舍。
 
 ## 0. M27 当前状态（2026-11-13，第 1 步实现）
 
-- 本轮目标：只做第 8 节**第 1 步**——硬基线集合 + `WindowState.windowType`。不含观察边界、用户白名单、批准交互和审计。
+- 本轮目标：只做第 8 节**第 1 步**——硬基线集合 + `WindowState.windowType`。不含观察边界、用户白名单、批准交互和审计（M35 后来补齐了审计，见开头 M35 段）。
 - 新增 `mods/phone_agent/plugin/android/src/main/kotlin/com/kelivo/phoneagent/AppBoundary.kt`：`WindowType`（平台常量→枚举，`else` 一律 `UNKNOWN`，`allowsInput` 仅 `APPLICATION`）、`HARD_BASELINE_PACKAGES`（原 5 个 AOSP 包 + 证书安装器 + settings 及其厂商变体 + MIUI 包安装器与权限授予界面，返工后共 21 项）、`KELIVO_PACKAGE` / `TEST_PACKAGE` 精确常量、`RoleHolders`（`Resolved` / `Unavailable`）、纯函数 `PackagePolicy.requireInputAllowed(packageName, windowType, roleHolders)`。
 - 判定顺序（先命中者生效，均有 JVM 断言）：`no_window` → 静态硬基线（含 Kelivo 精确包名）→ 角色解析失败 → 角色持有者 → 窗口类型 → `package_not_allowed`。**本步没有任何路径返回 `permission_required`。**
 - `WindowState` 加 `windowType`；`PhoneAgentService.windowState()` 内部按 `windowId` 从 `windows` 匹配 `AccessibilityWindowInfo.type`（同一次读取，策略层不另读 `windows`），解析失败落到 `UNKNOWN` 并拒绝；`sameWindow()`、截图观测、`TreeObservation`、`CapturedScreenshot` 全部带上类型。
@@ -329,7 +331,7 @@ dart tool/mod_loader.dart verify
 
 ## 8. 下一阶段入口：实现应用边界与应用授权
 
-契约全文见 `docs/phone-agent-plan.md` 7.5 与 7.6；`AGENTS.md` 有对应条目；用户可读说明见 `mods/phone_agent/README.md`「构建期白名单与预批准条目」与「应用白名单与批准（门控已实现，界面未实现）」。**第 1 步（硬基线 + `WindowState.windowType`）已完成**（代码 + JVM 测试 + 两台设备官方测试，见第 0 节与下方第 1 条）；**第 2 步（观察边界）已完成并补齐设备回归**；**第 3 步（用户白名单与签名绑定）已由 M33 实现，只有单元与静态检查证据**；**第 4–8 步（批准交互、隐私确认、任务控制、结果未知语义、审计）尚未实现**。
+契约全文见 `docs/phone-agent-plan.md` 7.5 与 7.6；`AGENTS.md` 有对应条目；用户可读说明见 `mods/phone_agent/README.md`「构建期白名单与预批准条目」与「应用白名单与批准（门控已实现，界面未实现）」。**第 1 步（硬基线 + `WindowState.windowType`）已完成**（代码 + JVM 测试 + 两台设备官方测试，见第 0 节与下方第 1 条）；**第 2 步（观察边界）已完成并补齐设备回归**；**第 3 步（用户白名单与签名绑定）已由 M33 实现，只有单元与静态检查证据**；**第 8 步（审计）已由 M35 实现，只有单元与静态检查证据、没有读取界面**；**第 4–7 步（批准交互、隐私确认、任务控制、结果未知语义）尚未实现**。
 
 **M32（2026-11-15，仅文档）修订了第 3 步及之后的契约，实现时必须按新契约、不要按旧文字：**
 
@@ -362,7 +364,7 @@ dart tool/mod_loader.dart verify
 5. **批准交互与终态（两入口方向为已定（用户拍板）；终态机制为设计提案。未实现）**。先做聊天内卡片（复用 `ToolApprovalService` 的请求结构、pending 存储与 `notifyListeners()` 刷新，**不复用其等待语义**——工具调用已返回 `permission_required`，卡片须自带 TTL 与“任一端批准即置终态”的收敛），再做通知栏（必须新增通知 action + `BroadcastReceiver`，现有 `NotificationService` 只有点击打开会话）。同批实现单终态、请求 id 幂等、迟到回调不写白名单、写入前重新解析签名（7.5.13）。
 6. **首次启用隐私确认（方案 B，已定（用户拍板），未实现）**。只在首次启用时一次性提示截图与界面文字会发往用户配置的 provider；不每张截图询问。文案进 ARB。provider 更换是否重新提示待定论。
 7. **任务控制与恢复、结果未知语义（设计提案（tower 建议、待实现），不是用户拍板项）**。「允许并继续」只恢复关联且仍可恢复的任务、恢复后先重新观察不重放动作；同时只一个任务控制手机，停止/撤销后未执行请求失效，已派发手势不承诺撤回；已派发后的超时/取消属结果未知，不盲目重试、先重新观察、区分动作完成与业务成功。
-8. **审计（未实现）**。落盘元数据，滚动保留 30 天或 2000 条。
+8. **审计 —— ✅ M35 已实现（无设备证据）**。`AuditLog.kt` 落盘七项元数据（时间戳、助手 id、会话 id、包名、签名哈希前 8 位、动作类型、结果码），滚动保留 30 天或最近 2000 条先到者生效，写在 `noBackupFilesDir/phone_agent_audit.tsv`；助手/会话 id 由通道可选参数从 Dart 侧传入，缺失记 null；审计失败静默计数、不阻断主路径；**没有读取通道也没有界面**，因此也没有任何用户可见的审计视图。字段集合由 JVM 反射断言固定，七类禁内容没有进入记录的路径。
 
 实现后必须重跑并把结果写入 9.3/9.4：API35 官方测试、完整异常套件、物理 MIUI 官方测试，以及至少一轮 VLM 固定任务（含“未批准 → 只回身份 → 批准 → 重新观察 → 撤销 → 重新 `permission_required`”的完整链路）。重跑前，9.4 与 10.1 的 VLM 结果**只能作为旧代码证据**，不得用于宣称新边界已验证。**M33 未跑任何设备**，因此现在能声明的只有“单元与静态检查通过”；官方测试、异常套件与 VLM 都必须重跑才能宣称门控生效。
 

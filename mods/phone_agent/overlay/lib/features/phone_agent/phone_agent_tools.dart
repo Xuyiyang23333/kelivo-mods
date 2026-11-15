@@ -59,6 +59,8 @@ class PhoneAgentTools {
     required Map<String, dynamic> args,
     required PhoneAgentService service,
     required bool supportsImageInput,
+    String? assistantId,
+    String? conversationId,
   }) async {
     try {
       switch (name) {
@@ -73,19 +75,29 @@ class PhoneAgentTools {
                   'actions instead.',
             );
           }
-          final capture = await service.screenshot();
+          final capture = await service.screenshot(
+            assistantId: assistantId,
+            conversationId: conversationId,
+          );
           return await PhoneAgentScreenshotResult.build(
             capture,
             toolName: name,
             service: service,
           );
         case PhoneAgentToolNames.tree:
-          return await _readTree(args, service);
+          return await _readTree(
+            args,
+            service,
+            assistantId: assistantId,
+            conversationId: conversationId,
+          );
         case PhoneAgentToolNames.input:
           return await _runInput(
             args,
             service,
             supportsImageInput: supportsImageInput,
+            assistantId: assistantId,
+            conversationId: conversationId,
           );
         default:
           throw PhoneAgentToolFailure(
@@ -101,8 +113,10 @@ class PhoneAgentTools {
 
   static Future<ClientToolResult> _readTree(
     Map<String, dynamic> args,
-    PhoneAgentService service,
-  ) async {
+    PhoneAgentService service, {
+    String? assistantId,
+    String? conversationId,
+  }) async {
     final offset = _intArg(args, 'offset', 0, min: 0, max: 1000000);
     final maxNodes = _intArg(args, 'max_nodes', 120, min: 1, max: 200);
     final interactiveOnly = _boolArg(args, 'interactive_only', false);
@@ -110,6 +124,8 @@ class PhoneAgentTools {
       offset: offset,
       maxNodes: maxNodes,
       interactiveOnly: interactiveOnly,
+      assistantId: assistantId,
+      conversationId: conversationId,
     );
     return ClientToolResult(
       jsonEncode(<String, dynamic>{
@@ -128,9 +144,15 @@ class PhoneAgentTools {
     Map<String, dynamic> args,
     PhoneAgentService service, {
     required bool supportsImageInput,
+    String? assistantId,
+    String? conversationId,
   }) async {
     _validateInput(args, supportsImageInput: supportsImageInput);
-    final result = await service.input(args);
+    final result = await service.input(
+      args,
+      assistantId: assistantId,
+      conversationId: conversationId,
+    );
     return ClientToolResult(
       jsonEncode(<String, dynamic>{
         'ok': true,

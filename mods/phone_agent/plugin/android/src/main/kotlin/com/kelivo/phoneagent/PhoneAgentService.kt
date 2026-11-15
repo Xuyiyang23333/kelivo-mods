@@ -61,6 +61,25 @@ class PhoneAgentService : AccessibilityService() {
         @Volatile
         private var approvalsOrNull: AppApprovals? = null
 
+        private val auditLock = Any()
+
+        @Volatile
+        private var auditOrNull: AuditLog? = null
+
+        /**
+         * 审计日志。与白名单同目录策略（`noBackupFilesDir`，应用私有、不进聊天备份、
+         * 不上传、不同步），字段与保留策略见 [AuditRecord] / [AuditLog]。
+         */
+        internal fun auditLog(context: Context): AuditLog = synchronized(auditLock) {
+            auditOrNull ?: AuditLog(
+                FileAuditStorage(File(context.noBackupFilesDir, AuditLog.FILE_NAME)),
+            ).also { auditOrNull = it }
+        }
+
+        /** 审计用的签名前缀；解析失败返回 null，不阻断记录。 */
+        private fun auditSigningPrefix(context: Context, packageName: String): String? =
+            runCatching { signingIdentity(context, packageName)?.signingPrefix }.getOrNull()
+
         /**
          * 进程级批准入口。批准/撤销/查询不依赖无障碍服务是否连接，因此放在
          * companion：Mods 页在服务关闭时也必须能撤销授权。
@@ -307,12 +326,22 @@ class PhoneAgentService : AccessibilityService() {
         val epoch = generation.get()
         val enqueuedAt = SystemClock.elapsedRealtime()
         val finished = AtomicBoolean(false)
+        // 审计上下文按调用创建：动作名已收敛为固定 token，身份字段缺失记为 null。
+        // `packageName` 由真正取到前台窗口的那一步写入，写不到就是 null。
+        val audit = AuditAction.forCall(method, args)?.let { action ->
+            val (assistantId, conversationId) = AuditIdentity.from(args)
+            AuditContext(action).also {
+                it.assistantId = assistantId
+                it.conversationId = conversationId
+            }
+        }
         lateinit var reply: (Any?, PhoneAgentError?) -> Unit
         reply = { value, error ->
             val deliver = {
                 if (finished.compareAndSet(false, true)) {
                     requests.remove(reply)
                     if (epoch == generation.get() && !destroyed) {
+                        recordAudit(audit, error?.code)
                         complete(value, error)
                     } else {
                         complete(null, interrupted())
@@ -341,7 +370,7 @@ class PhoneAgentService : AccessibilityService() {
                     if (epoch != generation.get() || destroyed) {
                         reply(null, interrupted())
                     } else {
-                        dispatchOnWorker(method, args, reply)
+                        dispatchOnWorker(method, args, audit, reply)
                     }
                 }
             }
@@ -350,9 +379,44 @@ class PhoneAgentService : AccessibilityService() {
         }
     }
 
+    /**
+     * 写入一条审计元数据。**永不阻断主路径**：失败只在 [AuditLog] 内计数，
+     * 不影响工具结果、白名单或边界判定。记录内容是固定七字段，见 [AuditRecord]。
+     *
+     * `reply` 的收口常常在主线程执行（超时、提前返回都会走那里），而审计包含
+     * `PackageManager` 签名解析与一次文件写入，因此优先投递到 worker 线程执行；
+     * worker 已关闭时退化为就地执行。时间戳在结果时刻捕获，不随后入队漂移。
+     */
+    private fun recordAudit(context: AuditContext?, resultCode: String?) {
+        if (context == null) return
+        val code = resultCode ?: AUDIT_OK
+        val now = System.currentTimeMillis()
+        val log = auditLog(this)
+        val write = Runnable {
+            log.recordSafely(
+                context = context,
+                resultCode = code,
+                now = now,
+                signingPrefix = { packageName ->
+                    packageName?.let { auditSigningPrefix(this, it) }
+                },
+            )
+        }
+        if (Looper.myLooper() == Looper.getMainLooper() && !worker.isShutdown) {
+            try {
+                worker.execute(write)
+                return
+            } catch (error: RejectedExecutionException) {
+                // worker 正关闭：退回就地执行，失败仍只计数。
+            }
+        }
+        write.run()
+    }
+
     private fun dispatchOnWorker(
         method: String,
         args: Map<String, Any?>?,
+        audit: AuditContext?,
         reply: (Any?, PhoneAgentError?) -> Unit,
     ) {
         try {
@@ -369,9 +433,12 @@ class PhoneAgentService : AccessibilityService() {
             }
             ensureUnlocked()
             when (method) {
-                "readTree" -> reply(readTree(args), null)
-                "screenshot" -> captureScreenshot(reply)
-                "input" -> input(args, reply)
+                "readTree" -> {
+                    val result = readTree(args, audit)
+                    reply(result, null)
+                }
+                "screenshot" -> captureScreenshot(reply, audit)
+                "input" -> input(args, reply, audit)
                 "clearScreenshot" -> {
                     registry.clearScreenshot()
                     reply(linkedMapOf("cleared" to true), null)
@@ -398,12 +465,13 @@ class PhoneAgentService : AccessibilityService() {
         }
     }
 
-    private fun readTree(args: Map<String, Any?>?): Map<String, Any?> {
+    private fun readTree(args: Map<String, Any?>?, audit: AuditContext?): Map<String, Any?> {
         val offset = PhoneAgentArgs.int(args, "offset", 0, 0, 1_000_000)
         val maxNodes = PhoneAgentArgs.int(args, "max_nodes", 120, 1, 200)
         val interactiveOnly = PhoneAgentArgs.bool(args, "interactive_only", false)
         val root = rootInActiveWindow ?: throw noAccessibleWindowError()
         val current = windowState(root)
+        audit?.packageName = current.packageName
         if (offset == 0) {
             // 观察门控只在这一处判定：分页请求复用同一观测，registry.page 仍会比较
             // 完整 WindowState。未批准时这里直接抛出 permission_required，因此不会
@@ -446,7 +514,7 @@ class PhoneAgentService : AccessibilityService() {
         return PhoneAgentResult.treePage(registry.page(0, maxNodes, current))
     }
 
-    private fun captureScreenshot(reply: (Any?, PhoneAgentError?) -> Unit) {
+    private fun captureScreenshot(reply: (Any?, PhoneAgentError?) -> Unit, audit: AuditContext?) {
         if (pendingScreenshot != null || screenshots.isBusy()) {
             reply(
                 null,
@@ -463,6 +531,7 @@ class PhoneAgentService : AccessibilityService() {
         } finally {
             root.recycle()
         }
+        audit?.packageName = current.packageName
         // 顺序固定：前台窗口 → 硬基线/窗口类型 → 构建期 deny 清单 → 用户白名单
         // → 全窗口密码遮挡遍历 → 截图。门控不读节点内容、不读密码 bounds，
         // 未批准或前台被拒时直接失败，遮挡遍历的范围与规则不受影响。
@@ -497,7 +566,11 @@ class PhoneAgentService : AccessibilityService() {
         }
     }
 
-    private fun input(args: Map<String, Any?>?, reply: (Any?, PhoneAgentError?) -> Unit) {
+    private fun input(
+        args: Map<String, Any?>?,
+        reply: (Any?, PhoneAgentError?) -> Unit,
+        audit: AuditContext?,
+    ) {
         val action = PhoneAgentArgs.string(args, "action")
         val request = when (action) {
             "tap", "long_press" -> {
@@ -544,6 +617,7 @@ class PhoneAgentService : AccessibilityService() {
             )
         }
         val current = currentWindow() ?: throw noAccessibleWindowError()
+        audit?.packageName = current.packageName
         executor.execute(request, current) { outcome ->
             when (outcome) {
                 is InputOutcome.Success -> reply(

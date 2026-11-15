@@ -467,4 +467,120 @@ void main() {
     );
     expect(calls, isEmpty);
   });
+
+  group('audit identity', () {
+    Map<String, dynamic> treePayload() => <String, dynamic>{
+      'offset': 0,
+      'next_offset': 0,
+      'total': 0,
+      'truncated': false,
+      'text_truncated': false,
+      'package_name': 'com.example.app',
+      'width': 1080,
+      'height': 2400,
+      'nodes': <Map<String, dynamic>>[],
+    };
+
+    test('readTree forwards assistant and conversation ids', () async {
+      mock((call) async => treePayload());
+
+      await PhoneAgentClient().readTree(
+        assistantId: 'assistant-a',
+        conversationId: 'conversation-1',
+      );
+
+      expect(calls.single.method, 'readTree');
+      expect(calls.single.arguments, <String, dynamic>{
+        'offset': 0,
+        'max_nodes': 120,
+        'interactive_only': false,
+        'assistant_id': 'assistant-a',
+        'conversation_id': 'conversation-1',
+      });
+    });
+
+    test(
+      'readTree omits blank identity instead of sending an empty value',
+      () async {
+        mock((call) async => treePayload());
+
+        await PhoneAgentClient().readTree(
+          assistantId: '  ',
+          conversationId: null,
+        );
+
+        final arguments = calls.single.arguments as Map<Object?, Object?>;
+        expect(arguments.containsKey('assistant_id'), isFalse);
+        expect(arguments.containsKey('conversation_id'), isFalse);
+      },
+    );
+
+    test('screenshot forwards identity only for the audited fields', () async {
+      mock(
+        (call) async => <String, dynamic>{
+          'bytes': Uint8List.fromList(<int>[1, 2]),
+          'imageWidth': 10,
+          'imageHeight': 20,
+          'screenWidth': 1080,
+          'screenHeight': 2400,
+          'packageName': 'com.example.app',
+        },
+      );
+
+      await PhoneAgentClient().screenshot(
+        assistantId: 'assistant-a',
+        conversationId: 'conversation-1',
+      );
+
+      expect(calls.single.method, 'screenshot');
+      expect(calls.single.arguments, <String, dynamic>{
+        'assistant_id': 'assistant-a',
+        'conversation_id': 'conversation-1',
+      });
+    });
+
+    test('input keeps the tool arguments and adds identity', () async {
+      mock(
+        (call) async => <String, dynamic>{
+          'success': true,
+          'action': 'tap',
+          'message': 'ok',
+        },
+      );
+
+      await PhoneAgentClient().input(
+        <String, dynamic>{'action': 'set_text', 'node_id': 'n1', 'text': 'hi'},
+        assistantId: 'assistant-a',
+        conversationId: 'conversation-1',
+      );
+
+      expect(calls.single.arguments, <String, dynamic>{
+        'action': 'set_text',
+        'node_id': 'n1',
+        'text': 'hi',
+        'assistant_id': 'assistant-a',
+        'conversation_id': 'conversation-1',
+      });
+    });
+
+    test('a call without identity keeps the old wire payload', () async {
+      mock(
+        (call) async => <String, dynamic>{
+          'success': true,
+          'action': 'tap',
+          'message': 'ok',
+        },
+      );
+
+      await PhoneAgentClient().input(<String, dynamic>{
+        'action': 'tap',
+        'node_id': 'n1',
+      });
+
+      expect(calls.single.arguments, <String, dynamic>{
+        'action': 'tap',
+        'node_id': 'n1',
+      });
+    });
+  });
 }
