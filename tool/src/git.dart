@@ -5,6 +5,35 @@ import 'paths.dart';
 
 const Utf8Codec _utf8 = Utf8Codec(allowMalformed: true);
 
+/// Windows 超长路径的进程级 Git 配置：只对当前 git 进程生效，
+/// 不写入仓库、全局或上游配置。
+const List<String> _longPathsConfig = <String>['-c', 'core.longpaths=true'];
+
+const String _longPathMarker = 'Filename too long';
+
+/// `git worktree add` 失败时把 Git 的裸报错转成可执行提示。
+///
+/// 超长路径失败时 Git 会先报 `Filename too long`，再补一句
+/// `fatal: Could not reset index file to revision 'HEAD'`；后者容易
+/// 被误判为上游仓库损坏，因此在提示里指明真实原因。
+String worktreeAddFailureMessage(GitResult result) {
+  final stderrText = result.stderr;
+  if (stderrText.contains(_longPathMarker)) {
+    return 'worktree add 失败（退出码 ${result.exitCode}）：'
+        'Windows 路径超过 260 字符，Git 无法检出上游文件'
+        '（$_longPathMarker）。\n'
+        'Loader 已对该 git 进程传入 -c core.longpaths=true；'
+        '仍然失败说明该进程级设置未覆盖到出错的文件操作'
+        '（例如外部工具或系统调用链）。\n'
+        '处理方式：把私有仓或合成目录移到更短的绝对路径。\n'
+        '注意：修改系统注册表 LongPathsEnabled 只影响声明了 '
+        'longPathAware 的程序，实测不能修复 Git 的这条失败，'
+        '不要把它当成 Git 的开关。\n'
+        '这不是上游仓库损坏，也不是索引文件损坏；处理后可重试 apply。';
+  }
+  return 'worktree add 失败（退出码 ${result.exitCode}）';
+}
+
 class GitResult {
   const GitResult({
     required this.args,
@@ -97,12 +126,13 @@ class Git {
     Map<String, String>? environment,
   }) async {
     if (args.isEmpty) throw ArgumentError('Git 参数不能为空');
+    final effectiveArgs = <String>[..._longPathsConfig, ...args];
     final directory = workingDirectory ?? this.workingDirectory;
     final ProcessResult result;
     try {
       result = await Process.run(
         'git',
-        args,
+        effectiveArgs,
         workingDirectory: directory,
         stdoutEncoding: _utf8,
         stderrEncoding: _utf8,
@@ -115,7 +145,7 @@ class Git {
     } on ProcessException catch (error) {
       throw GitException(
         GitResult(
-          args: List<String>.unmodifiable(args),
+          args: List<String>.unmodifiable(effectiveArgs),
           workingDirectory: directory,
           exitCode: -1,
           stdout: '',
@@ -125,7 +155,7 @@ class Git {
       );
     }
     return GitResult(
-      args: List<String>.unmodifiable(args),
+      args: List<String>.unmodifiable(effectiveArgs),
       workingDirectory: directory,
       exitCode: result.exitCode,
       stdout: result.stdout as String,
@@ -251,7 +281,7 @@ class Git {
     required String path,
     required String commit,
   }) async {
-    await runChecked(<String>[
+    final result = await run(<String>[
       '-c',
       'core.autocrlf=false',
       'worktree',
@@ -260,6 +290,9 @@ class Git {
       path,
       commit,
     ]);
+    if (!result.succeeded) {
+      throw GitException(result, worktreeAddFailureMessage(result));
+    }
   }
 
   Future<void> worktreeRemove({

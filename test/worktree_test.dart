@@ -350,7 +350,7 @@ void main() {
       );
     });
 
-    test('marks a failed creation and allows an explicit clean', () async {
+    test('a failed add that leaves nothing behind heals on retry', () async {
       final failing = WorktreeManager(
         privateRepoRoot: fixture.privateRepoPath,
         upstreamPath: fixture.upstreamPath,
@@ -359,7 +359,40 @@ void main() {
       );
       await expectLater(
         failing.createOrReuse(modsetHash: _hashA, synthesize: (_) async {}),
-        throwsA(isA<WorktreeCreationException>()),
+        throwsA(
+          isA<WorktreeCreationException>().having(
+            (error) => error.toString(),
+            'message',
+            isNot(contains('clean --modset')),
+          ),
+        ),
+      );
+      final stateFile = File('${failing.worktreePathFor(_hashA)}.state.json');
+      expect(stateFile.existsSync(), isFalse);
+
+      final handle = await manager.createOrReuse(
+        modsetHash: _hashA,
+        synthesize: (_) async {},
+      );
+      expect(handle.reused, isFalse);
+    });
+
+    test('keeps a failed record when the target directory exists', () async {
+      final failing = WorktreeManager(
+        privateRepoRoot: fixture.privateRepoPath,
+        upstreamPath: fixture.upstreamPath,
+        upstreamCommit: fixture.commit,
+        git: _PartialAddGit(workingDirectory: fixture.upstreamPath),
+      );
+      await expectLater(
+        failing.createOrReuse(modsetHash: _hashA, synthesize: (_) async {}),
+        throwsA(
+          isA<WorktreeCreationException>().having(
+            (error) => error.toString(),
+            'message',
+            contains('clean --modset $_hashA'),
+          ),
+        ),
       );
       final stateFile = File('${failing.worktreePathFor(_hashA)}.state.json');
       expect(stateFile.existsSync(), isTrue);
@@ -452,6 +485,90 @@ void main() {
         manager.verifyOrThrow(modsetHash: _hashB),
         throwsA(isA<WorktreeVerificationException>()),
       );
+    });
+  });
+
+  group('long paths', () {
+    test('every git process carries core.longpaths=true', () async {
+      final git = Git(workingDirectory: fixture.upstreamPath);
+      final result = await git.run(<String>['--version']);
+      expect(result.succeeded, isTrue, reason: result.stderr);
+      expect(result.args.take(2), <String>['-c', 'core.longpaths=true']);
+      expect(result.commandLine, contains('core.longpaths=true'));
+    });
+
+    test('worktree add keeps the autocrlf and longpaths flags', () async {
+      final recorded = _RecordingGit(workingDirectory: fixture.upstreamPath);
+      final recording = WorktreeManager(
+        privateRepoRoot: fixture.privateRepoPath,
+        upstreamPath: fixture.upstreamPath,
+        upstreamCommit: fixture.commit,
+        git: recorded,
+      );
+      await recording.createOrReuse(
+        modsetHash: _hashB,
+        synthesize: (_) async {},
+      );
+
+      final add = recorded.calls.firstWhere(
+        (args) => args.contains('add'),
+        orElse: () =>
+            throw StateError('missing worktree add call: ${recorded.calls}'),
+      );
+      expect(add.take(4).toList(), <String>[
+        '-c',
+        'core.longpaths=true',
+        '-c',
+        'core.autocrlf=false',
+      ]);
+    });
+
+    test(
+      'explains a Filename too long failure instead of a bare reset error',
+      () {
+        final message = worktreeAddFailureMessage(
+          const GitResult(
+            args: <String>[
+              '-c',
+              'core.longpaths=true',
+              '-c',
+              'core.autocrlf=false',
+              'worktree',
+              'add',
+              '--detach',
+              'V:/repo/.build/worktrees/abc',
+              '73afa4ec77cfc9af2efea2487fee8bba1362639d',
+            ],
+            workingDirectory: 'V:/upstream',
+            exitCode: 128,
+            stdout: '',
+            stderr:
+                'Preparing worktree (detached HEAD 73afa4e)\n'
+                'error: unable to create file dependencies/.../Long.java: '
+                'Filename too long\n'
+                "fatal: Could not reset index file to revision 'HEAD'.",
+          ),
+        );
+        expect(message, contains('Filename too long'));
+        expect(message, contains('core.longpaths=true'));
+        expect(message, contains('更短的绝对路径'));
+        expect(message, contains('不能修复 Git'));
+        expect(message, contains('不是上游仓库损坏'));
+        expect(message, isNot(contains('Could not reset index')));
+      },
+    );
+
+    test('keeps a generic message for unrelated worktree add failures', () {
+      final message = worktreeAddFailureMessage(
+        const GitResult(
+          args: <String>['worktree', 'add'],
+          workingDirectory: 'V:/upstream',
+          exitCode: 128,
+          stdout: '',
+          stderr: 'fatal: invalid reference: 73afa4e',
+        ),
+      );
+      expect(message, 'worktree add 失败（退出码 128）');
     });
   });
 
@@ -750,6 +867,27 @@ class _GitFixture {
   }
 }
 
+class _RecordingGit extends Git {
+  _RecordingGit({required super.workingDirectory});
+
+  final List<List<String>> calls = <List<String>>[];
+
+  @override
+  Future<GitResult> run(
+    List<String> args, {
+    String? workingDirectory,
+    Map<String, String>? environment,
+  }) async {
+    final result = await super.run(
+      args,
+      workingDirectory: workingDirectory,
+      environment: environment,
+    );
+    calls.add(result.args);
+    return result;
+  }
+}
+
 class _FailingGit extends Git {
   _FailingGit({required super.workingDirectory});
 
@@ -768,6 +906,21 @@ class _FailingGit extends Git {
       ),
       'simulated failure',
     );
+  }
+}
+
+/// 模拟“检出到一半失败”：目标目录仍然存在，Git 也没有登记它。
+class _PartialAddGit extends _FailingGit {
+  _PartialAddGit({required super.workingDirectory});
+
+  @override
+  Future<void> worktreeAddDetached({
+    required String path,
+    required String commit,
+  }) async {
+    Directory(path).createSync(recursive: true);
+    File(joinPath(path, 'partial.txt')).writeAsStringSync('partial');
+    await super.worktreeAddDetached(path: path, commit: commit);
   }
 }
 

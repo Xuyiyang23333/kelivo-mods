@@ -320,6 +320,35 @@ index 0000000..1111111
     );
   });
 
+  test('git apply 携带进程级 core.longpaths=true', () async {
+    final patch = _capturePatch(repo, () {
+      File('${repo.path}/lib/longpath.txt').writeAsStringSync('long\n');
+    });
+    final patchFile = _writePatch(tempDir, 'longpath.patch', patch);
+    final invocations = <List<String>>[];
+    final applier = PatchApplier(
+      worktree: repo.path,
+      runProcess: (executable, arguments) {
+        invocations.add(arguments);
+        return Process.run(
+          executable,
+          arguments,
+          stdoutEncoding: const Utf8Codec(allowMalformed: true),
+          stderrEncoding: const Utf8Codec(allowMalformed: true),
+        );
+      },
+    );
+
+    await applier.apply(
+      PatchSpec(patchFile: patchFile, touches: ['lib/longpath.txt']),
+    );
+
+    expect(invocations, hasLength(2));
+    for (final arguments in invocations) {
+      expect(arguments.take(2).toList(), <String>['-c', 'core.longpaths=true']);
+    }
+  });
+
   test('二进制补丁可以应用', () async {
     final bytes = List<int>.generate(256, (index) => index);
     final patch = _capturePatch(repo, () {

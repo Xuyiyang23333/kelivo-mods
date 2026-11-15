@@ -40,7 +40,8 @@
 - Loader 运行时只使用 Dart SDK 和 Git，不引入 YAML、AST、代码改写或 CLI 框架依赖。
 - 测试使用开发依赖 `package:test`，不要自写测试框架。
 - Git 和 Flutter 进程调用使用参数数组；需要 shell 时仅限 Windows `.bat` 查找等明确原因，不拼接用户输入。
-- Windows 上创建合成 worktree 时显式使用 `git -c core.autocrlf=false worktree add`，按仓库存储的 LF 检出；不修改上游 Git 配置，也不重写已有合成树。
+- Windows 上创建合成 worktree 时显式使用 `git -c core.longpaths=true -c core.autocrlf=false worktree add`，按仓库存储的 LF 检出；两个 `-c` 都只对当前 git 进程生效，不修改上游、仓库或全局 Git 配置。
+- Windows 超长路径：Loader 的每个 git 进程都追加 `-c core.longpaths=true`（不只 `worktree add`；`worktree remove`、`diff`、`status` 在同一条长路径上同样会失败或误报）。`worktree add` 因 `Filename too long` 失败时必须给出可执行提示，不得裸抛 `Could not reset index file`。该情况下若未留下目录和 Git 登记，Loader 撤销本次状态文件，重试即可；留下目录或登记时才保留 `failed` 记录，需 `clean` 后重试。
 - `verify` 只允许 `pubspec.lock` 和根项目 Flutter 生成注册文件这几类精确构建产物变化，其他已跟踪漂移必须失败。
 - 所有仓库路径在配置、哈希和补丁中使用 `/`；进程参数保留合法的本机绝对路径。
 - `plan` 不得写文件；`apply` 必须幂等；`verify` 不执行 Flutter 构建；`rebase-drill` 不改变当前配置和主合成树。
