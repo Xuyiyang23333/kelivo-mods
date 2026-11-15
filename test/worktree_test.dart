@@ -412,6 +412,64 @@ void main() {
       expect(handle.reused, isFalse);
     });
 
+    test('keeps a failed record when Git still registers the path', () async {
+      final failing = WorktreeManager(
+        privateRepoRoot: fixture.privateRepoPath,
+        upstreamPath: fixture.upstreamPath,
+        upstreamCommit: fixture.commit,
+        git: _RegisteredWithoutDirectoryGit(
+          workingDirectory: fixture.upstreamPath,
+          pendingPath: manager.worktreePathFor(_hashA),
+        ),
+      );
+      await expectLater(
+        failing.createOrReuse(modsetHash: _hashA, synthesize: (_) async {}),
+        throwsA(
+          isA<WorktreeCreationException>().having(
+            (error) => error.toString(),
+            'message',
+            contains('clean --modset $_hashA'),
+          ),
+        ),
+      );
+      final stateFile = File('${failing.worktreePathFor(_hashA)}.state.json');
+      expect(stateFile.existsSync(), isTrue);
+      expect(
+        (jsonDecode(stateFile.readAsStringSync()) as Map)['status'],
+        'failed',
+      );
+      expect(
+        Directory(failing.worktreePathFor(_hashA)).existsSync(),
+        isFalse,
+        reason: '该分支模拟“已登记但目录不存在”，目录本身必须不残留',
+      );
+    });
+
+    test('keeps a failed record when listing worktrees fails', () async {
+      final failing = WorktreeManager(
+        privateRepoRoot: fixture.privateRepoPath,
+        upstreamPath: fixture.upstreamPath,
+        upstreamCommit: fixture.commit,
+        git: _UnlistableGit(workingDirectory: fixture.upstreamPath),
+      );
+      await expectLater(
+        failing.createOrReuse(modsetHash: _hashA, synthesize: (_) async {}),
+        throwsA(
+          isA<WorktreeCreationException>().having(
+            (error) => error.toString(),
+            'message',
+            contains('clean --modset $_hashA'),
+          ),
+        ),
+      );
+      final stateFile = File('${failing.worktreePathFor(_hashA)}.state.json');
+      expect(stateFile.existsSync(), isTrue);
+      expect(
+        (jsonDecode(stateFile.readAsStringSync()) as Map)['status'],
+        'failed',
+      );
+    });
+
     test('refuses a non-directory worktrees root', () async {
       File(manager.worktreesRoot).createSync(recursive: true);
       await expectLater(
@@ -921,6 +979,49 @@ class _PartialAddGit extends _FailingGit {
     Directory(path).createSync(recursive: true);
     File(joinPath(path, 'partial.txt')).writeAsStringSync('partial');
     await super.worktreeAddDetached(path: path, commit: commit);
+  }
+}
+
+/// 模拟“Git 仍登记该路径、但目录已不存在”：不得当作无痕失败自愈。
+class _RegisteredWithoutDirectoryGit extends _FailingGit {
+  _RegisteredWithoutDirectoryGit({
+    required super.workingDirectory,
+    required this.pendingPath,
+  });
+
+  final String pendingPath;
+
+  @override
+  Future<List<GitWorktreeEntry>> worktreeList() async {
+    return <GitWorktreeEntry>[
+      GitWorktreeEntry(
+        path: pendingPath,
+        head: null,
+        branch: null,
+        detached: true,
+        locked: false,
+        prunable: false,
+      ),
+    ];
+  }
+}
+
+/// 模拟“无法列举 worktree”：查询失败必须 fail closed，保留 failed 记录。
+class _UnlistableGit extends _FailingGit {
+  _UnlistableGit({required super.workingDirectory});
+
+  @override
+  Future<List<GitWorktreeEntry>> worktreeList() async {
+    throw GitException(
+      const GitResult(
+        args: ['worktree', 'list', '--porcelain'],
+        workingDirectory: '',
+        exitCode: 1,
+        stdout: '',
+        stderr: 'simulated list failure',
+      ),
+      'simulated list failure',
+    );
   }
 }
 
