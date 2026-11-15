@@ -969,11 +969,11 @@ M30 只验证与记录，不改产品代码、不放宽任何断言。`phone_age
 
 - `f26c1c7ed3238610`（`modsetHash` `f26c1c7ed3238610…`，与 M28 最终树同哈希）：`run17`/`run18` 两轮异常套件与 `official_api35.log` 官方测试。
 - `b9ed56f89b3146c9`：`run19` 异常套件与 `official_final.log`。**该树不能作为 run19 的可复现基线**——run19 结束后，该树里的 `integration_test/phone_agent_exception_test.dart` 被就地改写为 LF（现 mtime 晚于 run19 结束时间），因此磁盘上现在的文件**不是** run19 实际执行的输入；run19 当轮的测试文件内容未留存。其 `+8`/`+2` 只作「又一棵树也是绿的」这一方向性记录。
-- `8a44ec55a023185e`（`modsetHash` `8a44ec55a023185e58c89f4c7b40d4aa62cee2a6c402f22eebb8870f7a410102`，`plan`/`apply`/`verify` 通过）：**最终交付树**（测试文件 LF，与分支 blob 一致）。`run20` 异常套件与 `official_lf.log` 官方测试在这棵树上跑。
+- `8a44ec55a023185e`（`modsetHash` `8a44ec55a023185e58c89f4c7b40d4aa62cee2a6c402f22eebb8870f7a410102`，`plan`/`apply`/`verify` 通过）：`run20` 异常套件与 `official_lf.log` 官方测试跑在这棵树上；其测试文件（LF）与**返工前**分支 blob `72f5b605…` 一致。R1 返工改了测试文案，因此它**不再**是当前 tip 的测试文件；返工后的最终交付树见下方 blockquote。
 
 Android 15 / API 35。
 
-> **R1 返工后的最终交付树是 `3aa07f9c88d3341c`**（`modsetHash` `3aa07f9c88d3341ca1850ecfb79db6a125383a3c26aee400d0bfc0adb3e662da`，`plan`/`apply`/`verify` 通过）。返工只改文档、测试文案与新增宿主脚本，**未重跑设备**；`run17`–`run20` 的设备结果对应返工前的测试文件。返工对测试的改动是：`_waitForStableWindow` 的可重试集合排除 `window_type_unknown`（收窄，不影响已通过的轮次——`RESTART_WAIT_STOPPED`/`TIMEOUT` 在 run17–run20 均为 0 次）、失败文案改为不写死 `no_window`、服务重启后用不打印标记的 `_waitForReady` 消除双触发。这些改动都不改变任何断言的通过条件。
+> **R1 返工后的最终交付树是 `474262a402cca985`**（`modsetHash` `474262a402cca985f216636ac8dbd0b8af9ffd31507acb7feb1614a103853fac`，`plan`/`apply`/`verify` 通过）。返工只改文档、测试文案与新增宿主脚本，**未重跑设备**；`run17`–`run20` 的设备结果对应返工前的测试文件。返工对测试的改动是：`_waitForStableWindow` 的可重试集合排除 `window_type_unknown`（收窄，不影响已通过的轮次——`RESTART_WAIT_STOPPED`/`TIMEOUT` 在 run17–run20 均为 0 次）、失败文案改为不写死 `no_window`、服务重启后用不打印标记的 `_waitForReady` 消除双触发。这些改动都不改变任何断言的通过条件。
 
 **异常套件 `phone_agent_exception_test.dart`：四个绿轮、`+8`、`All tests passed!`、EXIT=0**——`run17.log`（477s）、`run18.log`（490s）在 `f26c1c7ed3238610`；`run19.log`（721s）在 `b9ed56f89b3146c9`；`run20.log`（574s）在**最终交付树** `8a44ec55a023185e`。即 **3 棵树 / 4 轮**全部 `+8`。可复现的基线是 `run17`/`run18`（同一棵树、同一份测试文件）与 `run20`（最终交付树）。
 

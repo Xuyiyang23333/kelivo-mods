@@ -473,8 +473,9 @@ flutter test integration_test/phone_agent_exception_test.dart -d <android-device
 
 **M30 只补齐设备回归与文档，未改任何产品代码**（分支改动仅测试与文档）。结果：
 
-- API35（`emulator-5554`，Android 15）异常套件 **3 棵树 / 4 轮 `+8`、`All tests passed!`、EXIT=0**（`run17`/`run18` 在 `f26c1c7ed3238610`，`run19` 在 `b9ed56f89b3146c9`，`run20` 在最终交付树 `8a44ec55a023185e`）。可复现基线是 `run17`/`run18`（同树同文件）与 `run20`（最终树）。
-- API35 官方 `phone_agent_test.dart` **`+2`、EXIT=0**（`official_api35.log` 与最终树上的 `official_lf.log` 各一次）。
+> **返工后最终交付树是 `474262a402cca985`**（`modsetHash` `474262a402cca985f216636ac8dbd0b8af9ffd31507acb7feb1614a103853fac`，`plan`/`apply`/`verify` 通过）。评审返工**未重跑设备**：下面的 `run17`–`run20` 结果对应**返工前**的测试文件（blob `72f5b605…`）；返工对测试只做了收窄与文案修正（可重试集合排除 `window_type_unknown`、服务重启改用不打印标记的等待、失败文案不写死 `no_window`），而 `PHONE_AGENT_RESTART_WAIT_STOPPED`/`TIMEOUT` 在四个绿轮中均为 0 次，因此**不影响绿轮成立性**，但也不能说成「`+8` 是在交付的测试文件上取得的」。
+- API35（`emulator-5554`，Android 15）异常套件 **3 棵树 / 4 轮 `+8`、`All tests passed!`、EXIT=0**（`run17`/`run18` 在 `f26c1c7ed3238610`，`run19` 在 `b9ed56f89b3146c9`，`run20` 在 `8a44ec55a023185e`）。可复现基线是 `run17`/`run18`（同树同文件）与 `run20`（该树文件与返工前分支 blob 一致）。`b9ed56f8` 在 run19 后被就地改写，不能作为 run19 的基线。
+- API35 官方 `phone_agent_test.dart` **`+2`、EXIT=0**（`official_api35.log` 在 `f26c1c7ed3238610`，`official_lf.log` 在 `8a44ec55a023185e`）。
 - 物理 MIUI（`1960cd68`）官方 `phone_agent_test.dart` **`+2`、EXIT=0**（`official_miui.log`，107s）。这是 M28 遗留的「有通过迹象、无留存日志」一项的补齐。
 - 复跑这两套测试需要宿主脚本：`mods/phone_agent/host/driver.py` 与 `run_official.py`（见该目录 README 的六处行为修正）。M30 的绿色轮次依赖这些宿主动作，缺少它们无法复现。
 

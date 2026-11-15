@@ -82,6 +82,17 @@ python3 mods/phone_agent/host/run_official.py
 被系统冻结，用例会静默卡住）；`_find_service_entry` 先把设置列表滚回顶部再逐屏
 查找（列表会保留上次滚动位置，条目可能在视野外被误判为「不存在」）。
 
+## 与产生绿轮的实跑版本的差异（交付版行为披露）
+
+交付版脚本**不是**逐字节等于产生 `run17`–`run20` 的那一份；与实跑版相比有两处行为差异（其余为 docstring、`OUT_DIR` 与注释）：
+
+| 位置 | 实跑版 | 交付版 | 影响 |
+| --- | --- | --- | --- |
+| `MARKERS["PHONE_AGENT_OVERLAY_ANIMATION"]` | `lambda: None`（会排进 FIFO 并执行，白占一个队列槽 + 两次 adb 查询） | `_NOOP` 信息标记（直接跳过队列） | 只减少空转，不改变任何断言；**未单独设备复跑** |
+| `run_official.py` 的 flutter 可执行文件解析 | `FLUTTER_BIN` 或字面 `flutter.bat` | `FLUTTER_BIN` → `shutil.which("flutter")` → `flutter.bat` | 只影响查找顺序，不改变执行内容；**未单独设备复跑** |
+
+两处都是无害或更保守的方向，但它们意味着「交付脚本原样复跑」与当时的实跑版本并非同一份。复现绿轮时若发现差异，先看这两处。
+
 ## 已知边界
 
 - 脚本**不是阶段握手**：它按标记串行执行动作，但测试侧仍有固定等待

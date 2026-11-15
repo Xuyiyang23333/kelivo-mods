@@ -338,7 +338,7 @@ dart tool/mod_loader.dart verify
 
    **证明边界（必读）**：上面那个「服务禁用中断与重新启用恢复」是**组合用例**，其最终 `stale_handle / No current tree observation` 与三种机制完全兼容——① 用例自己发的分页请求在宿主进入设置页后即 `clearTreeLocked()`（`ObservationRegistry.kt:213-225`）；② `DEFAULT_TTL_MILLIS = 120_000` 自然过期；③ 服务中断的 `invalidateAll()`。因此只能断言「禁用与中断行为已验证、重启后旧句柄不可用已验证」，**清树机制不可独立归因**；窗口 id 变化同样无法排除。要独立证明需拆成带 ACK 握手的独立子场景（M31 survey 已给设计），属另一 mission。复跑绿色轮次依赖 `mods/phone_agent/host/` 下的宿主脚本。**`exc5` 归因**：`screenshot_required` 与 `stale_observation` 是 `requireScreenshot` 的两个确定性分支（槽位为 null vs 槽位存在但窗口/TTL 变化），语义不同、优先级由 if 顺序固定，不是优先级缺陷，期望值也没有过期。槽位为 null 的**可能来源**（代码确认存在）是 `ensureUnlocked()` 的 `invalidateAll()`、`interruptPending()` 的 `invalidateAll()`、或任意节点动作后的 `clearScreenshot()`。**`exc5` 当轮具体是哪一条没有留存证据**；同树一次通过一次失败**不足以排除竞态回归**，因此记录为「错误码语义已查清，当轮触发来源未定性」。
 
-   **R1 返工后最终交付树 `3aa07f9c88d3341c`**（`modsetHash` `3aa07f9c88d3341ca1850ecfb79db6a125383a3c26aee400d0bfc0adb3e662da`，`plan`/`apply`/`verify` 通过）：返工只改文档、测试文案与新增宿主脚本 `mods/phone_agent/host/`，**未重跑设备**；设备结果对应返工前测试文件，测试侧改动都是收窄或文案修正（排除 `window_type_unknown`、消除启用双触发），不放宽任何断言。
+   **R1 返工后最终交付树 `474262a402cca985`**（`modsetHash` `474262a402cca985f216636ac8dbd0b8af9ffd31507acb7feb1614a103853fac`，`plan`/`apply`/`verify` 通过）：返工只改文档、测试文案与新增宿主脚本 `mods/phone_agent/host/`，**未重跑设备**；设备结果对应返工前测试文件，测试侧改动都是收窄或文案修正（排除 `window_type_unknown`、消除启用双触发），不放宽任何断言。
 
    **产品 debug APK（当前产品，未改动）**：最终树 `f26c1c7ed3238610`（`modsetHash` `f26c1c7ed32386105a763feeb3ea95accdd127b6041941b9f3d75f83abadafa9`），**181,410,150 字节**，SHA-256 `a6c2e51b73435af1de4f74d5e95807a9688e95cb3d78be2f47521d715971b70f`（M30 已复核未变）。M30 未改产品代码，因此未重建；integration_test 入口构建只在测试树内，不作为产品。
 3. **用户白名单与签名校验**。`(包名, 签名证书 SHA-256)` 双匹配，未命中返回 `permission_required`；签名解析能力受 Android 11+ 包可见性限制，需先实测（见 7.6 风险 5）。

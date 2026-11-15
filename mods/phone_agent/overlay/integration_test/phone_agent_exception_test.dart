@@ -1141,7 +1141,11 @@ Future<bool> _waitForStableWindow(
     // - `rate_limited`：截图限频；
     // - `stale_observation`：**窗口已经取得**，只是截图期间发生了切换
     //   （服务重启会让窗口重建、叠加层收起、输入法起落），属瞬态；
-    // - 宿主还在设置页时的观察边界拒绝（`hard_baseline` / `window_type_*`）。
+    // - 宿主还在设置页时的观察边界拒绝，且仅限「前台没回到应用」这个子集：
+    //   `hard_baseline` 与 `window_type_system`/`overlay`/`split_divider`
+    //   （见 `_isRetryableObservationDenial`）。**不含 `window_type_unknown`**：
+    //   那是窗口列表尚未稳定、类型解析失败，当作「稍后会好」会让真实时序缺陷
+    //   静默通过。
     // 这里只是把同一有界预算用在等待上，不放宽任何断言——超时仍失败，
     // 旧句柄的 `stale_handle` 断言也保持不变。
     final windowNotReady =
