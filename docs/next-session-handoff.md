@@ -1,5 +1,7 @@
 # 下一次会话交接：Phone Agent 前台可视化叠加层
 
+> **M32（2026-11-15，仅文档）**：应用批准契约已修订为「批准 = 读＋操作一体」（未批准应用的读树/截图只返回应用身份与 `permission_required`），并新增应用身份（`QUERY_ALL_PACKAGES`）、批准后恢复与任务控制、结果未知语义、多窗口首版不支持、批准终态与防自我批准、首次隐私确认（方案 B）。**全部为已定契约、未实现**，产品代码/测试/`mod.json` 未改，当前代码仍是观察不判白名单。第 8 节是实现入口，含四项必须先定论的交叉点。本节以下各节的设备与 APK 记录仍对应 M32 之前的树与代码。
+
 ## 0. M27 当前状态（2026-11-13，第 1 步实现）
 
 - 本轮目标：只做第 8 节**第 1 步**——硬基线集合 + `WindowState.windowType`。不含观察边界、用户白名单、批准交互和审计。
@@ -11,7 +13,7 @@
 - **R1 返工（reviewer `p2-6items` / `fix-then-merge`）**：硬基线集合补入 `com.miui.packageinstaller`、`com.lbe.security.miui`、`com.android.certinstaller`、`com.xiaomi.misettings`（reviewer 与 tower 均在 `1960cd68` 用 `dumpsys package` / `resolve-activity` 实证这些包持有安装、卸载、权限授予、证书安装入口）；`windowType()` 改为记录命中结果后循环结束统一返回，修复命中点之后窗口未 `recycle()` 的泄漏；plan 7.5.2 的角色解析描述改为与代码一致（无 `RoleManager`/版本分支），并把厂商枚举写成「按真机 `resolve-activity`/`dumpsys package` 实测补全」的流程与「第 3 步白名单上线前必须补全」的硬要求；同步 README 的两处输入层状态、AGENTS.md 未验证假设对象、本节 §8 第 1 步的设备结果。返工后未重跑设备，理由按改动分别说明：补入的 4 个厂商包**确实改变可观察行为**——硬基线判定排在构建期 allowlist 之前，这些包成为前台时错误码由 `package_not_allowed` **收紧为** `system_window_denied`；设备结果可沿用的依据是**官方 `phone_agent_test.dart` 全程前台为测试包，这 4 个包不会在该流程里成为前台**（不是“错误码没变”）。`windowType()` 的 `recycle` 改造只改回收时机，判定结果等价。插件 Kotlin 122 项全绿。
 - 测试：`PackagePolicyTest` 原有 5 条错误码断言**未改**（仅调用签名加窗口类型与角色参数），新增 settings、厂商变体、角色持有者、`Unavailable`、Kelivo 自身、测试包不误伤（含 `com.psyche.kelivo.phoneagent.other` 反例）、5 种非 `APPLICATION` 窗口类型、拒绝消息固定标识且不含包名、硬基线优先于窗口类型、窗口类型优先于构建期白名单、平台常量映射（含 0 与 99）；`ObservationRegistryTest` 新增窗口类型变化使句柄/分页/截图失效。
 - **设备结果**：API35 模拟器（`emulator-5554`）与物理 MIUI API31（`1960cd68`）官方 `phone_agent_test.dart` 各 **`+2`、All tests passed!、EXIT=0**——截图、读树、节点点击、坐标滑动、滚动、聚焦后 `set_text`、二次读树全程没有出现 `stale_*`，验证 `sameWindow()` 加 `windowType` 比较未在两台设备上产生误报。无障碍授权由宿主编排触摸在系统界面完成（点开 Kelivo Phone Agent → Allow / 「确定（5）」），**未用 `settings put secure` 写授权**；`flutter test` 每次重装包都会撤销授权，两台设备首轮均因此在 `setUpAll` 超时，授权后重跑通过。MIUI 结束后 `flutter test` 卸载了测试包，授权位随之回到 `null`/`0`。
-- **未做/未验证**：观察边界（读树与截图仍不检查包名或窗口类型）、用户白名单、签名校验、`permission_required`、批准交互、审计全部未实现。完整异常套件、VLM 固定任务未运行。**R1 返工后**最终源码树 `V:/coding/kelivo-private/.tower/worktrees/wt-27/.build/worktrees/2f6528a0e4e4c8d6`（`modsetHash` `2f6528a0e4e4c8d69b75b368b0850b599a360893765f841c3250d1b8cc042355`，`plan`/`apply`/`verify` 通过），产品 APK 在该树 `flutter clean` + 显式 `flutter build apk --debug` 生成：**181,408,190 字节**，SHA-256 `1c2b50967f2c2be0c432218ace3a3bd25f7ea4a932092e75c06af1fed48c387c`，merged manifest 含 `SecureWindowFixtureActivity`（1 处）与 `PhoneAgentService`（1 处），dex 含 4 个新增硬基线包名，未构建 release，构建后未再运行 integration_test（返工前 APK 181,407,582 / `5b706dd5…` 只作历史）；根项目 `dart analyze`/上游 seam 回归未跑（本轮只改插件 Kotlin 与文档，未触及 Dart 侧接缝）。
+- **未做/未验证（M27 当轮）**：观察边界（M28 随后实现；M27 当轮读树与截图仍不检查包名或窗口类型）、用户白名单、签名校验、`permission_required`、批准交互、审计全部未实现。完整异常套件、VLM 固定任务未运行。**R1 返工后**最终源码树 `V:/coding/kelivo-private/.tower/worktrees/wt-27/.build/worktrees/2f6528a0e4e4c8d6`（`modsetHash` `2f6528a0e4e4c8d69b75b368b0850b599a360893765f841c3250d1b8cc042355`，`plan`/`apply`/`verify` 通过），产品 APK 在该树 `flutter clean` + 显式 `flutter build apk --debug` 生成：**181,408,190 字节**，SHA-256 `1c2b50967f2c2be0c432218ace3a3bd25f7ea4a932092e75c06af1fed48c387c`，merged manifest 含 `SecureWindowFixtureActivity`（1 处）与 `PhoneAgentService`（1 处），dex 含 4 个新增硬基线包名，未构建 release，构建后未再运行 integration_test（返工前 APK 181,407,582 / `5b706dd5…` 只作历史）；根项目 `dart analyze`/上游 seam 回归未跑（本轮只改插件 Kotlin 与文档，未触及 Dart 侧接缝）。
 - Windows 环境记录：`git worktree add` 在本机因 260 字符路径上限失败（`Filename too long`，fail 在 `dependencies/flutter_inappwebview_android/.../ThreadedInputConnectionProxyAdapterView.java`）。解决方式是在 Loader 进程环境注入 `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.longpaths GIT_CONFIG_VALUE_0=true`，**未修改上游 git 配置**，也未改 Loader 代码。失败的 `17007461ac82c427` 状态文件已用 `clean --modset` 精确清理。
 
 ## 0.1 M26 状态（2026-11-13，仅文档；以下为 M26 当时状态，第 1 步已由 M27 实现）
@@ -141,7 +143,7 @@
 6. `llama-cpp/llama-cpp` 的物理完整坐标 swipe 未完成（网关故障）。
 7. 上游可触摸后台胶囊无法被 Mod 隐藏；开启胶囊时截图可能含胶囊、坐标手势可能被拦截，不宣称兼容。
 
-首版输入仍只开放给测试包名 `com.psyche.kelivo.phoneagent`。**M26 已在计划 7.5 写入应用边界与授权的设计提案；M27 已实现第 1 步（硬基线 + `WindowState.windowType`），第 2–5 步（观察边界、用户白名单与签名、批准交互、审计）仍未实现**，下一阶段入口见第 8 节；在实现落地前，不要扩大白名单、引入自动无障碍授权，或把发送/购买/删除确认描述成原生硬护栏。
+首版输入仍只开放给测试包名 `com.psyche.kelivo.phoneagent`。**M27 已实现应用边界第 1 步（硬基线 + `WindowState.windowType`），M28/M30 完成第 2 步（观察边界）的代码与设备回归；第 3–5 步（用户白名单与签名、批准交互、审计）以及 M32 修订的批准契约（批准 = 读＋操作一体、`QUERY_ALL_PACKAGES` 应用身份、批准后恢复与任务控制、结果未知语义、多窗口不支持、终态与防自我批准、首次隐私确认）全部未实现**，下一阶段入口见第 8 节；在实现落地前，不要扩大白名单、引入自动无障碍授权，或把发送/购买/删除确认描述成原生硬护栏。
 
 ## 3. 已有实现与交付基线
 
@@ -325,12 +327,21 @@ dart tool/mod_loader.dart verify
 
 ## 8. 下一阶段入口：实现应用边界与应用授权
 
-契约全文见 `docs/phone-agent-plan.md` 7.5 与 7.6；`AGENTS.md` 有对应 8 条条目；用户可读说明见 `mods/phone_agent/README.md`「应用白名单与批准（设计提案，尚未实现）」。**第 1 步（硬基线 + `WindowState.windowType`）已完成**（代码 + JVM 测试 + 两台设备官方测试，见第 0 节与下方第 1 条）；**第 2 步（观察边界）代码与 JVM 测试已完成、设备验证进行中**；**第 3–5 步（用户白名单与签名、批准交互、审计）尚未实现**。
+契约全文见 `docs/phone-agent-plan.md` 7.5 与 7.6；`AGENTS.md` 有对应条目；用户可读说明见 `mods/phone_agent/README.md`「应用白名单与批准（已定契约，尚未实现）」。**第 1 步（硬基线 + `WindowState.windowType`）已完成**（代码 + JVM 测试 + 两台设备官方测试，见第 0 节与下方第 1 条）；**第 2 步（观察边界）已完成并补齐设备回归**；**第 3–5 步（用户白名单与签名、批准交互、审计）尚未实现**。
+
+**M32（2026-11-15，仅文档）修订了第 3 步及之后的契约，实现时必须按新契约、不要按旧文字：**
+
+- **批准 = 读＋操作一体**：未批准第三方应用的 `readTree`/`screenshot` 只返回应用身份（包名、签名 SHA-256 前 8 位、可选显示名）与 `permission_required`，不返回树节点、截图或界面内容；硬基线与窗口类型仍排在白名单之前，`no_window`/`device_locked` 优先级不变。旧理由「模型必须先看到内容才能解释」已作废。**当前代码仍是观察不判白名单（M28），不得写成已生效。**
+- **应用身份**：manifest 一次声明 `QUERY_ALL_PACKAGES`；`(包名, 签名)` 双匹配；同签名更新保留授权；签名变化或无法解析 → 重新批准；授权不随聊天备份迁移；**应用分身/工作资料首版明确不支持**。
+- 新增已定契约：批准后「允许并继续」只恢复关联且仍可恢复的任务、恢复后先重新观察不重放动作；同时只一个任务控制手机、停止/撤销后未执行请求失效、已派发手势不承诺撤回；结果未知语义（不盲目重试、重新观察、区分动作完成与业务成功）；截图与手势范围与获准目标一致、复杂多窗口首版明确不支持；批准终态校验与防自我批准；首次启用隐私确认（方案 B：只在首次提示，不每张截图询问）。
+- 已定决策不重开：白名单全局共享、批准长期有效 + Mods 页撤销、审计元数据 30 天/2000 条、systemui 等系统应用硬禁止、不用叠加层做批准界面、聊天卡片 + 通知两入口。
+- **四项交叉点必须在写代码前定论**（plan 7.6 末）：观察侧是否也判 `package_not_allowed`（推荐判，否则用户会被要求批准一个本构建无法操作的应用，但会把该码从“仅输入”扩到观察）；多窗口是拒绝还是仅不承诺；任务控制冲突是否新增错误码；provider 更换是否重新提示隐私确认。
+- **一项实现前提**：用户白名单出现后，构建期测试包 `com.psyche.kelivo.phoneagent` 必须被同时视为已批准（推荐走构建期 allowlist，不写用户白名单），否则官方与异常套件全线 `permission_required`。异常套件 home/recents 用例的判据也需从“读树成功且包名不是测试应用”改为“`permission_required` 且包名不是测试应用”。
 
 实现时按以下顺序，前一步不稳定不要开始后一步：
 
 1. **硬基线集合 + `WindowState.windowType` —— ✅ M27 已完成（代码 + JVM 测试 + 两台设备官方测试）**。落地位置改为新增 `AppBoundary.kt`（原计划未指定文件）：`WindowType`、`HARD_BASELINE_PACKAGES`、`KELIVO_PACKAGE`/`TEST_PACKAGE`、`RoleHolders`、纯函数 `PackagePolicy`。settings 及厂商变体补进静态集合；Kelivo 自身按精确包名判定；电话/短信持有者改用 **公共等价接口** `TelecomManager.defaultDialerPackage` + `Telephony.Sms.getDefaultSmsPackage`（`RoleManager.getRoleHolders` 是 @SystemApi，公共 SDK 编译不过，实测 `Unresolved reference`），查询异常才视为解析失败。`WindowState` 已加 `windowType`，在 `windowState()` 内按 `windowId` 从 `windows` 匹配（同一次读取），解析失败落到 `UNKNOWN` 即拒绝；`sameWindow()`、截图观测、`TreeObservation`、`CapturedScreenshot` 已同步。`PackagePolicyTest` 原 5 条错误码断言未改，只加参数。设备回归已在 API35（`emulator-5554`）与物理 MIUI（`1960cd68`）各跑官方 `phone_agent_test.dart`，均 `+2`、EXIT=0、全程无 `stale_*`（详见第 0 节）。**待办：完整异常套件（旋转/锁屏/服务禁用重启/权限窗口/叠加层）未跑，那是窗口类型抖动最容易出现的地方。**
-2. **观察边界 —— ✅ M30 已补齐设备回归（API35 异常套件 3 棵树 / 4 轮 `+8`、EXIT=0；API35 与物理 MIUI 官方测试均 `+2`、EXIT=0），但服务重启清树机制不可独立归因（见下方「证明边界」）**。`PackagePolicy.requireObservable(packageName, windowType)`（`AppBoundary.kt`）判定顺序 `no_window` → 静态硬基线 → 观察窗口类型（`{APPLICATION, INPUT_METHOD}`），**不判用户白名单、不查询角色**；接入点是 `readTree`（仅 `offset == 0`）与 `captureScreenshot`（取前台 `WindowState` → 边界 → `collectPasswordBounds` 全窗口遍历 → 截图，三段独立）。异常套件 5 处已同批改为宿主 `dumpsys` 确认 + 产品错误码/观察标识断言。**M28 当时异常套件从未取得绿色整轮**：`exc5`(e2d50da0)=`+1 -1`、`exc6`(c3c760c0)=`+1 -7`、`exc7`=`+2 -6`、`exc8`=`+2 -6`、`exc9`(最终)=`+1 -7`；`exc8`/`exc9` 的失败句是 `最后前台包名：未知`，日志未记录 `error`。
+2. **观察边界 —— ✅ M30 已补齐设备回归（API35 异常套件 3 棵树 / 4 轮 `+8`、EXIT=0；API35 与物理 MIUI 官方测试均 `+2`、EXIT=0），但服务重启清树机制不可独立归因（见下方「证明边界」）**。`PackagePolicy.requireObservable(packageName, windowType)`（`AppBoundary.kt`）判定顺序 `no_window` → 静态硬基线 → 观察窗口类型（`{APPLICATION, INPUT_METHOD}`），**当前代码不判用户白名单、不查询角色**（M32 契约将加入白名单门控，未实现）；接入点是 `readTree`（仅 `offset == 0`）与 `captureScreenshot`（取前台 `WindowState` → 边界 → `collectPasswordBounds` 全窗口遍历 → 截图，三段独立）。异常套件 5 处已同批改为宿主 `dumpsys` 确认 + 产品错误码/观察标识断言。**M28 当时异常套件从未取得绿色整轮**：`exc5`(e2d50da0)=`+1 -1`、`exc6`(c3c760c0)=`+1 -7`、`exc7`=`+2 -6`、`exc8`=`+2 -6`、`exc9`(最终)=`+1 -7`；`exc8`/`exc9` 的失败句是 `最后前台包名：未知`，日志未记录 `error`。
 
    **M30 结论（详见 plan 9.3.0.1–9.3.0.3）**：`未知` 的成因已定位为**测试诊断缺陷 + 宿主驱动缺陷**，不是产品缺陷——`_waitForTreeText` 的失败句只拼包名、`_tryTree` 把拒绝与异常都折叠成 `null`；`run1.log` 用新增的 `_TreeProbe` 记录到该轮 102 条探测为 `system_window_denied (com.android.systemui, hard_baseline)`（其中单次探测内连续 77 次），前台确实是通知栏。驱动另有 5 个缺陷已逐个修掉（通知栏固定 13 秒循环无法取消、服务授权后不回应用、`HOME`/`RECENTS` 信息标记占用有序动作队列、设置页在重启后残留前台、前台确认过慢），以及一处**误发 BACK 导致 `MainActivity` 被 finish**、任务重启后产品一度无法解析窗口类型（该轮 logcat 观察到 `windowType exhausted ...` 与任务 CLOSE 过渡，**原文未留存**；可核对旁证是 `run9.log` 内 `window_type_unknown` 30 次、`run5.log` 0 次）。修正后该标识为 0–1 次（`run19` 有 1 次瞬态），并非恒为 0。
 
@@ -341,10 +352,13 @@ dart tool/mod_loader.dart verify
    **R1 返工后最终交付树 `474262a402cca985`**（`modsetHash` `474262a402cca985f216636ac8dbd0b8af9ffd31507acb7feb1614a103853fac`，`plan`/`apply`/`verify` 通过）：返工只改文档、测试文案与新增宿主脚本 `mods/phone_agent/host/`，**未重跑设备**；设备结果对应返工前测试文件，测试侧改动都是收窄或文案修正（排除 `window_type_unknown`、消除启用双触发），不放宽任何断言。
 
    **产品 debug APK（当前产品，未改动）**：最终树 `f26c1c7ed3238610`（`modsetHash` `f26c1c7ed32386105a763feeb3ea95accdd127b6041941b9f3d75f83abadafa9`），**181,410,150 字节**，SHA-256 `a6c2e51b73435af1de4f74d5e95807a9688e95cb3d78be2f47521d715971b70f`（M30 已复核未变）。M30 未改产品代码，因此未重建；integration_test 入口构建只在测试树内，不作为产品。
-3. **用户白名单与签名校验**。`(包名, 签名证书 SHA-256)` 双匹配，未命中返回 `permission_required`；签名解析能力受 Android 11+ 包可见性限制，需先实测（见 7.6 风险 5）。
-4. **批准交互**。先做聊天内卡片（复用 `ToolApprovalService` 的请求结构、pending 存储与 `notifyListeners()` 刷新，**不复用其等待语义**——工具调用已返回 `permission_required`，卡片须自带 TTL 与“任一端批准即置终态”的收敛），再做通知栏（必须新增通知 action + `BroadcastReceiver`，现有 `NotificationService` 只有点击打开会话）。
-5. **审计**。落盘元数据，滚动保留 30 天或 2000 条。
+3. **应用身份与签名校验（M32 契约，未实现）**。插件 manifest 一次声明 `QUERY_ALL_PACKAGES`，解析前台包签名；`(包名, 签名证书 SHA-256)` 双匹配，未命中（含签名变化、签名解析失败）返回 `permission_required`。同签名更新保留授权；授权不随聊天备份迁移；应用分身与工作资料首版不支持。**签名解析能力仍需设备实测**（见 7.6 风险 5），不得先写成“任意前台包都能解析”。
+4. **白名单门控接入观察与输入（M32 契约，未实现）**。观察路径顺序 `device_locked` → `no_window` → 硬基线 → 窗口类型 → 构建期硬禁止 → 用户白名单；未批准时结果只含应用身份，不建立观测、不截图。前提：构建期测试包须被同时视为已批准（推荐走 allowlist），异常套件 home/recents 与 settings 相关断言需按新错误码同步改写（不是放宽）。
+5. **批准交互与终态（M32 契约，未实现）**。先做聊天内卡片（复用 `ToolApprovalService` 的请求结构、pending 存储与 `notifyListeners()` 刷新，**不复用其等待语义**——工具调用已返回 `permission_required`，卡片须自带 TTL 与“任一端批准即置终态”的收敛），再做通知栏（必须新增通知 action + `BroadcastReceiver`，现有 `NotificationService` 只有点击打开会话）。同批实现单终态、请求 id 幂等、迟到回调不写白名单、写入前重新解析签名（7.5.13）。
+6. **首次启用隐私确认（方案 B，M32 已定契约，未实现）**。只在首次启用时一次性提示截图与界面文字会发往用户配置的 provider；不每张截图询问。文案进 ARB。provider 更换是否重新提示待定论。
+7. **任务控制与恢复、结果未知语义（M32 已定契约，未实现）**。「允许并继续」只恢复关联且仍可恢复的任务、恢复后先重新观察不重放动作；同时只一个任务控制手机，停止/撤销后未执行请求失效，已派发手势不承诺撤回；已派发后的超时/取消属结果未知，不盲目重试、先重新观察、区分动作完成与业务成功。
+8. **审计（未实现）**。落盘元数据，滚动保留 30 天或 2000 条。
 
-实现后必须重跑并把结果写入 9.3/9.4：API35 官方测试、完整异常套件、物理 MIUI 官方测试，以及至少一轮 VLM 固定任务（含 `permission_required` → 批准 → 重试 → 重新观察的完整链路）。重跑前，9.4 与 10.1 的 VLM 结果**只能作为旧代码证据**，不得用于宣称新边界已验证。
+实现后必须重跑并把结果写入 9.3/9.4：API35 官方测试、完整异常套件、物理 MIUI 官方测试，以及至少一轮 VLM 固定任务（含“未批准 → 只回身份 → 批准 → 重新观察 → 撤销 → 重新 `permission_required`”的完整链路）。重跑前，9.4 与 10.1 的 VLM 结果**只能作为旧代码证据**，不得用于宣称新边界已验证。
 
-三项已定决策不要重新讨论：白名单全局共享、批准长期有效 + Mods 页显式撤销、审计落盘元数据滚动保留。若实现中发现某项不可行，需要回写文档并请用户确认，不得静默改向。
+已定决策不要重新讨论：白名单全局共享、批准长期有效 + Mods 页显式撤销、审计落盘元数据滚动保留、systemui 等系统应用硬禁止、批准 = 读＋操作一体、`QUERY_ALL_PACKAGES` 一次声明、方案 B 首次隐私确认、聊天卡片 + 通知两入口、不用叠加层做批准界面。若实现中发现某项不可行，需要回写文档并请用户确认，不得静默改向。**M32 遗留的四项交叉点与测试包归属见本节开头的列表，实现前必须先在文档定论。**
