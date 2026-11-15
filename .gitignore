@@ -4,3 +4,7 @@ build/
 *.log
 .idea/
 *.iml
+
+# Phone Agent host test scripts write run logs and UI dumps here
+mods/phone_agent/host/_runs/
+__pycache__/
