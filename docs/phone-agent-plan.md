@@ -54,7 +54,7 @@
 - 节点输入优先，坐标输入作为视觉和自绘界面的补充。
 - 观察按需发生，不强制每个动作后重新读取完整界面。
 - 原生技术护栏尽量硬实现，业务风险识别不作虚假保证。
-- 首版只在显式测试包名中开放输入，不直接面向敏感应用（M32 已定契约、未实现：用户按应用批准后，输入与观察都受同一批准约束，见 7.5.1/7.5.4）。
+- 首版只在显式测试包名中开放输入，不直接面向敏感应用（M32 已定（用户拍板）、未实现：用户按应用批准后，输入与观察都受同一批准约束，见 7.5.1/7.5.4）。
 - 工具选择与服务授权分离。Mods 页的三态选择只决定助手使用哪套工具，不代表系统无障碍服务已经授权。
 - 正常 UI 不允许原生手机控制和 Phone Agent 同时启用；两者互斥写入助手的 `localToolIds`。
 - 已有仅启用 `phone_control` 的助手保持原生行为，不自动迁移，不批量改写 `localToolIds`。
@@ -72,7 +72,7 @@ Phone Agent 首版不做：
 - 把 Mods 页接入上游设置搜索索引。
 - 上游工具目录集成、运行时 Mod 商店、动态 Dart 加载或运行时下载插件。
 - 在正常 UI 中同时启用原生手机控制和 Phone Agent。
-- 按应用配置任意策略，或以运行时编辑的方式修改**构建期**测试包白名单（**首版**不做）。M32 已把「用户按应用批准」的运行时白名单与签名绑定定为**已定契约、未实现**（见 7.5.2/7.5.9）：那是“授权或不授权某个应用”的开关，不是可编辑的任意策略；构建期硬禁止仍不可由运行时覆盖。
+- 按应用配置任意策略，或以运行时编辑的方式修改**构建期**测试包白名单（**首版**不做）。M32 已把「用户按应用批准」的运行时白名单与签名绑定定为**已定（用户拍板）、未实现**（运行时白名单的批准方向为用户拍板；`(包名, 签名)` 绑定的细节为早期已定契约。见 7.5.2/7.5.9）：那是“授权或不授权某个应用”的开关，不是可编辑的任意策略；构建期硬禁止仍不可由运行时覆盖。
 - `list_apps`、`open_app`、通知栏和快捷设置操作。
 - 多显示器、折叠屏专项适配或 MediaProjection 截图后备方案。
 - 自动上下文压缩、树差分、跨观测稳定节点 ID。
@@ -391,7 +391,7 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 - `unsupported_platform`：非 Android 平台；
 - `timeout`：通道或原生调用超时；
 - `plugin_unavailable`：插件不可用；
-- `package_not_allowed`：目标包名不在本次构建的白名单（**仅表示构建期硬禁止**，不表示“用户未批准”）；**当前实现只用于输入**，M32 已定契约（未实现）把它扩到输入与观察；
+- `package_not_allowed`：目标包名属本次构建的 deny 成员（**仅表示构建期硬禁止**，不表示“用户未批准”；当前实现仍是 allowlist，即“只允许测试包”）；**当前实现只用于输入**，M32 已定契约（未实现）把它扩到输入与观察；
 - `permission_required`：目标应用尚未获得用户批准（**7.5 已定契约、尚未实现**）；**M32 起输入与观察（读树/截图）都返回该码**，观察侧只带应用身份、不带树节点或截图；立即返回、不排队、不静默降级；
 - `system_window_denied`：系统窗口、硬基线或窗口类型拒绝（锁屏仍返回 `device_locked`，不会走本码）；
 - `device_locked`：设备锁屏或息屏；
@@ -399,7 +399,7 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 
 其余错误码以适配层和插件返回为准。错误信息应给出可执行的下一步，例如重新截图、重新读树、在 Mods 页重新选择工具或请用户检查无障碍服务。
 
-输入路径的错误码优先级固定为：空包名 → `no_window`；系统包 → `system_window_denied`；其他非白名单包 → `package_not_allowed`；白名单内再校验句柄/截图，失效返回 `stale_handle` 或 `stale_observation`。因此系统窗口或非白名单应用在前台时，即使句柄已经失效，也先返回包名策略错误，而不是句柄错误。锁屏/息屏在包名策略之前检查，所有方法（含读树和截图）返回 `device_locked`。
+**当前实现**的输入路径错误码优先级固定为：空包名 → `no_window`；系统包 → `system_window_denied`；其他非白名单包 → `package_not_allowed`；白名单内再校验句柄/截图，失效返回 `stale_handle` 或 `stale_observation`。因此系统窗口或非白名单应用在前台时，即使句柄已经失效，也先返回包名策略错误，而不是句柄错误。锁屏/息屏在包名策略之前检查，所有方法（含读树和截图）返回 `device_locked`。
 
 以上是**当前实现**的链。7.5 的判定已插入 `no_window` 之后：**硬基线与输入窗口类型已实现（M27 第 1 步，见 7.5.2/7.5.3）**，两者复用 `system_window_denied`，因此既有三段相对顺序不变；**观察边界已实现（M28 第 2 步，见 7.5.4）**，读树与截图在硬基线与观察窗口类型处返回 `system_window_denied`，且**不判** `package_not_allowed` 与用户白名单；**用户白名单（`permission_required`，M32 起同时约束观察）与批准交互尚未实现**，构建期硬禁止 `package_not_allowed` 已在实现中排在输入窗口类型之后。未实现的层不得当作当前行为引用。
 
@@ -450,7 +450,7 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 - 截图、读树、手势和通道调用超时；
 - 每次生成过程中的动作预算和速率限制；
 - 默认仅允许显式配置的测试包名，当前为独立测试应用 `com.psyche.kelivo.phoneagent`；开发者只能在私有 Mod 中编辑白名单；
-- 输入与观察请求拒绝可取得包名的系统窗口、硬基线包与不允许的窗口类型（`system_window_denied`）；无可访问 root 的权限弹窗保持 `no_window` 并只做条件式人工提示；锁屏/息屏时读树、截图和输入都返回 `device_locked`；**当前实现**中读树和截图**不检查**构建期包名白名单，仍可观察普通第三方应用的前台窗口（M32 已定契约、未实现：未批准应用的读树与截图改为返回 `permission_required` 与只含应用身份的结果，见 7.5.4）；
+- 输入与观察请求拒绝可取得包名的系统窗口、硬基线包与不允许的窗口类型（`system_window_denied`）；无可访问 root 的权限弹窗保持 `no_window` 并只做条件式人工提示；锁屏/息屏时读树、截图和输入都返回 `device_locked`；**当前实现**中读树和截图**不检查**构建期包名白名单，仍可观察普通第三方应用的前台窗口（M32 已定（用户拍板）、未实现：未批准应用的读树与截图改为返回 `permission_required` 与只含应用身份的结果，见 7.5.4）；
 - `home`/`recents` 执行后前台会离开白名单，**后续输入（包括 `back`）被拒绝**，模型无法自行把测试应用切回前台，需要用户或宿主动作恢复。但**读树与截图仍会成功**：API35 实测 `home`/`recents` 后前台是启动器（`com.google.android.apps.nexuslauncher`，`TYPE_APPLICATION`），而观察边界不判构建期白名单，只判硬基线与窗口类型。反过来说，“前台是 systemui / `TYPE_SYSTEM` 所以读树被拒”只适用于**通知栏**场景；而且由于 `com.android.systemui` 本身就在硬基线集合内、硬基线判定先于窗口类型，该场景返回的标识是 `hard_baseline`，**不会**是 `window_type_system`（详见 7.6 风险 2 的实测修正）。
 - 结构化错误包含可执行的下一步，而非只返回笼统失败。
 
@@ -494,14 +494,14 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 >
 > - **已实现（M27 第 1 步）**：输入路径的硬基线（静态系统包集合含 settings 与厂商变体、运行时角色持有者解析、精确包名 `com.psyche.kelivo`）与窗口类型判定（输入允许集 `{TYPE_APPLICATION}`），集中在纯函数 `PackagePolicy`（`mods/phone_agent/plugin/android/src/main/kotlin/com/kelivo/phoneagent/AppBoundary.kt`）与 `WindowState.windowType`。
 > - **已实现（M28 第 2 步，代码事实）**：观察边界 `PackagePolicy.requireObservable`（静态硬基线 + 观察窗口类型 `{TYPE_APPLICATION, TYPE_INPUT_METHOD}`），接入 `readTree()` 与截图路径；异常套件对应的 5 处依赖同批改为宿主 `dumpsys` 确认。**这一层不判用户白名单**——即当前代码里未批准的第三方应用仍可被读树和截图（见 7.5.4「当前实现事实」）。
-> - **已定契约、未实现（M32 修订）**：批准 = **读＋操作一体**。未批准第三方应用的 `readTree`/`screenshot` 只返回应用身份与 `permission_required` 授权请求，`permission_required` 从未返回过；用户白名单与签名校验、批准交互、审计、应用身份（`QUERY_ALL_PACKAGES`）、任务控制与恢复、结果未知语义、首次隐私确认同样全部未实现。
+> - **已定（用户拍板）、未实现（M32 修订）**：批准 = **读＋操作一体**。未批准第三方应用的 `readTree`/`screenshot` 只返回应用身份与 `permission_required` 授权请求，`permission_required` 从未返回过；用户白名单与签名校验、批准交互、审计、应用身份（`QUERY_ALL_PACKAGES`）同样全部未实现。任务控制与恢复、结果未知语义等属**设计提案（tower 建议）**，不是用户拍板项，逐条来源见 7.5.9 的四档定义。
 >
 > 因此**不得**把本节的白名单与批准描述引用为已生效；也不得把「观察边界已实现」读成「批准门控已实现」——前者是 M28 的硬基线 + 窗口类型，后者是 M32 新契约，两者方向不同且后者尚未落地。9.4/10.1 的旧 VLM 结果同样**不能**用于宣称新契约已验证。
 
 #### 7.5.1 方向
 
 - **默认拒绝**：任何未明确允许的目标一律拒绝，不做黑名单式放行。
-- **批准 = 读＋操作一体（M32 已定契约、未实现）**：批准同时覆盖读树/截图与输入，不存在“只批准看”“只批准点”两种粒度。未批准应用的读树与截图只返回应用身份与授权请求，不返回树节点、截图或界面内容（见 7.5.4）。理由见 7.5.4：申请授权只需要应用身份，不需要先读内容。
+- **批准 = 读＋操作一体（已定（用户拍板），M32，未实现）**：批准同时覆盖读树/截图与输入，不存在“只批准看”“只批准点”两种粒度。未批准应用的读树与截图只返回应用身份与授权请求，不返回树节点、截图或界面内容（见 7.5.4）。理由见 7.5.4：申请授权只需要应用身份，不需要先读内容。
 - 白名单条目绑定 **`(包名, 签名证书哈希)`**，两者必须同时匹配；包名匹配但签名不符视为未批准。这样可避免“同名包换签名后继承旧授权”。
 - 硬基线**不可由用户开关覆盖**，Mods 页不提供关闭硬基线的选项。
 - 判定全部在**原生侧**完成，Dart 只做错误码映射与展示；Dart 侧不得成为可绕过的放行点。
@@ -516,6 +516,16 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 
 **观察侧也判构建期硬禁止（已定（M32，tower 定论，用户可推翻））**：观察路径的顺序里**包含**构建期硬禁止（`package_not_allowed`），与输入路径一致。理由：批准 = 读＋操作一体（用户拍板），而本次构建根本不支持操作的应用**不应该产生批准提示**——让用户批准一个「批准了也操作不了」的应用是纯粹的误导。代价是要把 `package_not_allowed` 的适用范围从「仅输入」扩到「输入与观察」，6.6 与 7.5.8 已同步。该项由 tower 本轮定论，**用户可推翻**；推翻时须同时收回 7.5.4 观察顺序里的这一层、恢复 6.6/7.5.8/README 的「仅输入」表述，并改写本节。**当前代码不实现这一层**（M28 的 `requireObservable` 不判 `package_not_allowed`）。
 
+**构建期范围在批准上线时转为 deny 清单（已定（M32，tower 定论，用户可推翻））**：批准功能上线时，构建期 allowlist 的语义**从「allowlist（只放测试包）」转为「deny 清单（只保留明确不支持或危险的包）」**。
+
+- **规则**：`PackagePolicy` 的构建期判定改成 deny 成员判定——**`package_not_allowed` 只对 deny 清单成员出现**；其余第三方应用不因构建期范围被拒，直接进入用户白名单判定，未批准返回 `permission_required`。
+- **理由（是可达性问题，不是风格问题）**：产品目标是操作真实应用，而「批准 = 读＋操作一体」又是用户拍板的方向。若维持「只允许测试包」的 allowlist 旧语义，则测试包被直接视为已批准、其他第三方包全部命中 `package_not_allowed`，**`permission_required` 在任何输入上都不可达**——批准卡片、通知栏批准、Mods 页撤销、「允许并继续」全部没有触发入口，P6 的完成条件（设备跑通「未批准 → 只回身份 → 批准 → 重新观察 → 撤销 → 重新 `permission_required`」）也就不可能达成。1.3 非目标又把「运行时编辑构建期测试包白名单」列为首版不做，等于没有运行时补救路径。
+- **deny 清单保留什么**：只保留**明确不支持或危险**的包。硬基线（systemui、权限控制器、包安装器、证书安装器、settings 及厂商变体、电话/短信角色持有者、Kelivo 自身）**不在 deny 清单里**，它们由更早的硬基线层返回 `system_window_denied`，两套机制不要混为一谈。
+- **具体成员尚未定稿（设计提案，待定）**：首版 deny 清单的成员清单需要在实现阶段确定并写进本文；tower 的建议是**初始为空**，只有确认某包必须硬禁止（例如已知会自我提权的工具类包）时才加入。**不得据此写成“deny 清单已确定”**，也不得把硬基线集合复制进来充数。
+- **与既有层的关系不变**：判定顺序仍是 `device_locked` → `no_window` → 硬基线 → 窗口类型 → 构建期硬禁止（此时即 deny 成员判定）→ 用户白名单。硬基线与窗口类型排在前面、系统窗口无条件拒绝这两点不受本项影响。
+- **当前实现**：仍是 allowlist（`AppBoundary.kt` 的 `allowedPackages` 默认 `setOf(TEST_PACKAGE)`），因此**现在**除测试包外的应用都返回 `package_not_allowed`。这是过渡状态，不是目标语义。
+- **来源与推翻连带**：tower 本轮定论，**不是**用户 AskUserQuestion 拍板项，**用户可推翻**。推翻时须同时：恢复 allowlist 语义、重写本段、改写 7.5.8/10.1/10.2 里「未批准 → `permission_required`」的表述为「仅对已在本构建支持集内、但未获用户批准的应用返回 `permission_required`」、同步 `AGENTS.md` 与 `README.md` 的错误码分界，并把 P6 的完成条件改成可达链路（例如把测试包从构建期范围移除、改走用户白名单）。
+
 **第 1 步的实际实现顺序**（`PackagePolicy.requireInputAllowed`，先命中者生效，均有 JVM 断言）：
 
 `no_window` → 静态硬基线（含 Kelivo 精确包名）→ 角色解析失败 → 角色持有者 → 窗口类型 → 构建期白名单（`package_not_allowed`）。
@@ -524,7 +534,7 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 
 #### 7.5.2 三层判定
 
-| 层 | 判定依据 | 约束范围（M32 已定契约、未实现） | 失败码 | 用户可否覆盖 |
+| 层 | 判定依据 | 约束范围（M32，未实现） | 失败码 | 用户可否覆盖 |
 |---|---|---|---|---|
 | 1 硬基线 | 固定系统包名 + 角色解析结果 + 承载助手的 Kelivo 包 | 输入与观察 | `system_window_denied` | 否 |
 | 2 窗口类型 | `AccessibilityWindowInfo.type` | 输入与观察（集合不同，见 7.5.3） | `system_window_denied` | 否 |
@@ -549,7 +559,7 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
   - 证书安装器 `com.android.certinstaller`（`android.credentials.INSTALL`）；
   - 设置与变体 `com.android.settings`、`com.google.android.settings`、`com.samsung.android.settings`、`com.miui.securitycenter`、`com.xiaomi.misettings`、`com.coloros.settings`、`com.coloros.safecenter`、`com.oplus.settings`、`com.oplus.safecenter`、`com.vivo.settings`、`com.bbk.settings`、`com.huawei.systemmanager`、`com.hihonor.systemmanager`。
 - **厂商枚举的补全流程（不是“尽力而为”就完了）**：新增厂商支持时必须在该机型的真机上用只读命令实测，把解析到安装、卸载、权限授予、证书安装或设置的包名逐个补进集合——`adb shell cmd package resolve-activity --brief -a android.intent.action.INSTALL_PACKAGE`、`-a android.intent.action.DELETE`、`-a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n <settings>`、`-a android.credentials.INSTALL`，以及 `adb shell dumpsys package <pkg> | grep -i -E 'GrantPermissions|ReviewPermissions|InstallStart|UninstallStart|INSTALL'`。**只凭厂商命名习惯猜包名不算补全**。
-- **风险要写醒目**：漏写一个入口 = 该入口在该构建里按普通应用处理（命中构建期 allowlist 判定，返回 `package_not_allowed`），当前 allowlist 只有 `TEST_PACKAGE`，所以漏写暂时仍被拒绝；而**已补进集合的入口返回的是 `system_window_denied`**（硬基线判定排在 allowlist 之前），两者错误码不同、语义也不同。第 3 步用户白名单上线后，**漏写的入口会变成真实缺口**（用户批准某个厂商设置包后即可被输入）。因此第 3 步上线前必须先按上述流程把目标机型补全，并把已补包名列成清单。
+- **风险要写醒目**：漏写一个入口 = 该入口在该构建里按普通应用处理。**当前实现**下构建期范围仍是 allowlist（只有 `TEST_PACKAGE`），所以漏写暂时仍被 `package_not_allowed` 拒绝；而**已补进集合的入口返回的是 `system_window_denied`**（硬基线判定排在构建期判定之前），两者错误码不同、语义也不同。**批准上线时构建期范围转为 deny 清单**（见 7.5.1），届时漏写的入口不再被 `package_not_allowed` 拦住，而是**直接变成真实缺口**（用户批准该厂商设置包后即可被读树、截图与输入）。因此批准上线前必须先按上述流程把目标机型补全，并把已补包名列成清单——这件事的紧迫性属于上线前置条件，不是“以后再说”。
 - 角色持有者按 `RoleHolders` 建模，只有 `Resolved(packages)` 与 `Unavailable` 两种。`PhoneAgentService.resolveRoleHolders()` **在所有 API 版本统一使用**公共等价接口 `TelecomManager.defaultDialerPackage`（对应 `ROLE_DIALER`）与 `Telephony.Sms.getDefaultSmsPackage(this)`（对应 `ROLE_SMS`），没有 `RoleManager` 分支，也没有版本分支。原因：`RoleManager.getRoleHolders` 是 @SystemApi（`MANAGE_ROLE_HOLDERS` 签名权限），公共 SDK 无法编译（实测 `Unresolved reference 'getRoleHolders'`）。
 - 区分两种失败：查询抛异常或 `TelecomManager` 服务缺失表示“不知道”，返回 `Unavailable`，策略层据此**拒绝全部输入**（`system_window_denied`，消息标识 `role_resolution_failed`）；查询返回 null 表示系统明确回答“没有该角色的默认应用”（例如无短信能力的平板），归入 `Resolved(emptySet())`，不封死这类设备。不把“解析失败”当成“没有持有者”。
 - Kelivo 自身按 `KELIVO_PACKAGE = "com.psyche.kelivo"` 精确比较，测试包 `TEST_PACKAGE = "com.psyche.kelivo.phoneagent"` 独立常量；有专门用例断言测试包不被前缀/contains 规则误伤。
@@ -658,9 +668,9 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 
 **契约实现时的测试影响（未实现，不得现在改测试）**：
 
-- 构建期测试包 `com.psyche.kelivo.phoneagent` 当前是构建期 allowlist 成员，但**不是**用户白名单成员（用户白名单尚未存在）。契约实现后若不同时把测试包当作“已批准”，`phone_agent_test.dart` 与异常套件会全线 `permission_required`。**这是实现阶段必须先定的一项**（推荐：测试包走构建期 allowlist 直接视为可观察/可输入，不写用户白名单；理由见 7.5.2 的“测试包是构建期白名单成员而非硬基线成员”）。本轮只记录该前提，不把它写成契约。
-- **跨 UID securefixture 夹具**：异常套件的 `FLAG_SECURE` 用例依赖宿主独立夹具包 `com.kelivo.phoneagent.securefixture`（不属于 Mod 交付）。观察侧开始判 `package_not_allowed` 后，该包若不在测试构建的**观察白名单**内，夹具前台时读树/截图会被 `package_not_allowed` 误伤，用例从「验证 secure」退化成「验证构建期拒绝」。**实现时必须把它加入测试构建的观察白名单**（与上条测试包同批处理），否则该用例必红且红的原因与 secure 无关。
-- 异常套件的 home/recents 用例：`_waitForForegroundLeftApp` 当前接受“读树成功且包名不是测试应用”（API35 实测 home/recents 后前台是 `com.google.android.apps.nexuslauncher`，`TYPE_APPLICATION`）。观察侧判 `package_not_allowed` 后，launcher 作为第三方包会返回 `package_not_allowed`（**不是** `permission_required`），该 helper 的「读树成功」前提不再成立，接受集合必须同步调整（`package_not_allowed` + 包名，或按硬基线/观察标识退化），并保持「不得退化成任意错误即通过」的既有约束。**这条不是放宽断言，而是错误码语义随契约改变**；属实现任务的范围，本轮只记录、不改测试。
+- 构建期测试包 `com.psyche.kelivo.phoneagent` 当前是构建期 allowlist 成员，但**不是**用户白名单成员（用户白名单尚未存在）。契约实现后若不同时把测试包当作“已批准”，`phone_agent_test.dart` 与异常套件会全线 `permission_required`。**实现阶段的处理**：把测试包作为**构建配置里的预批准条目**（不是用户白名单条目、不落盘、不可在 Mods 页撤销），直接视为已批准。这条只影响测试包自身：它**不会产生批准提示**，也**不影响其他应用的 `permission_required` 可达性**——其他非 deny 成员的第三方应用仍按用户白名单判定并返回 `permission_required`（见 7.5.1 的 deny 清单段）。本轮只记录该前提，不把它写成用户可见契约。
+- **跨 UID securefixture 夹具**：异常套件的 `FLAG_SECURE` 用例依赖宿主独立夹具包 `com.kelivo.phoneagent.securefixture`（不属于 Mod 交付）。该包不是 deny 成员、也不是用户白名单成员，因此观察与输入都会返回 `permission_required`，用例从「验证 secure」退化成「验证未批准拒绝」。**测试构建需把 `securefixture` 预置为已批准**（与上条测试包同类的构建配置预批准条目，不写用户白名单、不产生批准提示），否则该用例必红且红的原因与 secure 无关。
+- 异常套件的 home/recents 用例：`_waitForForegroundLeftApp` 当前接受“读树成功且包名不是测试应用”（API35 实测 home/recents 后前台是 `com.google.android.apps.nexuslauncher`，`TYPE_APPLICATION`）。契约落地后 launcher 属**第三方、非 deny 成员、未批准**，观察返回 **`permission_required`（只回身份，不带树与包名之外的界面内容）**，该 helper 的「读树成功」前提不再成立；接受集合必须同步调整（`permission_required` 且能确认前台已离开本应用，或按硬基线/观察标识退化），并保持「不得退化成任意错误即通过」的既有约束。**这条不是放宽断言，而是错误码语义随契约改变**；属实现任务的范围，本轮只记录、不改测试。
 - 异常套件的叠加层触摸用例断言 `system_window_denied` + `hard_baseline`，不涉及白名单层，**不受影响**。
 - 异常套件的 settings 用例断言硬基线拒绝（`system_window_denied` + `hard_baseline`），硬基线排在 `package_not_allowed` 之前，**不受影响**。
 
@@ -675,7 +685,7 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 - 这一形态比旧断言**更强**，不是更弱：旧写法只要求“读到的包名不是测试应用”，新写法要求观察边界给出**固定的来源标识**，等于同时验证了“前台确实切换了”和“观察层确实按新边界拒绝”。
 
 - （c）home/recents 用例（`:350-385` 经 `_expectSystemNavigationDenied`，helper 在 `:1010` 起）：**仍然读树**，但改用的是 `_waitForForegroundLeftApp`（`phone_agent_exception_test.dart:1108-1146`）——它轮询 `_tryTreePayload` 并接受三种结果之一：(1) 读树**成功**且 `package_name` 不是测试应用（实测 home/recents 落在启动器时的正常情况）；(2) `no_window`；(3) `system_window_denied` 且带真实观察标识（`hard_baseline` / `window_type_system` / `window_type_overlay` / `window_type_split_divider`）。**`window_type_unknown` 明确不在可接受集合内**，因为它表示窗口列表尚未稳定，把它当证据会吞掉真实时序缺陷。随后直接断言节点 `tap` 与 `back` 的错误码，并按“硬基线集合成员”区分 `system_window_denied` / `package_not_allowed`，要求两次判定一致；无法确定时不得退化成“只要报错就算通过”。
-- **为什么不能写成“不再读树取包名”**：实测 home/recents 后前台是启动器（可观察、读树成功），所以“前台已离开本应用”的**正向证据恰恰来自读树返回的包名**；只有前台不可观察时才退化为标识断言。**注意这条只对 M28 的观察边界成立**：M32 契约（批准=读＋操作一体、观察侧判 `package_not_allowed`，未实现）落地后，启动器读树会返回 `package_not_allowed`，该分支判据必须同步改写（见上文「契约实现时的测试影响」）。
+- **为什么不能写成“不再读树取包名”**：实测 home/recents 后前台是启动器（可观察、读树成功），所以“前台已离开本应用”的**正向证据恰恰来自读树返回的包名**；只有前台不可观察时才退化为标识断言。**注意这条只对 M28 的观察边界成立**：M32 契约（批准=读＋操作一体，未实现）落地后，启动器属第三方、非 deny 成员、未批准，读树会返回 `permission_required`（只回身份），该分支判据必须同步改写（见上文「契约实现时的测试影响」）。
 
 
 不受影响、不得顺手改动：`phone_agent_test.dart`、异常套件的其余读树点（均在测试应用自身前台）、权限窗口用例（`no_window` 而非 `system_window_denied`）。
@@ -689,12 +699,12 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 **观察侧也判构建期硬禁止（已定（M32，tower 定论，用户可推翻））**：观察路径的判定顺序里**包含**构建期硬禁止（`package_not_allowed`），命中时返回 `package_not_allowed` 而不是 `permission_required`。
 
 - 理由：批准 = 读＋操作一体（用户拍板）。本次构建根本不支持操作的应用**不应该产生批准提示**——让用户批准一个「批准了也操作不了」的应用是纯粹的误导，而且会在用户批准后再给出一个与批准无关的拒绝，用户无从理解。
-- 顺序：`package_not_allowed` 排在**用户白名单之前**，所以未批准**且**本构建不支持的应用报 `package_not_allowed`（确定性结论），只有本构建支持的应用才会走到 `permission_required`。硬基线与窗口类型仍排在最前，系统窗口仍是 `system_window_denied`。
+- 顺序：`package_not_allowed` 排在**用户白名单之前**。批准上线时构建期范围转为 deny 清单（见 7.5.1），因此结果是确定的两分：**deny 成员的未批准应用报 `package_not_allowed`**（确定结论，不产生批准提示），**非 deny 成员的未批准应用走到 `permission_required`**。硬基线与窗口类型仍排在最前，系统窗口仍是 `system_window_denied`。
 - 代价：`package_not_allowed` 的适用范围从「仅输入」扩到「输入与观察」（6.6 与 7.5.8 已同步），需要新增「`package_not_allowed` 排在用户白名单之前」的同序断言。
 - 来源：tower 本轮定论，**不是**用户的 AskUserQuestion 拍板项。用户可推翻；推翻时须同时收回 7.5.1 与本节观察顺序里的这一层、恢复 6.6/7.5.8/README/AGENTS.md 的「仅输入」表述，并重写 10.1 的对应条目。
 - **当前代码不实现这一层**：M28 的 `requireObservable` 不判 `package_not_allowed`，未批准/不支持的应用现在都仍可观察。
 
-**测试影响**：观察侧判 `package_not_allowed` 会连带改变两处异常测试前提（跨 UID `securefixture` 需加入测试构建的观察白名单；home/recents 的 launcher 观察返回码由「读树成功」变为 `package_not_allowed`）。完整说明见上文「契约实现时的测试影响」列表，不在此重复，也不在本轮改测试。
+**测试影响**：白名单门控会连带改变两处异常测试前提（跨 UID `securefixture` 需在测试构建里预置为已批准，否则收到 `permission_required`；home/recents 的 launcher 观察返回码由「读树成功」变为 `permission_required`）。完整说明见上文「契约实现时的测试影响」列表，不在此重复，也不在本轮改测试。
 
 
 #### 7.5.5 三项已定决策
@@ -744,7 +754,7 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 - **立即返回，不阻塞**：检测到未批准时立刻返回 `permission_required`，不持有 `Completer` 等待、不排队重试、不静默降级为只读。与 7.5.6 的关系需要读清：我们复用 `ToolApprovalService` 的**请求结构与 UI 通知机制**，但批准请求**不挂在工具调用上**——工具调用拿到 `permission_required` 就结束，卡片/通知是独立的状态记录，有自己的 TTL 与终态收敛规则。因此“立即返回”与“复用该服务”并不互斥：互斥的只是“复用它的等待语义”。
 - 理由是数字，不是偏好：Dart 通道超时 **35 秒**（`phone_agent_service.dart:149`），原生排队超时 **15 秒**（`PhoneAgentService.kt:35` 的 `QUEUE_TIMEOUT_MS`）。让工具调用等一封可能几小时后才来的批准，必然先把设计好的 `permission_required` 退化成 `timeout`，模型无法区分“用户拒绝”“用户不在场”和“系统卡住”。
 - 明说取舍：批准未到时**当前任务停在此处**；用户批准后模型需要**重新观察**（旧句柄、旧截图会因时间与窗口变化失效），之前规划的步骤不能假设仍然有效。**长任务会中断**，不描述成无感体验，也不描述成“部分完成”。批准后如何继续见 7.5.10（该节的恢复机制是**设计提案**，不是用户拍板项）。
-- **观察请求同样返回 `permission_required`（M32 已定契约、未实现）**：`readTree` 与 `screenshot` 在未批准时也走这个码，结果只带应用身份（包名、签名哈希前缀、可选显示名），不带节点、截图或界面内容。它**不是**“工具不可用”的错误，模型应把它当作“请用户授权”，并停止重试同一调用。当前实现不返回该码（观察不判白名单，见 7.5.4「当前实现事实」）。
+- **观察请求同样返回 `permission_required`（已定（用户拍板），M32，未实现）**：`readTree` 与 `screenshot` 在未批准时也走这个码，结果只带应用身份（包名、签名哈希前缀、可选显示名），不带节点、截图或界面内容。它**不是**“工具不可用”的错误，模型应把它当作“请用户授权”，并停止重试同一调用。当前实现不返回该码（观察不判白名单，见 7.5.4「当前实现事实」）。
 - 不自动批准、不自动重试、不在失败后循环弹批准卡片。
 - 模型可见文案（英文，与结构化错误风格一致）。输入：
 
@@ -760,7 +770,7 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 
 - 6.6 与 6.5.1 的既有码与优先级**继续有效**，本节只在其间插入三层判定，并新增 `permission_required`。
 - 硬基线与窗口类型复用 `system_window_denied`，靠固定标识区分来源；不新增 `system_settings_denied` 之类的码，因为集合成员资格已经表达语义，新增码会稀释既有断言。
-- `package_not_allowed` 表示构建期硬禁止（当前即“只允许测试包”）。**当前实现它只用于输入**；**M32 已定契约（未实现）把适用范围扩到输入与观察**（观察侧排在用户白名单之前，理由见 7.5.1/7.5.4：本构建不支持操作的应用不应产生批准提示）。实现时需同步本段、6.6、AGENTS.md 与 README 的错误码分界，并新增“`package_not_allowed` 排在用户白名单之前”的同序断言。无论如何，**不要让同一个码同时表示“用户未批准”**。
+- `package_not_allowed` 表示构建期硬禁止，**语义有两层变化必须分开读**：(a) **范围**——当前实现是 allowlist（只允许测试包），批准上线时转为 deny 清单（只拒绝 deny 成员），`package_not_allowed` 届时只对 deny 成员出现（见 7.5.1）；(b) **路径**——当前实现只用于输入，M32 已定契约（未实现）把它扩到输入与观察（观察侧排在用户白名单之前）。带 deny 清单后，错误码分界变得确定：deny 成员 → `package_not_allowed`；非 deny 成员但未获用户批准 → `permission_required`。实现时需同步本段、6.6、AGENTS.md 与 README 的分界，并新增“`package_not_allowed` 排在用户白名单之前”的同序断言。无论如何，**不要让同一个码同时表示“用户未批准”**。
 - M28 第 2 步起 `system_window_denied` 也由观察层返回。读树/截图侧的 `system_window_denied` 只来自硬基线与观察窗口类型，**不会**来自 `package_not_allowed` 或角色持有者；观察层不查询角色，因此也不会产生 `role_resolution_failed`。
 - **M32 契约（未实现）**：`permission_required` 首次由观察层返回。因此它的适用范围从“仅输入”扩到“输入与观察”；这不是新增错误码，而是把同一码用在同一语义上（“这个应用还没被用户批准”）。观察侧与输入侧的 `permission_required` 文案必须分别指明“没有读取任何内容/没有执行任何动作”，不得复用输入文案让用户以为截图已经发生。
 - 本节不改变 `device_locked`、`no_window`、`stale_handle`、`stale_observation`、`screenshot_blocked` 的含义与范围。
@@ -778,7 +788,7 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 > **来源标注（覆盖 7.5.9–7.5.14 全段）**：本节起每个条目都带来源，四种标注含义固定如下，不得混用。
 >
 > - **已定（用户拍板）**：用户在 AskUserQuestion 或对话中明确选定的项，不再作为开放问题，不得重开。本轮范围内的拍板只有：`QUERY_ALL_PACKAGES` 一次声明、未批准只返回身份与授权请求；以及此前已定的 7.5.5 三项（白名单全局共享、批准长期有效 + Mods 页撤销、审计元数据滚动保留）、systemui 等系统应用禁止、批准两入口方向、不用叠加层做批准界面、首次隐私确认方案 B、产品定位（自用且可给朋友交付）。
-> - **已定（M32，tower 定论，用户可推翻）**：本轮由 tower 定论、用户未直接拍板但可推翻的项，目前只有「观察侧也判 `package_not_allowed`」（7.5.1/7.5.4）。
+> - **已定（M32，tower 定论，用户可推翻）**：本轮由 tower 定论、用户未直接拍板但可推翻的项，目前有两项——「观察侧也判 `package_not_allowed`」与「构建期范围在批准上线时转为 deny 清单」（均见 7.5.1/7.5.4）。
 > - **已定契约（早期设计，非本轮用户拍板）**：M26/M27 阶段确立、本轮沿用的契约（例如 `(包名, 签名)` 双匹配）；实现时须遵守，但来源不是本轮用户决策。
 > - **设计提案（tower 建议、待实现）**：tower 的实现建议，**不是**用户决策。实现阶段可依证据调整，但调整必须回写本文，且不得拿来当作"用户已同意"的依据。
 
@@ -943,7 +953,7 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 **M32 实现顺序与必须先定论的前提（未实现，供后续 mission 使用）**
 
 1. **先定论、再写代码**：多窗口是否拒绝而非仅“不承诺”（7.5.12）；任务控制冲突是否新增错误码（7.5.10）；provider 更换是否重新提示隐私确认（7.5.14）。这三项不在本轮拍板范围内，不得在实现里静默二选一。观察侧判 `package_not_allowed` 已由 tower 定论（7.5.1/7.5.4，用户可推翻），实现时照做即可，但若用户推翻须先回写文档。
-2. **测试包与夹具归属**：用户白名单出现后，构建期测试包 `com.psyche.kelivo.phoneagent` 必须被同时视为“已批准”，否则官方与异常套件全线 `permission_required`；跨 UID `securefixture` 夹具包也必须加入测试构建的观察白名单，否则 `FLAG_SECURE` 用例会被 `package_not_allowed` 误伤。推荐都走构建期 allowlist（7.5.4「契约实现时的测试影响」），不写用户白名单。
+2. **测试包与夹具归属**：用户白名单出现后，构建期测试包 `com.psyche.kelivo.phoneagent` 必须作为**构建配置的预批准条目**（不写用户白名单、不产生批准提示、不影响其他应用的可达性），否则官方与异常套件全线 `permission_required`；跨 UID `securefixture` 夹具包同样需在测试构建里预置为已批准，否则 `FLAG_SECURE` 用例会收到 `permission_required`。详见 7.5.4「契约实现时的测试影响」。
 3. **实现顺序**：应用身份与签名解析（7.5.9）→ 白名单门控接入观察与输入（7.5.4/7.5.2）→ 批准交互与终态（7.5.13/7.5.6）→ 首次隐私确认（7.5.14）→ 任务控制与恢复（7.5.10）→ 结果未知语义（7.5.11）→ 审计（7.5.5）。前一步不稳定不要开始后一步。
 4. **重跑要求**：见风险 4；另需为“未批准 → 只回身份”“批准 → 重新观察”“撤销 → 下轮重新 `permission_required`”三条链路各写设备断言，不能只靠单元测试。
 
@@ -1006,9 +1016,9 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 
 > 本节只列顺序与前提，契约全文见 7.5.4、7.5.9–7.5.14 与 7.6 末的「M32 实现顺序与必须先定论的前提」。**当前一行代码都没有实现**，不得把本节当作进度记录。
 
-1. **先定论三项未定稿**（7.5.12 多窗口是否拒绝、7.5.10 任务控制冲突的错误码、7.5.14 provider 更换是否重新提示），并回写本文，再动代码。观察侧判 `package_not_allowed` 已定为 tower 定论（7.5.1/7.5.4），直接按契约实现；若用户推翻需先回写文档。
+1. **先定论三项未定稿**（7.5.12 多窗口是否拒绝、7.5.10 任务控制冲突的错误码、7.5.14 provider 更换是否重新提示），并回写本文，再动代码。观察侧判 `package_not_allowed` 与「批准上线时构建期范围转 deny 清单」已定为 tower 定论（7.5.1/7.5.4），直接按契约实现；若用户推翻需先回写文档。
 2. **应用身份与签名绑定**（7.5.9）：manifest 一次声明 `QUERY_ALL_PACKAGES`；`(包名, 签名 SHA-256)` 双匹配；同签名更新保留授权；签名变化或无法解析 → 未批准；首版明确不支持应用分身与工作资料。
-3. **白名单门控接入观察与输入**（7.5.4/7.5.2）：观察侧顺序含构建期硬禁止（`package_not_allowed`，已定（tower 定论，用户可推翻）），未批准返回 `permission_required` 且只带应用身份；硬基线与窗口类型仍排在前面；测试包与跨 UID 夹具包需被同时视为已批准/可观察，否则两套设备测试全线红。
+3. **白名单门控接入观察与输入**（7.5.4/7.5.2）：同时把构建期范围从 allowlist 转为 deny 清单（7.5.1，已定（tower 定论，用户可推翻）），否则 `permission_required` 不可达；非 deny 成员的未批准应用返回 `permission_required` 且只带应用身份，deny 成员返回 `package_not_allowed`；硬基线与窗口类型仍排在前面；测试包与跨 UID 夹具包需被预置为已批准，否则两套设备测试全线红。
 4. **批准交互与终态**（7.5.6/7.5.13）：卡片 + 通知两入口、TTL、单终态、迟到回调按请求 id 校验、防自我批准；通知 action + `BroadcastReceiver` 是新增基础设施。
 5. **首次启用隐私确认**（7.5.14，方案 B）：只在首次，不每张截图询问；文案进 ARB。
 6. **任务控制与恢复**（7.5.10）：同时只一个任务控制手机；「允许并继续」只恢复关联且仍可恢复的任务，恢复后先重新观察、不重放动作；已派发手势不承诺撤回。
@@ -1115,7 +1125,7 @@ dart analyze --fatal-infos
 - 硬基线扩展（M27）：`com.android.settings` 与常见厂商变体（`com.miui.securitycenter`、`com.xiaomi.misettings`、`com.coloros.*`、`com.oplus.*`、`com.samsung.android.settings`、`com.huawei.systemmanager`）、厂商包安装器（`com.miui.packageinstaller`）、厂商权限控制器（`com.lbe.security.miui`）与证书安装器（`com.android.certinstaller`）均返回 `system_window_denied`；默认电话/短信角色持有者被拒；`RoleHolders.Unavailable` 时拒绝全部输入（`role_resolution_failed`）；Kelivo 自身 `com.psyche.kelivo` 被拒而测试包 `com.psyche.kelivo.phoneagent` 不被误伤（含 `com.psyche.kelivo.phoneagent.other` 前缀反例）；
 - 窗口类型（M27）：`INPUT_METHOD`/`SYSTEM`/`ACCESSIBILITY_OVERLAY`/`SPLIT_SCREEN_DIVIDER`/`UNKNOWN` 均返回 `system_window_denied`，仅 `APPLICATION` 放行；平台常量映射含未定义值 0 与 99 回落 `UNKNOWN`；拒绝消息含固定标识 `window_type_*` 且不含包名；硬基线优先于窗口类型、窗口类型优先于构建期白名单；
 - `WindowState.windowType` 变化使树分页、句柄和截图观测失效（`stale_observation` / `stale_handle`）；
-- 输入错误码优先级：空包名 `no_window` → 硬基线/角色/窗口类型 `system_window_denied` → 非白名单 `package_not_allowed` → 白名单内句柄/截图校验；
+- 输入错误码优先级（**当前实现**）：空包名 `no_window` → 硬基线/角色/窗口类型 `system_window_denied` → 非白名单 `package_not_allowed` → 白名单内句柄/截图校验；
 - debug 夹具 `SecureWindowFixtureActivity` 的 `FLAG_SECURE` 开关、纯色像素和权限请求（只请求、不授予、不使用敏感能力）；
 - 独立服务状态 supported/enabled/connected/sdk 的通道返回；API 29 上截图能力为 false，但 ready 状态与树/节点输入仍可用。
 
@@ -1711,7 +1721,7 @@ JVM 测试（无 Robolectric、无新依赖）：
 - 整屏 `takeScreenshot` 不保证对 `FLAG_SECURE` 报错；secure 内容可能以黑色区域出现在成功截图中。不根据像素猜 secure，不承诺不发送黑图，正常黑色页面保留。
 - 平台明确报错时不得把图片或图片 metadata 交给模型；成功黑图只作为普通截图，模型应优先读树、不凭黑图猜坐标。
 - `FLAG_SECURE` 不阻止无障碍读树和输入；API35 夹具树可读，但不是绝对保证；密码字段、自定义 View、窗口变化仍会影响树；非白名单输入仍被拒绝。
-- `system_window_denied` 同时约束输入与观察；`package_not_allowed` **当前实现**只约束输入，M32 已定契约（未实现）把它扩到输入与观察且排在用户白名单之前。**当前实现**下读树和截图仍可观察普通第三方应用（M28 已让系统窗口、系统无障碍叠加层、分屏分隔条、未知类型窗口与硬基线窗口不可观察，见 7.5.4）；M32 契约（未实现）会让未批准应用的读树与截图返回 `permission_required` 且结果只含应用身份。
+- `system_window_denied` 同时约束输入与观察；`package_not_allowed` **当前实现**只约束输入且语义是 allowlist（只允许测试包），M32 已定契约（未实现）把它扩到输入与观察、并在批准上线时改为只对 deny 成员出现（排在用户白名单之前）。**当前实现**下读树和截图仍可观察普通第三方应用（M28 已让系统窗口、系统无障碍叠加层、分屏分隔条、未知类型窗口与硬基线窗口不可观察，见 7.5.4）；M32 契约（未实现）会让未批准应用的读树与截图返回 `permission_required` 且结果只含应用身份。
 - 应用边界与应用授权（7.5/7.6）**已实现第 1、2 步**：输入路径的硬基线与输入窗口类型判定（M27）、观察边界（M28）已生效，并有 JVM 测试与设备证据；**第 3–5 步与 M32 修订的批准契约全部未实现**——用户白名单、签名绑定、`permission_required`、批准卡片与通知、批准后恢复、任务控制、结果未知语义、`QUERY_ALL_PACKAGES` 应用身份、多窗口首版不支持（拒绝方式未定稿）、首次隐私确认、审计。**当前代码仍是观察不判白名单**：输入只允许构建期测试包，读树与截图对普通第三方应用仍成功。未实现部分不得写成已生效能力（M32 契约全文见 7.5.9–7.5.14）。
 - M32 的契约生效前，**不会**出现任何批准 UI：Mods 页没有白名单管理页、聊天里没有批准卡片、通知栏没有批准按钮、没有首次隐私确认弹窗。所有相关文案与状态都是目标行为描述。
 - `home`/`recents` 执行后前台离开白名单，后续输入（包括 `back`）会被拒绝，模型无法自行回到测试应用，需要用户或宿主恢复。
