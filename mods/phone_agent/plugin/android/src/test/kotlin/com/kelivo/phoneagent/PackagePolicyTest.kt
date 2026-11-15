@@ -7,72 +7,189 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PackagePolicyTest {
-    private val policy = PackagePolicy()
+    private val hashA = "a".repeat(64)
+    private val hashB = "b".repeat(64)
+
+    private val resolvable = mutableMapOf(
+        "com.example.app" to listOf(hashA),
+        "com.example.vendor" to listOf(hashA),
+    )
+    private val storage = InMemoryWhitelistStorage()
+    private val approvals = AppApprovals(
+        resolver = SigningResolver { packageName ->
+            resolvable[packageName]?.let {
+                SigningIdentity(packageName, SigningIdentity.normalizeSha256(it), "Example")
+            }
+        },
+        store = WhitelistStore(storage),
+    )
+
+    private fun policy(
+        denyPackages: Set<String> = emptySet(),
+        preApprovedPackages: Set<String> = setOf(TEST_PACKAGE),
+    ) = PackagePolicy(
+        approvals = approvals,
+        denyPackages = denyPackages,
+        preApprovedPackages = preApprovedPackages,
+    )
+
+    private val policy = policy()
     private val noRoles = RoleHolders.Resolved(emptySet())
+
+    private fun approve(packageName: String, vararg hashes: String) {
+        resolvable[packageName] = if (hashes.isEmpty()) listOf(hashA) else hashes.toList()
+        val outcome = approvals.approve(packageName, now = 1L, sourceAssistantId = null)
+        assertTrue(packageName, outcome.approved)
+    }
 
     private fun require(
         packageName: String?,
         windowType: WindowType = WindowType.APPLICATION,
         roleHolders: RoleHolders = noRoles,
+        using: PackagePolicy = policy,
     ) {
-        policy.requireInputAllowed(packageName, windowType, roleHolders)
+        using.requireInputAllowed(packageName, windowType, roleHolders)
     }
 
     private fun codeOf(
         packageName: String?,
         windowType: WindowType = WindowType.APPLICATION,
         roleHolders: RoleHolders = noRoles,
+        using: PackagePolicy = policy,
     ): String = assertThrows(PhoneAgentError::class.java) {
-        require(packageName, windowType, roleHolders)
+        require(packageName, windowType, roleHolders, using)
     }.code
 
     private fun messageOf(
         packageName: String?,
         windowType: WindowType = WindowType.APPLICATION,
         roleHolders: RoleHolders = noRoles,
+        using: PackagePolicy = policy,
     ): String = assertThrows(PhoneAgentError::class.java) {
-        require(packageName, windowType, roleHolders)
+        require(packageName, windowType, roleHolders, using)
+    }.message.orEmpty()
+
+    private fun observe(
+        packageName: String?,
+        windowType: WindowType = WindowType.APPLICATION,
+        using: PackagePolicy = policy,
+    ) {
+        using.requireObservable(packageName, windowType)
+    }
+
+    private fun observeCode(
+        packageName: String?,
+        windowType: WindowType = WindowType.APPLICATION,
+        using: PackagePolicy = policy,
+    ): String = assertThrows(PhoneAgentError::class.java) {
+        observe(packageName, windowType, using)
+    }.code
+
+    private fun observeMessage(
+        packageName: String?,
+        windowType: WindowType = WindowType.APPLICATION,
+        using: PackagePolicy = policy,
+    ): String = assertThrows(PhoneAgentError::class.java) {
+        observe(packageName, windowType, using)
     }.message.orEmpty()
 
     @Test
-    fun `allows the test package`() {
+    fun `the build pre approved test package needs no user approval`() {
         require(TEST_PACKAGE)
+        observe(TEST_PACKAGE)
+        assertTrue(approvals.approvedApps().isEmpty())
     }
 
     @Test
-    fun `rejects other packages`() {
-        val error = assertThrows(PhoneAgentError::class.java) {
-            require("com.example.app")
-        }
+    fun `an unapproved third party app requires approval for input`() {
+        assertEquals("permission_required", codeOf("com.example.app"))
+    }
 
-        assertEquals("package_not_allowed", error.code)
+    @Test
+    fun `an approved third party app accepts input`() {
+        approve("com.example.app")
+
+        require("com.example.app")
+    }
+
+    @Test
+    fun `a signing change turns an approved app back into permission required`() {
+        approve("com.example.app")
+        require("com.example.app")
+
+        resolvable["com.example.app"] = listOf(hashB)
+
+        val message = messageOf("com.example.app")
+        assertEquals("permission_required", codeOf("com.example.app"))
+        assertTrue(message.contains("bbbbbbbb"))
+        assertFalse(message.contains(hashA))
+    }
+
+    @Test
+    fun `an unreadable signing certificate fails closed with a fixed tag`() {
+        approve("com.example.app")
+        resolvable.remove("com.example.app")
+
+        val message = messageOf("com.example.app")
+
+        assertEquals("permission_required", codeOf("com.example.app"))
+        assertTrue(message.contains("signing_unavailable"))
+        assertFalse(message.contains("aaaaaaaa"))
+    }
+
+    @Test
+    fun `revoking blocks the next input immediately`() {
+        approve("com.example.app")
+        require("com.example.app")
+
+        approvals.revoke("com.example.app")
+
+        assertEquals("permission_required", codeOf("com.example.app"))
+    }
+
+    @Test
+    fun `the permission required message carries only identity and the next step`() {
+        val message = messageOf("com.example.app")
+
+        assertTrue(message.contains("com.example.app"))
+        assertTrue(message.contains("aaaaaaaa"))
+        assertTrue(message.contains("Example"))
+        assertTrue(message.contains("Do not retry the same call repeatedly"))
+    }
+
+    @Test
+    fun `the observation permission message states nothing was captured`() {
+        val message = observeMessage("com.example.app")
+
+        assertTrue(message.contains("com.example.app"))
+        assertTrue(message.contains("aaaaaaaa"))
+        assertTrue(message.contains("No screenshot or UI text was captured or sent"))
+        assertTrue(message.contains("Do not retry the same call repeatedly"))
+    }
+
+    @Test
+    fun `input and observation permission messages differ`() {
+        val input = messageOf("com.example.app")
+        val observation = observeMessage("com.example.app")
+
+        assertTrue(input.contains("was not executed and is not queued"))
+        assertFalse(observation.contains("was not executed and is not queued"))
+        assertTrue(observation.contains("re-observe before acting"))
     }
 
     @Test
     fun `rejects system windows`() {
-        val error = assertThrows(PhoneAgentError::class.java) {
-            require("com.android.systemui")
-        }
-
-        assertEquals("system_window_denied", error.code)
+        assertEquals("system_window_denied", codeOf("com.android.systemui"))
     }
 
     @Test
     fun `rejects permission dialogs`() {
-        val error = assertThrows(PhoneAgentError::class.java) {
-            require("com.google.android.permissioncontroller")
-        }
-
-        assertEquals("system_window_denied", error.code)
+        assertEquals("system_window_denied", codeOf("com.google.android.permissioncontroller"))
     }
 
     @Test
     fun `rejects a missing package`() {
-        val error = assertThrows(PhoneAgentError::class.java) {
-            require(null)
-        }
-
-        assertEquals("no_window", error.code)
+        assertEquals("no_window", codeOf(null))
     }
 
     @Test
@@ -147,7 +264,7 @@ class PackagePolicyTest {
     @Test
     fun `the test package is not matched by prefix or contains`() {
         require(TEST_PACKAGE)
-        assertEquals("package_not_allowed", codeOf("com.psyche.kelivo.phoneagent.other"))
+        assertEquals("permission_required", codeOf("com.psyche.kelivo.phoneagent.other"))
     }
 
     @Test
@@ -161,11 +278,6 @@ class PackagePolicyTest {
         ).forEach { type ->
             assertEquals(type.name, "system_window_denied", codeOf(TEST_PACKAGE, windowType = type))
         }
-    }
-
-    @Test
-    fun `allows application windows in the build allow list`() {
-        require(TEST_PACKAGE, windowType = WindowType.APPLICATION)
     }
 
     @Test
@@ -192,70 +304,90 @@ class PackagePolicyTest {
     }
 
     @Test
-    fun `window type is judged before the build allow list`() {
-        val message = messageOf("com.example.app", windowType = WindowType.INPUT_METHOD)
+    fun `hard baseline takes precedence over the user whitelist`() {
+        approve("com.android.settings")
+
+        assertEquals("system_window_denied", codeOf("com.android.settings"))
+        assertTrue(messageOf("com.android.settings").contains("hard_baseline"))
+        assertEquals("system_window_denied", observeCode("com.android.settings"))
+    }
+
+    @Test
+    fun `window type is judged before the build deny list`() {
+        val denied = policy(denyPackages = setOf("com.example.app"))
+        val message = messageOf("com.example.app", windowType = WindowType.INPUT_METHOD, using = denied)
 
         assertTrue(message.contains("window_type_ime"))
         assertFalse(message.contains("package_not_allowed"))
     }
 
     @Test
-    fun `platform window type mapping falls back to unknown`() {
-        assertEquals(WindowType.APPLICATION, WindowType.fromPlatformType(1))
-        assertEquals(WindowType.INPUT_METHOD, WindowType.fromPlatformType(2))
-        assertEquals(WindowType.SYSTEM, WindowType.fromPlatformType(3))
-        assertEquals(WindowType.ACCESSIBILITY_OVERLAY, WindowType.fromPlatformType(4))
-        assertEquals(WindowType.SPLIT_SCREEN_DIVIDER, WindowType.fromPlatformType(5))
-        assertEquals(WindowType.UNKNOWN, WindowType.fromPlatformType(0))
-        assertEquals(WindowType.UNKNOWN, WindowType.fromPlatformType(99))
-        assertFalse(WindowType.UNKNOWN.allowsInput)
-        assertFalse(WindowType.UNKNOWN.allowsObservation)
-    }
+    fun `the build deny list reports package not allowed for input`() {
+        val denied = policy(denyPackages = setOf("com.example.app"))
 
-    private fun observe(packageName: String?, windowType: WindowType = WindowType.APPLICATION) {
-        policy.requireObservable(packageName, windowType)
-    }
-
-    private fun observeCode(
-        packageName: String?,
-        windowType: WindowType = WindowType.APPLICATION,
-    ): String = assertThrows(PhoneAgentError::class.java) {
-        observe(packageName, windowType)
-    }.code
-
-    private fun observeMessage(
-        packageName: String?,
-        windowType: WindowType = WindowType.APPLICATION,
-    ): String = assertThrows(PhoneAgentError::class.java) {
-        observe(packageName, windowType)
-    }.message.orEmpty()
-
-    @Test
-    fun `observation allows application windows`() {
-        observe(TEST_PACKAGE)
+        assertEquals("package_not_allowed", codeOf("com.example.app", using = denied))
+        assertTrue(messageOf("com.example.app", using = denied).contains("build_denied"))
     }
 
     @Test
-    fun `observation allows input method windows`() {
-        observe(TEST_PACKAGE, WindowType.INPUT_METHOD)
+    fun `the build deny list reports package not allowed for observation`() {
+        val denied = policy(denyPackages = setOf("com.example.app"))
+
+        assertEquals("package_not_allowed", observeCode("com.example.app", using = denied))
     }
 
     @Test
-    fun `observation allows packages outside the input allow list`() {
-        // 未批准应用也必须可观察，否则模型无法向用户解释为什么需要授权。
+    fun `the build deny list is judged before the user whitelist`() {
+        approve("com.example.app")
+        val denied = policy(denyPackages = setOf("com.example.app"))
+
+        assertEquals("package_not_allowed", codeOf("com.example.app", using = denied))
+        assertEquals("package_not_allowed", observeCode("com.example.app", using = denied))
+    }
+
+    @Test
+    fun `an app outside the deny list requires approval instead of package not allowed`() {
+        val denied = policy(denyPackages = setOf("com.example.blocked"))
+
+        assertEquals("permission_required", codeOf("com.example.app", using = denied))
+        assertEquals("permission_required", observeCode("com.example.app", using = denied))
+    }
+
+    @Test
+    fun `approved apps still pass the build deny list check when unlisted`() {
+        approve("com.example.app")
+
+        require("com.example.app")
+        observe("com.example.app")
+    }
+
+    @Test
+    fun `unapproved packages are not observable`() {
+        assertEquals("permission_required", observeCode("com.example.app"))
+        assertTrue(observeMessage("com.example.app").contains("No screenshot or UI text"))
+    }
+
+    @Test
+    fun `approved packages are observable`() {
+        approve("com.example.app")
+
         observe("com.example.app")
         observe("com.example.app", WindowType.INPUT_METHOD)
     }
 
     @Test
-    fun `observation does not report the input allow list`() {
-        val message = assertThrows(PhoneAgentError::class.java) {
-            observe("com.example.app", WindowType.SYSTEM)
-        }.message.orEmpty()
-
-        assertFalse(message.contains("package_not_allowed"))
-        assertFalse(message.contains("permission_required"))
-        assertFalse(message.contains(TEST_PACKAGE))
+    fun `observation does not apply the input role holders`() {
+        assertEquals(
+            "permission_required",
+            observeCode("com.miui.dialer", WindowType.APPLICATION),
+        )
+        assertEquals(
+            "system_window_denied",
+            codeOf(
+                "com.miui.dialer",
+                roleHolders = RoleHolders.Resolved(setOf("com.miui.dialer")),
+            ),
+        )
     }
 
     @Test
@@ -335,6 +467,53 @@ class PackagePolicyTest {
         assertFalse(WindowType.INPUT_METHOD.allowsInput)
         assertTrue(WindowType.APPLICATION.allowsObservation)
         assertTrue(WindowType.APPLICATION.allowsInput)
+    }
+
+    @Test
+    fun `the cross uid fixture is pre approved only in debuggable builds`() {
+        val debugPolicy = policy(preApprovedPackages = buildPreApprovedPackages(debuggable = true))
+        val releasePolicy = policy(preApprovedPackages = buildPreApprovedPackages(debuggable = false))
+
+        require(SECURE_FIXTURE_PACKAGE, using = debugPolicy)
+        observe(SECURE_FIXTURE_PACKAGE, using = debugPolicy)
+        assertEquals(
+            "permission_required",
+            codeOf(SECURE_FIXTURE_PACKAGE, using = releasePolicy),
+        )
+        assertEquals(
+            "permission_required",
+            observeCode(SECURE_FIXTURE_PACKAGE, using = releasePolicy),
+        )
+    }
+
+    @Test
+    fun `pre approved entries never appear in the user whitelist`() {
+        val debugPolicy = policy(preApprovedPackages = buildPreApprovedPackages(debuggable = true))
+
+        require(SECURE_FIXTURE_PACKAGE, using = debugPolicy)
+
+        assertTrue(approvals.approvedApps().isEmpty())
+    }
+
+    @Test
+    fun `pre approvals do not make other apps reachable`() {
+        val debugPolicy = policy(preApprovedPackages = buildPreApprovedPackages(debuggable = true))
+
+        assertEquals("permission_required", codeOf("com.example.app", using = debugPolicy))
+        assertEquals("permission_required", observeCode("com.example.other", using = debugPolicy))
+    }
+
+    @Test
+    fun `platform window type mapping falls back to unknown`() {
+        assertEquals(WindowType.APPLICATION, WindowType.fromPlatformType(1))
+        assertEquals(WindowType.INPUT_METHOD, WindowType.fromPlatformType(2))
+        assertEquals(WindowType.SYSTEM, WindowType.fromPlatformType(3))
+        assertEquals(WindowType.ACCESSIBILITY_OVERLAY, WindowType.fromPlatformType(4))
+        assertEquals(WindowType.SPLIT_SCREEN_DIVIDER, WindowType.fromPlatformType(5))
+        assertEquals(WindowType.UNKNOWN, WindowType.fromPlatformType(0))
+        assertEquals(WindowType.UNKNOWN, WindowType.fromPlatformType(99))
+        assertFalse(WindowType.UNKNOWN.allowsInput)
+        assertFalse(WindowType.UNKNOWN.allowsObservation)
     }
 
     @Test

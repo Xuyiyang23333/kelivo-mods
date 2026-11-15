@@ -1152,6 +1152,11 @@ Future<bool> _waitForStableWindow(
         lastError == 'no_window' ||
         lastError == 'rate_limited' ||
         lastError == 'stale_observation' ||
+        // 批准门控（M33）：前台若不是本应用且未获批准（例如重启后宿主把
+        // launcher 留在前台），观察返回 `permission_required`。这与「前台还没
+        // 回到应用」是同一个状态，仍属可重试的窗口未就绪；成功条件
+        // （`package_name == _appPackage`）不变，超时仍失败。
+        lastError == 'permission_required' ||
         (lastError == 'system_window_denied' &&
             _isRetryableObservationDenial(lastMessage));
     if (!windowNotReady) {
@@ -1251,8 +1256,15 @@ Future<void> _expectSystemNavigationDenied(
     'message=${foreground.message}',
   );
 
-  // 输入错误码按硬基线集合成员区分：systemui 等硬基线包 → system_window_denied，
-  // 其他包 → package_not_allowed；无法确定时只接受这两种之一。
+  // 输入错误码按门控层区分：硬基线包（systemui 等）→ system_window_denied；
+  // 构建期 deny 成员 → package_not_allowed；其余第三方未批准应用（实测 launcher）
+  // → permission_required（M33：批准 = 读＋操作一体）。三者都只接受精确码，
+  // 不接受“任意错误”；并要求两次判定一致，否则说明前台在两次调用之间变了。
+  const acceptedCodes = <String>[
+    'system_window_denied',
+    'package_not_allowed',
+    'permission_required',
+  ];
   final nodeDenied = await _input(service, <String, dynamic>{
     'action': 'tap',
     'node_id': tapNode!['node_id'],
@@ -1260,14 +1272,14 @@ Future<void> _expectSystemNavigationDenied(
   final nodeCode = _payload(nodeDenied)['error'] as String?;
   expect(
     nodeCode,
-    anyOf('system_window_denied', 'package_not_allowed'),
+    isIn(acceptedCodes),
     reason: '$action 后节点输入返回了预期之外的错误码：$nodeCode。',
   );
   final backDenied = await _input(service, <String, dynamic>{'action': 'back'});
   final backCode = _payload(backDenied)['error'] as String?;
   expect(
     backCode,
-    anyOf('system_window_denied', 'package_not_allowed'),
+    isIn(acceptedCodes),
     reason: '$action 后 back 返回了预期之外的错误码：$backCode。',
   );
   final expectedCodes = <String>{nodeCode!, backCode!};
@@ -1304,8 +1316,18 @@ typedef _ForegroundProbe = ({
 
 /// 轮询读树，直到前台不再是测试应用本身。超时返回 null。
 ///
-/// 不能只等“读树被拒”：`home`/`recents` 实测落在 launcher（TYPE_APPLICATION），
-/// 观察是允许的。因此成功时比较包名，被拒时要求是观察边界的精确来源标识。
+/// 不能只等“读树被拒”：观察边界（M28）后 `home`/`recents` 实测落在 launcher
+/// （`TYPE_APPLICATION`），而批准门控（M33）让未批准的 launcher 读树返回
+/// `permission_required` 且只回身份。因此这里接受三类结果：
+///
+/// 1. 读树**成功**且 `package_name` 不是测试应用（测试包是构建配置预批准条目）；
+/// 2. `no_window`；
+/// 3. `system_window_denied` 且带真实观察边界标识；
+/// 4. `permission_required` 且消息能确认前台已不是测试应用（未批准应用的唯一
+///    可见信息就是身份，因此以“消息含包名且不是测试应用”为准）。
+///
+/// **刻意排除 `window_type_unknown`**，也**不接受**不带身份的 `permission_required`
+/// ——没有身份就无法证明前台已离开本应用，退化成“任意错误即通过”。
 Future<_ForegroundProbe?> _waitForForegroundLeftApp(
   PhoneAgentService service, {
   required Duration timeout,
@@ -1328,6 +1350,13 @@ Future<_ForegroundProbe?> _waitForForegroundLeftApp(
         }
       } else if (error == 'no_window') {
         return (packageName: null, error: error, message: message);
+      } else if (error == 'permission_required' &&
+          _permissionRequiredIdentity(message) != null) {
+        return (
+          packageName: _permissionRequiredIdentity(message),
+          error: error,
+          message: message,
+        );
       } else if (error == 'system_window_denied' &&
           _isObservationBoundaryMessage(message)) {
         // 硬基线先于窗口类型判定，所以通知栏/systemui 的来源标识是
@@ -1338,6 +1367,22 @@ Future<_ForegroundProbe?> _waitForForegroundLeftApp(
     await Future<void>.delayed(_pollInterval);
   }
   return null;
+}
+
+/// 从 `permission_required` 消息里取出前台包名（未批准应用唯一可见的信息）。
+/// 只认“`Reading <package> (signing cert …)` / `signing_unavailable`”这种身份句式，
+/// 且包名必须不是测试应用本身；其他形态一律返回 null，不做模糊匹配。
+String? _permissionRequiredIdentity(String message) {
+  final match = RegExp(
+    r'^Reading ([A-Za-z0-9_.]+) \(signing cert [0-9a-f]{8}\)',
+  ).firstMatch(message);
+  final unavailable = RegExp(
+    r'^Reading ([A-Za-z0-9_.]+), signing_unavailable',
+  ).firstMatch(message);
+  final packageName = match?.group(1) ?? unavailable?.group(1);
+  if (packageName == null || packageName.isEmpty) return null;
+  if (packageName == _appPackage) return null;
+  return packageName;
 }
 
 /// 观察边界拒绝中「前台还没回到应用」这一可重试子集。

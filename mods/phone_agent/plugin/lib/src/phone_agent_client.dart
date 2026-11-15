@@ -78,6 +78,58 @@ class PhoneAgentClient {
     return _invokeMap('input', Map<String, dynamic>.from(arguments));
   }
 
+  /// 已获用户批准的应用列表（不含构建配置的预批准条目）。
+  Future<List<PhoneAgentApprovedApp>> approvedApps() async {
+    final map = await _invokeMap('approvedApps');
+    final apps = map['apps'];
+    if (apps is! List) {
+      throw const PhoneAgentException(
+        'invalid_response',
+        'approvedApps returned an unexpected payload.',
+      );
+    }
+    return apps
+        .whereType<Map>()
+        .map(
+          (entry) =>
+              PhoneAgentApprovedApp.fromMap(Map<String, dynamic>.from(entry)),
+        )
+        .toList(growable: false);
+  }
+
+  /// 写入批准记录。原生侧在写入前重新解析当前签名，解析失败或与
+  /// [expectedSigningSha256] 不一致都不会写入。
+  Future<PhoneAgentApprovedApp> approveApp(
+    String packageName, {
+    String? sourceAssistantId,
+    List<String>? expectedSigningSha256,
+  }) async {
+    if (packageName.trim().isEmpty) {
+      throw const PhoneAgentException(
+        'invalid_argument',
+        'packageName is required.',
+      );
+    }
+    final map = await _invokeMap('approveApp', <String, dynamic>{
+      'package_name': packageName,
+      if (sourceAssistantId != null) 'source_assistant_id': sourceAssistantId,
+      if (expectedSigningSha256 != null)
+        'expected_signing_sha256': expectedSigningSha256,
+    });
+    return PhoneAgentApprovedApp.fromMap(map);
+  }
+
+  /// 撤销批准记录，立即生效。
+  Future<void> revokeApp(String packageName) async {
+    if (packageName.trim().isEmpty) {
+      throw const PhoneAgentException(
+        'invalid_argument',
+        'packageName is required.',
+      );
+    }
+    await _invoke('revokeApp', <String, dynamic>{'package_name': packageName});
+  }
+
   Future<Map<String, dynamic>> _invokeMap(
     String method, [
     Map<String, dynamic>? arguments,

@@ -44,4 +44,21 @@ class KelivoPhoneAgent {
   /// 执行节点、坐标或系统输入。参数使用工具 schema 的 snake_case 键。
   Future<Map<String, dynamic>> input(Map<String, dynamic> arguments) =>
       _client.input(arguments);
+
+  /// 已获用户批准的应用列表（不含构建配置的预批准条目）。
+  Future<List<PhoneAgentApprovedApp>> approvedApps() => _client.approvedApps();
+
+  /// 写入一条批准记录（幂等）。写入前原生侧会重新解析当前签名。
+  Future<PhoneAgentApprovedApp> approveApp(
+    String packageName, {
+    String? sourceAssistantId,
+    List<String>? expectedSigningSha256,
+  }) => _client.approveApp(
+    packageName,
+    sourceAssistantId: sourceAssistantId,
+    expectedSigningSha256: expectedSigningSha256,
+  );
+
+  /// 撤销一条批准记录。立即生效；已发出的动作不受影响。
+  Future<void> revokeApp(String packageName) => _client.revokeApp(packageName);
 }

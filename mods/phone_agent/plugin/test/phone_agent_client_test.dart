@@ -318,4 +318,153 @@ void main() {
       ),
     );
   });
+
+  test('approvedApps parses identity metadata only', () async {
+    mock(
+      (call) async => <String, dynamic>{
+        'apps': <dynamic>[
+          <String, dynamic>{
+            'package_name': 'com.example.app',
+            'signing_prefix': 'abcdef12',
+            'approved_at': 1700000000000,
+            'last_approved_at': 1700000001000,
+            'source_assistant_id': 'assistant-a',
+          },
+        ],
+      },
+    );
+
+    final apps = await PhoneAgentClient().approvedApps();
+
+    expect(calls.single.method, 'approvedApps');
+    expect(apps, hasLength(1));
+    expect(apps.single.packageName, 'com.example.app');
+    expect(apps.single.signingPrefix, 'abcdef12');
+    expect(apps.single.sourceAssistantId, 'assistant-a');
+  });
+
+  test('approvedApps rejects a malformed payload', () async {
+    mock((call) async => <String, dynamic>{'apps': 'nope'});
+
+    await expectLater(
+      PhoneAgentClient().approvedApps(),
+      throwsA(
+        isA<PhoneAgentException>().having(
+          (error) => error.code,
+          'code',
+          'invalid_response',
+        ),
+      ),
+    );
+  });
+
+  test('approveApp sends the identity and expected certificate', () async {
+    mock(
+      (call) async => <String, dynamic>{
+        'package_name': 'com.example.app',
+        'signing_prefix': 'abcdef12',
+        'approved_at': 1700000000000,
+        'outcome': 'approved',
+      },
+    );
+
+    final entry = await PhoneAgentClient().approveApp(
+      'com.example.app',
+      sourceAssistantId: 'assistant-a',
+      expectedSigningSha256: <String>['a' * 64],
+    );
+
+    expect(calls.single.method, 'approveApp');
+    expect(calls.single.arguments, <String, dynamic>{
+      'package_name': 'com.example.app',
+      'source_assistant_id': 'assistant-a',
+      'expected_signing_sha256': <String>['a' * 64],
+    });
+    expect(entry.packageName, 'com.example.app');
+    expect(entry.signingPrefix, 'abcdef12');
+  });
+
+  test('approveApp omits optional arguments when absent', () async {
+    mock(
+      (call) async => <String, dynamic>{
+        'package_name': 'com.example.app',
+        'signing_prefix': 'abcdef12',
+        'approved_at': 1,
+      },
+    );
+
+    await PhoneAgentClient().approveApp('com.example.app');
+
+    expect(calls.single.arguments, <String, dynamic>{
+      'package_name': 'com.example.app',
+    });
+  });
+
+  test('approveApp validates the package name before invoking', () async {
+    mock((call) async => <String, dynamic>{});
+
+    await expectLater(
+      PhoneAgentClient().approveApp('   '),
+      throwsA(
+        isA<PhoneAgentException>().having(
+          (error) => error.code,
+          'code',
+          'invalid_argument',
+        ),
+      ),
+    );
+    expect(calls, isEmpty);
+  });
+
+  test(
+    'approveApp surfaces a signing mismatch as a structured error',
+    () async {
+      mock(
+        (call) async => throw PlatformException(
+          code: 'signing_mismatch',
+          message: 'The signing certificate changed.',
+        ),
+      );
+
+      await expectLater(
+        PhoneAgentClient().approveApp(
+          'com.example.app',
+          expectedSigningSha256: <String>['a' * 64],
+        ),
+        throwsA(
+          isA<PhoneAgentException>().having(
+            (error) => error.code,
+            'code',
+            'signing_mismatch',
+          ),
+        ),
+      );
+    },
+  );
+
+  test('revokeApp forwards the package name', () async {
+    mock(
+      (call) async => <String, dynamic>{
+        'package_name': 'com.example.app',
+        'revoked': true,
+      },
+    );
+
+    await PhoneAgentClient().revokeApp('com.example.app');
+
+    expect(calls.single.method, 'revokeApp');
+    expect(calls.single.arguments, <String, dynamic>{
+      'package_name': 'com.example.app',
+    });
+  });
+
+  test('revokeApp validates the package name before invoking', () async {
+    mock((call) async => <String, dynamic>{});
+
+    await expectLater(
+      PhoneAgentClient().revokeApp(''),
+      throwsA(isA<PhoneAgentException>()),
+    );
+    expect(calls, isEmpty);
+  });
 }
