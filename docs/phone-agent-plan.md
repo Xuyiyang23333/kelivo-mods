@@ -975,7 +975,7 @@ Android 15 / API 35。
 
 > **R1 返工后的最终交付树是 `474262a402cca985`**（`modsetHash` `474262a402cca985f216636ac8dbd0b8af9ffd31507acb7feb1614a103853fac`，`plan`/`apply`/`verify` 通过）。返工只改文档、测试文案与新增宿主脚本，**未重跑设备**；`run17`–`run20` 的设备结果对应返工前的测试文件。返工对测试的改动是：`_waitForStableWindow` 的可重试集合排除 `window_type_unknown`（收窄，不影响已通过的轮次——`RESTART_WAIT_STOPPED`/`TIMEOUT` 在 run17–run20 均为 0 次）、失败文案改为不写死 `no_window`、服务重启后用不打印标记的 `_waitForReady` 消除双触发。这些改动都不改变任何断言的通过条件。
 
-**异常套件 `phone_agent_exception_test.dart`：四个绿轮、`+8`、`All tests passed!`、EXIT=0**——`run17.log`（477s）、`run18.log`（490s）在 `f26c1c7ed3238610`；`run19.log`（721s）在 `b9ed56f89b3146c9`；`run20.log`（574s）在**最终交付树** `8a44ec55a023185e`。即 **3 棵树 / 4 轮**全部 `+8`。可复现的基线是 `run17`/`run18`（同一棵树、同一份测试文件）与 `run20`（最终交付树）。
+**异常套件 `phone_agent_exception_test.dart`：四个绿轮、`+8`、`All tests passed!`、EXIT=0**——`run17.log`（477s）、`run18.log`（490s）在 `f26c1c7ed3238610`；`run19.log`（721s）在 `b9ed56f89b3146c9`；`run20.log`（574s）在 `8a44ec55a023185e`（返工前测试树）。即 **3 棵树 / 4 轮**全部 `+8`。可复现的基线是 `run17`/`run18`（同一棵树、同一份测试文件）与 `run20`（`8a44ec55a023185e`，其测试文件等于返工前分支 blob `72f5b605…`）。
 
 | 用例 | 结果 | 设备证据 |
 | --- | --- | --- |
@@ -1002,7 +1002,7 @@ Android 15 / API 35。
 
 机制层面的支撑目前只有既有 JVM 测试 `ObservationRegistryTest` 的 `invalidateAll clears handles`（纯 JVM，不覆盖真实 Android 生命周期）；不得据此宣称真实服务重启的清算路径已通过设备验证。
 
-**官方 `phone_agent_test.dart`：`+2`、`All tests passed!`、EXIT=0**（`official_api35.log` elapsed 334s，运行树 `f26c1c7ed3238610`；`official_lf.log`，运行树**最终交付树** `8a44ec55a023185e`）。覆盖截图 → 读树 → 节点点击 → 坐标滑动 → 节点滚动 → 聚焦后 `set_text` → 二次读树，以及 Mods 页三态选择。
+**官方 `phone_agent_test.dart`：`+2`、`All tests passed!`、EXIT=0**（`official_api35.log` elapsed 334s，运行树 `f26c1c7ed3238610`；`official_lf.log`，运行树 `8a44ec55a023185e`）。覆盖截图 → 读树 → 节点点击 → 坐标滑动 → 节点滚动 → 聚焦后 `set_text` → 二次读树，以及 Mods 页三态选择。
 
 **`exc5` 的 `screenshot_required` vs `stale_observation` 归因**：`PHONE_AGENT_STALE_COORDINATES` 在 run10/11/12/13/17/18 六轮一致给出 `error=stale_observation`、消息 `The screen changed since the screenshot`。产品侧的判定是 `ObservationRegistry.requireScreenshot` 里的两个**确定性分支**（同一把 `@Synchronized` 锁内顺序判断）：screenshot 槽位为 `null` → `screenshot_required`；槽位存在但 TTL 过期或窗口/包名/尺寸/旋转/窗口类型变化 → `stale_observation`（并清空槽位）。
 
