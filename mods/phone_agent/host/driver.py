@@ -63,13 +63,23 @@ def log(msg):
             fh.write(line + "\n")
 
 
-def adb(*args, timeout=60):
+def adb(*args, timeout=60, check=False):
     env = dict(os.environ)
     env["MSYS_NO_PATHCONV"] = "1"
-    return subprocess.run(
-        ["adb", "-s", SERIAL, *args], capture_output=True, text=True,
-        timeout=timeout, env=env,
-    ).stdout
+    try:
+        proc = subprocess.run(
+            ["adb", "-s", SERIAL, *args], capture_output=True, text=True,
+            timeout=timeout, env=env,
+        )
+    except subprocess.TimeoutExpired:
+        # M36: a single slow `uiautomator dump` used to raise out of the enable
+        # thread and kill it silently, leaving the suite waiting for a service
+        # that was never enabled. Log and keep going; the caller retries.
+        log(f"adb timeout ({timeout}s): {' '.join(args)}")
+        if check:
+            raise
+        return ""
+    return proc.stdout
 
 
 def dump_ui(name="ui"):
@@ -152,8 +162,18 @@ def ensure_app_foreground(expect_activity="com.psyche.kelivo.MainActivity"):
     matched, and PHONE_AGENT_TAP_TARGET was missing.
     """
     _shade_stop.set()
+    # M36: the product performs `home`/`recents` itself and it may do so while
+    # this loop is still bringing the app back (the home/recents marker is
+    # informational and runs no host action). Without this guard the leftover
+    # `am start` landed *after* `recents` and pulled the app forward again, so
+    # the suite saw the app still on top and could not prove the navigation
+    # left it. Abort a superseded bring-up instead of fighting the product.
+    generation = _nav_generation
     stable = 0
     for _ in range(18):
+        if generation != _nav_generation:
+            log("ensure_app_foreground: superseded by product navigation, stop")
+            return False
         top = top_activity() or ""
         focus, _ = foreground()
         focused_harness = bool(focus) and expect_activity in focus
@@ -204,20 +224,34 @@ def _find_service_entry():
     M30: the "downloaded/installed services" section sits far below the fold; a
     single small swipe never reached it and the driver reported
     `entry not found` while the app was installed and the row existed.
+
+    M36: four "back to top" swipes were not enough after the previous round had
+    left the list scrolled (and a leftover detail page could still be on top),
+    so the walk-down started mid-list and missed the installed-service rows
+    above it. Reset harder and only walk down from a confirmed top.
     """
+    # A leftover service-detail page sits in the same Settings task, so
+    # `am start` only brings that task to the front (`Activity not started, its
+    # current task has been brought to the front`) and the list is never shown.
+    # One BACK leaves the detail page and lands on the list — but only when
+    # Settings is actually focused: an unconditional BACK would land on the app
+    # under test (M36 round 5 finished/ANR'd the harness that way).
+    if "com.android.settings" in (foreground()[0] or ""):
+        adb("shell", "input", "keyevent", "KEYCODE_BACK")
+        time.sleep(1.0)
     adb("shell", "am", "start", "-a", "android.settings.ACCESSIBILITY_SETTINGS")
     time.sleep(2.6)
-    # The settings list keeps its previous scroll position, so "Downloaded apps"
-    # can be off-screen above. Reset to the top, then walk down.
-    for _ in range(4):
-        adb("shell", "input", "swipe", "540", "400", "540", "2100", "300")
-        time.sleep(0.7)
-    for step in range(10):
+    # The list keeps its previous scroll position; "Downloaded apps" can be off
+    # screen above. Eight drags are cheap (~3 s) and guarantee the top.
+    for _ in range(8):
+        adb("shell", "input", "swipe", "540", "500", "540", "2000", "250")
+        time.sleep(0.35)
+    for step in range(6):
         xml = dump_ui(f"a11y-list-{step}")
         entry = find(xml, text="Kelivo Phone Agent")
         if entry is not None:
             return entry
-        adb("shell", "input", "swipe", "540", "2000", "540", "700", "400")
+        adb("shell", "input", "swipe", "540", "2000", "540", "900", "400")
         time.sleep(1.0)
     return None
 
@@ -512,7 +546,9 @@ MARKERS = {
     "PHONE_AGENT_OVERLAY_HOST_TOUCH_RECOVER": lambda: recover_from_shade(),
     "PHONE_AGENT_ROTATION_HOST_ACTION": _NOOP,
     # `home` / `recents` are performed by the product input action itself; the
-    # marker is informational only.
+    # marker is informational only (it must NOT take a queue slot: correction
+    # #4 — a queued no-op delays the real `am start` and pushes the app back).
+    # M36: the generation bump happens in `dispatch`, before the queue.
     "PHONE_AGENT_HOME": _NOOP,
     "PHONE_AGENT_RECENTS": _NOOP,
     "PHONE_AGENT_PERMISSION_WINDOW": lambda: open_permission_dialog(),
@@ -535,6 +571,24 @@ MARKERS = {
 
 action_queue = queue.Queue()
 _shade_stop = threading.Event()
+# M36: bumped whenever the product performs its own `home`/`recents` navigation
+# or the host is asked to bring the app back. A bring-up loop that started
+# before the bump must stop, otherwise its `am start` lands after the
+# navigation and pulls the app forward again.
+_nav_generation = 0
+
+
+def bump_navigation(reason):
+    """Cancel any in-flight `ensure_app_foreground` bring-up.
+
+    Called when the product performs `home`/`recents` itself: the suite must be
+    able to observe that the foreground left the app, and a bring-up loop that
+    started earlier would otherwise re-foreground it right afterwards (M36
+    run1/run2: `[driver ...] return_to_app` 3 s after `PHONE_AGENT_RECENTS`).
+    """
+    global _nav_generation
+    _nav_generation += 1
+    log(f"navigation generation -> {_nav_generation} ({reason})")
 
 
 def dispatch(marker, source):
@@ -543,6 +597,12 @@ def dispatch(marker, source):
         # Cancel an in-flight shade swipe before waiting for the action lock, so
         # the recovery does not sit behind the loop it is meant to stop.
         _shade_stop.set()
+    if marker in ("PHONE_AGENT_HOME", "PHONE_AGENT_RECENTS"):
+        # M36: the product has already performed the navigation. Bump the
+        # generation *here* (not in the queue) so any in-flight host bring-up
+        # stops immediately; a queued action would also occupy a slot and delay
+        # the next real `am start` (correction #4).
+        bump_navigation(marker)
     action = MARKERS.get(marker)
     if action is not None and action is _NOOP:
         # Informational markers (home/recents are executed by the product

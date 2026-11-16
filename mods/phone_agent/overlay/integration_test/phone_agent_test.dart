@@ -373,6 +373,20 @@ void main() {
     await tester.ensureVisible(phoneAgentMode);
     await tester.tap(phoneAgentMode);
     await tester.pumpAndSettle();
+    // M34：首次启用 Phone Agent 会先弹出一次性隐私确认（方案 B）。未确认时选择
+    // **不会**写入，所以这里必须走完真实弹窗，而不是绕过它。弹窗要等原生
+    // `privacyNotice` 通道返回后才出现，`pumpAndSettle` 不等平台通道，因此有界轮询。
+    final privacyConfirm = find.text('I understand');
+    for (var i = 0; i < 60 && privacyConfirm.evaluate().isEmpty; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    if (privacyConfirm.evaluate().isNotEmpty) {
+      expect(find.text('Before you enable Phone Agent'), findsOneWidget);
+      await tester.tap(privacyConfirm);
+      await tester.pumpAndSettle();
+    } else {
+      debugPrint('PHONE_AGENT_PRIVACY_DIALOG: absent (already acknowledged)');
+    }
     for (
       var i = 0;
       i < 40 &&
