@@ -373,6 +373,34 @@ void main() {
     await tester.ensureVisible(phoneAgentMode);
     await tester.tap(phoneAgentMode);
     await tester.pumpAndSettle();
+    // M34：首次启用 Phone Agent 会先弹出一次性隐私确认（方案 B）。未确认时选择
+    // **不会**写入，所以这里必须走完真实弹窗，而不是绕过它。弹窗要等原生
+    // `privacyNotice` 通道返回后才出现，`pumpAndSettle` 不等平台通道，因此有界轮询。
+    //
+    // 文案不硬编码英文：从 l10n 按 harness 固定的 `en` locale 取，键改名/译文改动会
+    // 跟着走。诊断串必须区分「此前已确认」与「超时仍未出现」——把两者合并会让非英文
+    // locale 下的真实问题（找不到按钮）伪装成“选择没生效”。
+    final l10n = await AppLocalizations.delegate.load(const Locale('en'));
+    final privacyConfirm = find.text(l10n.phoneAgentPrivacyNoticeConfirm);
+    for (var i = 0; i < 60 && privacyConfirm.evaluate().isEmpty; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    if (privacyConfirm.evaluate().isNotEmpty) {
+      expect(find.text(l10n.phoneAgentPrivacyNoticeTitle), findsOneWidget);
+      await tester.tap(privacyConfirm);
+      await tester.pumpAndSettle();
+      debugPrint(
+        'PHONE_AGENT_PRIVACY_DIALOG: shown keyed on '
+        '${l10n.localeName} l10n label',
+      );
+    } else if (await PhoneAgentService.instance.privacyNoticeAcknowledged()) {
+      debugPrint('PHONE_AGENT_PRIVACY_DIALOG: already acknowledged');
+    } else {
+      fail(
+        '隐私确认弹窗 6 秒内没有出现，但原生记录仍是“未确认”。'
+        '这不是选择失败，而是测试找不到弹窗（locale/文案键或平台通道问题）。',
+      );
+    }
     for (
       var i = 0;
       i < 40 &&

@@ -53,6 +53,12 @@ def main():
     done = threading.Event()
 
     def enable():
+        try:
+            _enable()
+        except Exception as exc:  # M36: never let the enable thread die silently
+            driver.log(f"enable failed: {exc!r}")
+
+    def _enable():
         # The suite waits ~20 s (plus a 300 s poll) for the host to enable the
         # service. MIUI allows `settings put secure` under this mission's
         # documented exception; API35 must go through the system UI.
@@ -83,6 +89,45 @@ def main():
         done.set()
 
     threading.Thread(target=driver.action_worker, daemon=True).start()
+
+    # M36: the first "enable Phone Agent" in the Mods page shows the one-time
+    # privacy notice and then requests POST_NOTIFICATIONS. The host dismisses
+    # that dialog by **denying** it, which keeps the permission at
+    # `granted=false` as the exception suite requires (its permission-window
+    # case needs an un-granted POST_NOTIFICATIONS). Denial is allowed by the
+    # documented host contract; granting is not, and neither is `pm revoke`.
+    #
+    # Causal note (R1): the r10 log shows the Mods assertion passing ~10 s
+    # *before* this denial, so this thread is **not** proven to be what
+    # unblocks `writeSelection`; that gating rests on the product code path
+    # (`await _ensureNotificationPermission()` inside `ensureAcknowledged`).
+    # What the log does prove is that the dialog appeared and was denied.
+    #
+    # Scope guard: this is a 240 s daemon loop that only acts when
+    # `permissioncontroller` is the focused window — otherwise it idles. It can
+    # therefore hit an unrelated permission dialog; run1 hit exactly once and
+    # did not interfere.
+    def dismiss_notification_prompt():
+        seen = 0
+        for _ in range(240):
+            time.sleep(1.0)
+            focus, _ = driver.foreground()
+            if not focus or "permissioncontroller" not in focus:
+                continue
+            seen += 1
+            xml = driver.dump_ui(f"notif-prompt-{seen}")
+            deny = driver.find(xml, text="Don't allow", button_only=True) or \
+                driver.find(xml, text="Don’t allow", button_only=True) or \
+                driver.find(xml, text="不允许", button_only=True)
+            if deny is not None:
+                driver.tap_node(deny)
+                driver.log("dismissed POST_NOTIFICATIONS prompt (denied)")
+                driver.ensure_app_foreground()
+            else:
+                driver.adb("shell", "input", "keyevent", "KEYCODE_BACK")
+                driver.log("POST_NOTIFICATIONS prompt: no deny button, sent BACK")
+
+    threading.Thread(target=dismiss_notification_prompt, daemon=True).start()
 
     proc = subprocess.Popen(
         cmd, cwd=APP_TREE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
