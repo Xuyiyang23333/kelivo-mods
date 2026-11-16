@@ -41,6 +41,20 @@ final Map<String, dynamic> result = await agent.input({
 final List<PhoneAgentApprovedApp> approved = await agent.approvedApps();
 await agent.approveApp('com.example.app', sourceAssistantId: 'assistant-a');
 await agent.revokeApp('com.example.app');
+
+final PhoneAgentApprovalRequest request = await agent.requestApproval(
+  'com.example.app',
+  toolCallId: 'round-1:tool-2',
+  conversationId: 'c1',
+  assistantId: 'assistant-a',
+);
+final List<PhoneAgentApprovalRequest> pending = await agent.approvalRequests();
+final PhoneAgentApprovalRequest resolved = await agent.resolveApproval(
+  requestId: request.requestId,
+  approve: true,
+);
+final bool acknowledged = await agent.privacyNoticeAcknowledged();
+await agent.acknowledgePrivacyNotice();
 ```
 
 `PhoneAgentScreenshot` 字段：`bytes`、`imageWidth`、`imageHeight`、`screenWidth`、`screenHeight`、`packageName`。`PhoneAgentApprovedApp` 字段：`packageName`、`signingPrefix`、`approvedAt`、`lastApprovedAt`、`sourceAssistantId`。
@@ -62,11 +76,23 @@ await agent.revokeApp('com.example.app');
 | `approvedApps` | 无 | `{apps: [{package_name, signing_prefix, approved_at, last_approved_at, source_assistant_id}]}` |
 | `approveApp` | `{package_name, source_assistant_id?, expected_signing_sha256?}` | `{package_name, signing_prefix, approved_at, outcome: "approved"}` |
 | `revokeApp` | `{package_name}` | `{package_name, revoked}` |
+| `requestApproval` | `{package_name, tool_call_id?, conversation_id?, assistant_id?}` | 批准请求载荷（见下） |
+| `approvalRequests` | 无 | `{requests: [载荷]}`（只含仍 pending 的） |
+| `resolveApproval` | `{request_id, approve}` | 载荷 + `approve_result?: {approved, reason}` |
+| `dismissApprovals` | `{conversation_id?}` | `{dismissed: true}` |
+| `privacyNotice` | 无 | `{acknowledged}` |
+| `acknowledgePrivacyNotice` | 无 | `{acknowledged: true}` |
+
+批准请求载荷：`request_id`、`package_name`、`signing_prefix`（解析失败为 null）、`signing_available`、`display_name`、`tool_call_id`、`conversation_id`、`assistant_id`、`created_at`、`expires_at`、`state`。**不含**节点文本、窗口标题、截图或界面内容。
+
+`permission_required` 的错误载荷（`PlatformException.details`）为同一身份字段的精简版：`package_name`、`signing_prefix`、`display_name`、`signing_available`、`observation`；其他错误码的 `details` 为 null。
 
 `approvedApps` / `approveApp` / `revokeApp` 是应用白名单的原生通道面（M33），**不依赖无障碍服务是否连接**：`AppApprovals` 与其存储由插件进程持有，Mods 页在服务关闭时也必须能撤销。三者只处理身份元数据，不返回节点文本、截图或界面内容；完整签名哈希不离开原生侧，对外只给前 8 位十六进制字符。
 
-- `approveApp` 写入幂等：同一 `(包名, 签名集合)` 重复批准只更新最后批准时间并保留首次来源，不产生第二条记录。写入前**重新解析当前签名**——解析失败返回 `signing_unavailable`，与 `expected_signing_sha256` 不一致返回 `signing_mismatch`，两者都**不写入**（fail closed）。不传 `expected_signing_sha256` 表示“按当前签名写入”。
-- `revokeApp` 立即生效：下一次判定即重新读存储。撤销阻止新的读树（`offset == 0`）、全部截图与全部输入；但它不撤回已发出的动作，也不清理已建立的树观测——已建立观测在 TTL 内 `offset > 0` 分页仍会回放撤销前的旧树（见下方原生行为的分页条目）。
+- `approveApp` 写入幂等：同一 `(包名, 签名集合)` 重复批准只更新最后批准时间并保留首次来源，不产生第二条记录。写入前**重新解析当前签名**——解析失败返回 `signing_unavailable`，与 `expected_signing_sha256` 不一致返回 `signing_mismatch`，两者都**不写入**（fail closed）。不传 `expected_signing_sha256` 表示“按当前签名写入”。**构建期预批准成员返回 `pre_approved`**（不写用户白名单）。
+- `revokeApp` 立即生效：下一次判定即重新读存储。撤销阻止新的读树（`offset == 0`）、全部截图与全部输入；但它不撤回已发出的动作，也不清理已建立的树观测——已建立观测在 TTL 内 `offset > 0` 分页仍会回放撤销前的旧树（见下方原生行为的分页条目）。撤销预批准成员返回 `revoked: false`。
+- `requestApproval` / `approvalRequests` / `resolveApproval` / `dismissApprovals` 是 M34 的批准请求状态面，同样不依赖服务连接。`resolveApproval` 是**唯一**的批准/拒绝入口（聊天卡片与通知 action 共用），幂等：请求已是终态时只返回既有状态、不写白名单；请求不存在（进程重启后通知被重放）返回 `approval_not_found`。
+- `privacyNotice` / `acknowledgePrivacyNotice` 是首次启用隐私确认的本地状态（`noBackupFilesDir`，值 `acknowledged-v1`）；读不到或格式不符视为**未确认**。它只是告知记录，不改变任何判定。
 
 ### 审计元数据（M35）
 
@@ -88,7 +114,7 @@ await agent.revokeApp('com.example.app');
 
 ### 错误码
 
-`service_unavailable`、`unsupported_platform`、`unsupported_os`、`device_locked`、`no_window`、`invalid_argument`、`stale_observation`、`stale_handle`、`screenshot_required`、`screenshot_blocked`、`screenshot_failed`、`rate_limited`、`busy`、`interrupted`、`gesture_failed`、`gesture_timeout`、`gesture_cancelled`、`gesture_rejected`、`action_unavailable`、`action_failed`、`password_node_denied`、`package_not_allowed`、`permission_required`、`system_window_denied`、`budget_exceeded`、`timeout`、`internal_error`；白名单通道另有写入失败码 `signing_unavailable`、`signing_mismatch`。
+`service_unavailable`、`unsupported_platform`、`unsupported_os`、`device_locked`、`no_window`、`invalid_argument`、`stale_observation`、`stale_handle`、`screenshot_required`、`screenshot_blocked`、`screenshot_failed`、`rate_limited`、`busy`、`interrupted`、`gesture_failed`、`gesture_timeout`、`gesture_cancelled`、`gesture_rejected`、`action_unavailable`、`action_failed`、`password_node_denied`、`package_not_allowed`、`permission_required`、`system_window_denied`、`budget_exceeded`、`timeout`、`internal_error`；白名单通道另有写入失败码 `signing_unavailable`、`signing_mismatch`、`pre_approved`，批准请求通道另有 `approval_not_found`。
 
 `package_not_allowed` 只表示**构建期**硬禁止：M33 起构建期范围是 deny 清单（`DENY_PACKAGES`，初始为空），它同时约束输入与观察、并排在用户白名单之前。`permission_required` 表示“这个应用还没被用户批准”，输入与观察都返回该码；观察侧只带应用身份（包名 + 签名前 8 位），不带树节点、截图或图片 metadata，且该次调用**不建立观测、不占读树预算、不调用 `takeScreenshot`**。`system_window_denied` 表示硬基线或不允许的窗口类型，输入与观察都会返回，与 `permission_required`（“可以批准”）语义严格区分。
 
@@ -123,7 +149,6 @@ dependencies:
 ```
 
 Manifest Merger 会合并独立服务：
-
 ```xml
 <service
     android:name="com.kelivo.phoneagent.PhoneAgentService"
@@ -140,6 +165,16 @@ Manifest Merger 会合并独立服务：
 
 用户需要在系统无障碍设置中单独启用 “Kelivo Phone Agent”。该服务与上游 “Kelivo phone control” 相互独立，现有设置页不显示本服务状态。
 
+批准通知与 action 接收端也由 Manifest Merger 合并（M34）：
+
+```xml
+<receiver
+    android:name="com.kelivo.phoneagent.PhoneAgentApprovalReceiver"
+    android:exported="false" />
+```
+
+它只接收本应用自己的 `PendingIntent`；批准/拒绝的幂等与终态校验在 `ApprovalRequests` 内完成，不依赖 intent 来源。通知渠道为 `kelivo_phone_agent_approval`，文案在插件自己的 `strings.xml`（中英两套），**不复用上游 `NotificationService`**。
+
 ## 测试
 
 ```bash
@@ -153,8 +188,7 @@ flutter test
 ./gradlew :kelivo_phone_agent:testDebugUnitTest
 ```
 
-Dart 测试覆盖通道参数、默认值、错误映射、超时、`clearScreenshot`、`snapshot_id` 拒绝，白名单通道 `approvedApps` / `approveApp` / `revokeApp`（含畸形载荷、可选参数、本地校验与 `signing_mismatch` 映射），以及审计身份参数转发（含空白值不发送、无身份时载荷与旧协议一致）。Kotlin 测试覆盖有界 DFS、密码子树、文本预算、分页、TTL、窗口失效、句柄重验、清空截图后句柄复用、坐标换算、边界策略（硬基线、窗口类型两层、deny 清单、用户白名单、预批准）、签名身份与白名单存储（多签名、幂等、撤销即时、损坏行丢弃）、预算、截图限频、涂黑坐标、宽高比校验、多窗口密码收集和截图错误映射，以及审计日志（字段集合精确断言含七项禁用字段、TSV 列数、30 天与 2000 条滚动、损坏行丢弃、写入/读取失败不阻断、签名解析抛异常降级为 null）。
-
+Dart 测试覆盖通道参数、默认值、错误映射、超时、`clearScreenshot`、`snapshot_id` 拒绝，白名单通道 `approvedApps` / `approveApp` / `revokeApp`（含畸形载荷、可选参数、本地校验与 `signing_mismatch` 映射），审计身份参数转发（含空白值不发送、无身份时载荷与旧协议一致），以及批准请求通道与结构化身份。Kotlin 测试覆盖有界 DFS、密码子树、文本预算、分页、TTL、窗口失效、句柄重验、清空截图后句柄复用、坐标换算、边界策略（硬基线、窗口类型两层、deny 清单、用户白名单、预批准）、签名身份与白名单存储（多签名、幂等、撤销即时、损坏行丢弃）、批准请求状态机（TTL 到期、单终态、取代、按会话清理、预批准拒绝写入、签名缺失 fail closed）、隐私确认状态、预算、截图限频、涂黑坐标、宽高比校验、多窗口密码收集和截图错误映射，以及审计日志（字段集合精确断言含七项禁用字段、TSV 列数、30 天与 2000 条滚动、损坏行丢弃、写入/读取失败不阻断、签名解析抛异常降级为 null）。
 ## 未验证项与限制
 
 - M23 前台可视化叠加层（round 4 设备运行树 `9ebf2e991caa07ed`，最终源码树仅本 README 副本不同，hash 见 `docs/phone-agent-plan.md` 9.3.7）：API35 独立 AVD `Kelivo_M23_API_35` 完整异常套件 **`+8`、`All tests passed!`、EXIT=0**（含旋转、锁屏、服务禁用/重启、权限窗口），官方测试 `+2`、EXIT=0；物理 MIUI API31 官方测试 `+2`、截图无污染 `+1`，均 EXIT=0；服务停用后无孤儿窗口。API35 服务禁用用例单独 `+1`、EXIT=0，宿主 `dumpsys` 原始输出 `R5_OVERLAY_WINDOWS_AFTER_DISABLE: count=0`、`R5_OVERLAY_WINDOWS_AFTER_RESTART: count=0`；宿主 `screenrecord` 帧确认观察脉冲、节点点击圆环和坐标滑动轨迹（1500ms 定向验证，`#008999` 圆点沿 x≈539 从 y≈1110 上移到 y≈462，约 42 帧/1.4s）。返工期间旧 AVD 曾出现 `Input dispatching timed out (Application does not have a focused window)` 与 `com.android.systemui` 的 edge-swipe 手势监视器 ANR，均无产品栈，属宿主/模拟器窗口焦点与输入分发问题，不是 overlay 主线程死锁；round 2 树 `f1b26a580b737e14` 的历史 `+6 -2` 见计划 9.3.7。产品 APK 大小/hash 与 manifest 隔离见 `docs/phone-agent-plan.md` 9.3.7；API29、签名 release 未验证；观察脉冲、节点点击圆环和坐标滑动轨迹均已获宿主 `screenrecord` 像素证据（滑动为 1500ms 定向验证），不写成像素级验证。
@@ -172,4 +206,5 @@ Dart 测试覆盖通道参数、默认值、错误映射、超时、`clearScreen
 - 后台悬浮胶囊可能出现在截图中或拦截坐标手势，首版不处理。
 - 前台可视化叠加层是 `TYPE_ACCESSIBILITY_OVERLAY` 窗口，`addView` 在部分厂商 ROM 上可能失败；失败时只禁用本会话可视化，工具行为不变。叠加层无法隐藏上游胶囊，截图隐藏握手会增加约两帧等待并可能返回 `screenshot_failed`；动画不代表业务成功或用户审批。
 - 白名单通道（M33）的签名解析能力**未在设备上验证**：`QUERY_ALL_PACKAGES` 声明后交付服务进程能否解析任意前台包签名，只在 M29 用探针 APK 验证过；解析失败的形态按 fail closed 处理（`permission_required`），但真实失败形态未实测。
+- **批准交互（M34）完全没有设备证据**：通知权限（API 33+ `POST_NOTIFICATIONS`）与通知 action 的真实行为、进程被杀后系统重放 action、跨 UID 前台包签名解析、`Resolution` 在真实对话流中的卡片布局、通知与卡片同时存在时的撤下时序、服务关闭时 Mods 页撤销链路，全部只经过单元测试与静态检查。`pre_approved` 之外的批准失败在 UI 上的表现也未实测。
 - 本插件不提供绝对安全保证，也不识别“发送、购买、删除”等业务语义。

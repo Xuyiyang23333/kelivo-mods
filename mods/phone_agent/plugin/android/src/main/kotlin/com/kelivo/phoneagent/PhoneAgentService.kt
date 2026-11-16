@@ -80,6 +80,128 @@ class PhoneAgentService : AccessibilityService() {
         private fun auditSigningPrefix(context: Context, packageName: String): String? =
             runCatching { signingIdentity(context, packageName)?.signingPrefix }.getOrNull()
 
+        private val approvalRequestsLock = Any()
+
+        @Volatile
+        private var approvalRequestsOrNull: ApprovalRequests? = null
+
+        @Volatile
+        private var approvalNotifierOrNull: PhoneAgentApprovalNotifier? = null
+
+        @Volatile
+        private var privacyNoticeOrNull: PrivacyNoticeStore? = null
+
+        /**
+         * 首次启用隐私确认状态（plan 7.5.14，方案 B）。同样不依赖无障碍服务连接：
+         * 用户可能在服务关闭时就选择 Phone Agent。
+         */
+        internal fun privacyNotice(context: Context): PrivacyNoticeStore =
+            synchronized(approvalRequestsLock) {
+                privacyNoticeOrNull ?: PrivacyNoticeStore(
+                    FilePrivacyNoticeStorage(
+                        File(context.noBackupFilesDir, "phone_agent_privacy_notice.tsv"),
+                    ),
+                ).also { privacyNoticeOrNull = it }
+            }
+
+        /**
+         * 进程级批准请求状态机（plan 7.5.6/7.5.13）。不依赖无障碍服务连接：
+         * 通知栏批准 action 与 Mods 页撤销在服务关闭时也必须可用。
+         */
+        internal fun approvalRequests(context: Context): ApprovalRequests =
+            synchronized(approvalRequestsLock) {
+                approvalRequestsOrNull ?: ApprovalRequests(
+                    nowMillis = { System.currentTimeMillis() },
+                    // 请求离开 pending 时撤下对应的常驻通知，避免堆叠无法关闭的通知。
+                    onLeftPending = { record ->
+                        approvalNotifier(context).cancel(record.id)
+                    },
+                ).also { approvalRequestsOrNull = it }
+            }
+
+        private fun approvalNotifier(context: Context): PhoneAgentApprovalNotifier =
+            synchronized(approvalRequestsLock) {
+                approvalNotifierOrNull ?: PhoneAgentApprovalNotifier(context.applicationContext)
+                    .also { approvalNotifierOrNull = it }
+            }
+
+        /**
+         * 创建一条待处理批准请求。身份由**原生侧**解析并保存（Dart 不是放行点），
+         * 并立刻发通知。同一 `(包名, 签名集合)` 的旧 pending 请求被置为 `superseded`。
+         */
+        internal fun requestApproval(
+            context: Context,
+            packageName: String,
+            toolCallId: String?,
+            conversationId: String?,
+            approvalAssistantId: String?,
+        ): ApprovalRequestRecord {
+            val identity = signingIdentity(context, packageName)
+            val record = approvalRequests(context).create(
+                packageName = packageName,
+                signingSha256Values = identity?.sha256Values.orEmpty(),
+                displayName = identity?.displayName,
+                toolCallId = toolCallId,
+                conversationId = conversationId,
+                assistantId = approvalAssistantId,
+            )
+            approvalNotifier(context).show(record)
+            return record
+        }
+
+        /**
+         * 通知栏 action 与聊天卡片共用的唯一判定入口。返回 null 表示该 id 不存在
+         * （进程重启后系统重放、请求已被清理），**不写白名单**。
+         */
+        internal fun resolveApproval(
+            context: Context,
+            requestId: String,
+            approve: Boolean,
+        ): ApprovalResolution? {
+            val resolution = approvalRequests(context).resolve(requestId, approve) { record ->
+                when {
+                    // 签名从未解析成功的请求不能批准：空集合不能退化成“按当前签名写入”，
+                    // 否则签名绑定不变量被绕过（fail closed）。
+                    record.signingUnavailable ->
+                        ApproveResult(false, ApproveResult.REASON_SIGNING_UNAVAILABLE, null)
+                    else -> considerPreApproved(context, record) ?: approvals(context).approve(
+                        packageName = record.packageName,
+                        now = System.currentTimeMillis(),
+                        sourceAssistantId = record.assistantId,
+                        expectedSha256Values = record.signingSha256Values,
+                    )
+                }
+            }
+            // 任一端处理完就撤下另一端：通知在这里统一取消，聊天卡片由 Dart 侧
+            // 的状态流刷新（同一 resolve 结果）。
+            approvalNotifier(context).cancel(requestId)
+            return resolution
+        }
+
+        /**
+         * 构建配置的预批准条目已经在边界判定里直接放行，因此永远不该产生批准请求。
+         * 若出现（例如旧状态或误调用），这里明确失败而不是写入一条用不到的记录。
+         */
+        private fun considerPreApproved(
+            context: Context,
+            record: ApprovalRequestRecord,
+        ): ApproveResult? = if (record.packageName in preApprovedPackages(context)) {
+            ApproveResult(false, ApproveResult.REASON_PRE_APPROVED, null)
+        } else {
+            null
+        }
+
+        /** 本地清理（切换会话、应用重启、服务断连）：不写白名单、不通知模型。 */
+        internal fun dismissApprovals(context: Context, conversationId: String? = null) {
+            val ids = if (conversationId == null) {
+                approvalRequests(context).dismissAll()
+            } else {
+                approvalRequests(context).dismissForConversation(conversationId)
+            }
+            val notifier = approvalNotifier(context)
+            ids.forEach { notifier.cancel(it) }
+        }
+
         /**
          * 进程级批准入口。批准/撤销/查询不依赖无障碍服务是否连接，因此放在
          * companion：Mods 页在服务关闭时也必须能撤销授权。
@@ -95,6 +217,7 @@ class PhoneAgentService : AccessibilityService() {
                         File(context.noBackupFilesDir, "phone_agent_whitelist.tsv"),
                     ),
                 ),
+                preApprovedPackages = preApprovedPackages(context),
             ).also { approvalsOrNull = it }
         }
 

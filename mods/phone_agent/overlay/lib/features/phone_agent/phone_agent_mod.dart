@@ -143,10 +143,15 @@ class PhoneAgentMod extends ToolMod {
           supportsImageInput:
               _imageSupportByConversation[context.conversationId ?? ''] ??
               false,
-          // 审计元数据的助手/会话身份。对话 id 在上游上下文里可得；助手 id 取当前
-          // 助手快照（可能已过期，只是审计标签，不参与任何授权判定）。
+          // 审计元数据的助手/会话身份：助手 id 取**实时重读**（M35 语义），
+          // 只是审计标签，不参与任何授权判定。
           assistantId: context.readCurrentAssistant()?.id,
           conversationId: context.conversationId,
+          // 批准来源的助手 id 取**创建请求时的快照**（M34 语义）：它写进白名单记录的
+          // “首次批准来源”，必须反映发起请求时的助手，而不是批准时的当前助手。
+          toolCallId: toolCallId,
+          approvalAssistantId: context.assistant?.id,
+          // 与审计 id 分开传：上面的 assistantId 只喂审计，这里只写批准来源。
         );
       } on PhoneAgentToolFailure catch (failure) {
         return failure.toToolResult(tool: name);

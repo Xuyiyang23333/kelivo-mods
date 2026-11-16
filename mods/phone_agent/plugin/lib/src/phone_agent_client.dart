@@ -155,6 +155,89 @@ class PhoneAgentClient {
     await _invoke('revokeApp', <String, dynamic>{'package_name': packageName});
   }
 
+  /// 创建一条待用户处理的批准请求。身份由原生侧解析并保存，[packageName] 只是目标。
+  ///
+  /// [approvalAssistantId] 是**创建请求时的助手快照**，作为“首次批准来源”写入白名单
+  /// 记录，供 Mods 页分组展示。它与审计用的实时助手 id（[auditArguments]）语义不同、
+  /// 键名也不同（`approval_assistant_id`），两者不会互相覆盖。
+  Future<PhoneAgentApprovalRequest> requestApproval(
+    String packageName, {
+    String? toolCallId,
+    String? conversationId,
+    String? approvalAssistantId,
+  }) async {
+    if (packageName.trim().isEmpty) {
+      throw const PhoneAgentException(
+        'invalid_argument',
+        'packageName is required.',
+      );
+    }
+    final map = await _invokeMap('requestApproval', <String, dynamic>{
+      'package_name': packageName,
+      if (toolCallId != null) 'tool_call_id': toolCallId,
+      if (conversationId != null) 'conversation_id': conversationId,
+      if (approvalAssistantId != null)
+        'approval_assistant_id': approvalAssistantId,
+    });
+    return PhoneAgentApprovalRequest.fromMap(map);
+  }
+
+  /// 当前仍待处理的请求。已处理的历史不返回；TTL 到期的请求在这里被置为过期。
+  Future<List<PhoneAgentApprovalRequest>> approvalRequests() async {
+    final map = await _invokeMap('approvalRequests');
+    final requests = map['requests'];
+    if (requests is! List) {
+      throw const PhoneAgentException(
+        'invalid_response',
+        'approvalRequests returned an unexpected payload.',
+      );
+    }
+    return requests
+        .whereType<Map>()
+        .map(
+          (entry) =>
+              PhoneAgentApprovalRequest.fromMap(Map<String, dynamic>.from(entry)),
+        )
+        .toList(growable: false);
+  }
+
+  /// 处理一条批准请求。幂等：请求已是终态时返回既有状态，不写白名单。
+  /// 请求已不存在时抛出 `approval_not_found`。
+  Future<PhoneAgentApprovalRequest> resolveApproval({
+    required String requestId,
+    required bool approve,
+  }) async {
+    if (requestId.trim().isEmpty) {
+      throw const PhoneAgentException(
+        'invalid_argument',
+        'requestId is required.',
+      );
+    }
+    final map = await _invokeMap('resolveApproval', <String, dynamic>{
+      'request_id': requestId,
+      'approve': approve,
+    });
+    return PhoneAgentApprovalRequest.fromMap(map);
+  }
+
+  /// 清理待处理请求（切换会话或应用重启）。不写白名单、不通知模型。
+  Future<void> dismissApprovals({String? conversationId}) async {
+    await _invoke('dismissApprovals', <String, dynamic>{
+      if (conversationId != null) 'conversation_id': conversationId,
+    });
+  }
+
+  /// 首次启用隐私确认是否已读（方案 B）。
+  Future<bool> privacyNoticeAcknowledged() async {
+    final map = await _invokeMap('privacyNotice');
+    return map['acknowledged'] == true;
+  }
+
+  /// 记录用户已读首次启用隐私确认。只是告知记录，不改变任何判定。
+  Future<void> acknowledgePrivacyNotice() async {
+    await _invoke('acknowledgePrivacyNotice');
+  }
+
   Future<Map<String, dynamic>> _invokeMap(
     String method, [
     Map<String, dynamic>? arguments,
@@ -188,9 +271,13 @@ class PhoneAgentClient {
         'The phone agent plugin is not available on this platform.',
       );
     } on PlatformException catch (error) {
+      final rawDetails = error.details;
       throw PhoneAgentException(
         error.code,
         error.message ?? 'The phone agent failed without a message.',
+        details: rawDetails is Map
+            ? Map<String, dynamic>.from(rawDetails)
+            : null,
       );
     }
   }

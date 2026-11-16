@@ -101,6 +101,12 @@ internal data class ApproveResult(
 
         /** 当前签名与批准请求保存的签名不一致：置为失效，不写入。 */
         const val REASON_SIGNING_MISMATCH = "signing_mismatch"
+
+        /**
+         * 目标是构建配置的预批准条目：它已直接放行，不写用户白名单，也不产生批准
+         * 提示，因此批准/撤销都拒绝，避免留下不可撤销的冗余条目。
+         */
+        const val REASON_PRE_APPROVED = "pre_approved"
     }
 }
 
@@ -235,11 +241,19 @@ internal sealed class ApprovalDecision {
 /**
  * 批准判定与写入的唯一入口。读取当前签名是**每次判定都做**的动作：不做正缓存，
  * 因此撤销立即生效、签名变化立即失效。
+ *
+ * [preApprovedPackages] 是构建配置的预批准条目（测试包恒有、debuggable 构建额外有
+ * 跨 UID 夹具包）。它们**不写用户白名单、不产生批准提示、不可撤销**，因此批准与
+ * 撤销都直接拒绝它们：否则用户白名单里会出现一条永远用不到、也没有界面能撤销的
+ * 冗余条目。
  */
 internal class AppApprovals(
     private val resolver: SigningResolver,
     private val store: WhitelistStore,
+    preApprovedPackages: Set<String> = emptySet(),
 ) {
+    private val preApproved: Set<String> = preApprovedPackages.toSet()
+
     fun decide(packageName: String): ApprovalDecision {
         val record = store.find(packageName)
         val identity = resolver.resolve(packageName)
@@ -260,6 +274,9 @@ internal class AppApprovals(
         sourceAssistantId: String?,
         expectedSha256Values: List<String>? = null,
     ): ApproveResult {
+        if (packageName in preApproved) {
+            return ApproveResult(false, ApproveResult.REASON_PRE_APPROVED, null)
+        }
         val identity = resolver.resolve(packageName)
         if (identity == null || identity.sha256Values.isEmpty()) {
             return ApproveResult(false, ApproveResult.REASON_SIGNING_UNAVAILABLE, null)
@@ -272,7 +289,11 @@ internal class AppApprovals(
         )
     }
 
-    fun revoke(packageName: String): Boolean = store.revoke(packageName)
+    /** 撤销构建配置的预批准条目同样拒绝：它本来就不在用户白名单里。 */
+    fun revoke(packageName: String): Boolean {
+        if (packageName in preApproved) return false
+        return store.revoke(packageName)
+    }
 
     fun approvedApps(): List<WhitelistEntry> = store.all()
 }

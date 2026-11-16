@@ -2,6 +2,7 @@ package com.kelivo.phoneagent
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -92,6 +93,66 @@ class PackagePolicyTest {
     ): String = assertThrows(PhoneAgentError::class.java) {
         observe(packageName, windowType, using)
     }.message.orEmpty()
+
+    private fun detailsOf(
+        packageName: String,
+        observation: Boolean,
+        using: PackagePolicy = policy,
+    ): Map<String, Any?> = assertThrows(PhoneAgentError::class.java) {
+        if (observation) observe(packageName, using = using) else require(packageName, using = using)
+    }.details.orEmpty()
+
+    @Test
+    fun `permission required carries the structured app identity for input`() {
+        val details = detailsOf("com.example.app", observation = false)
+
+        assertEquals("com.example.app", details["package_name"])
+        assertEquals("aaaaaaaa", details["signing_prefix"])
+        assertEquals("Example", details["display_name"])
+        assertEquals(true, details["signing_available"])
+        assertEquals(false, details["observation"])
+        // 结构化载荷不得夹带节点文本、窗口标题或界面内容字段。
+        assertEquals(
+            setOf(
+                "package_name",
+                "signing_prefix",
+                "display_name",
+                "signing_available",
+                "observation",
+            ),
+            details.keys,
+        )
+    }
+
+    @Test
+    fun `permission required carries the structured app identity for observation`() {
+        val details = detailsOf("com.example.app", observation = true)
+
+        assertEquals("com.example.app", details["package_name"])
+        assertEquals("aaaaaaaa", details["signing_prefix"])
+        assertEquals(true, details["observation"])
+    }
+
+    @Test
+    fun `permission required marks an unavailable signature without a hash`() {
+        resolvable.remove("com.example.app")
+
+        val details = detailsOf("com.example.app", observation = false)
+
+        assertEquals("com.example.app", details["package_name"])
+        assertNull(details["signing_prefix"])
+        assertEquals(false, details["signing_available"])
+    }
+
+    @Test
+    fun `a hard baseline denial carries no approval identity`() {
+        val error = assertThrows(PhoneAgentError::class.java) {
+            observe("com.android.systemui")
+        }
+
+        assertEquals("system_window_denied", error.code)
+        assertNull(error.details)
+    }
 
     @Test
     fun `the build pre approved test package needs no user approval`() {

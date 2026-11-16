@@ -2,4 +2,10 @@
 <resources>
     <string name="kelivo_phone_agent_service_label">Kelivo Phone Agent</string>
     <string name="kelivo_phone_agent_service_description">Allows assistants you enable to read the current screen and perform taps, text input, scrolling and navigation for phone agent tasks. Screen content is sent to the model provider configured for the conversation. This service is separate from Kelivo phone control and can be turned off at any time in Accessibility settings.</string>
+    <string name="kelivo_phone_agent_approval_channel">App approval requests</string>
+    <string name="kelivo_phone_agent_approval_channel_description">Asks you to approve an app before the assistant can read or control it. Only the app name and signing certificate prefix are shown; no screen content.</string>
+    <string name="kelivo_phone_agent_approval_title">Allow the assistant to control this app?</string>
+    <string name="kelivo_phone_agent_approval_body">%1$s\nApproval covers reading the screen and sending taps, text and gestures. It stays valid until you revoke it in Kelivo.</string>
+    <string name="kelivo_phone_agent_approval_allow">Allow</string>
+    <string name="kelivo_phone_agent_approval_deny">Deny</string>
 </resources>
