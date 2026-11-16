@@ -92,8 +92,13 @@ class PhoneAgentClient {
         'action is required.',
       );
     }
+    // 审计身份只能来自宿主调用侧：模型参数里的同名键在这里剔除，否则宿主取不到
+    // 身份时模型自带的 assistant_id / conversation_id 会被原生侧写成审计事实。
+    final payload = Map<String, dynamic>.from(arguments)
+      ..remove(assistantIdKey)
+      ..remove(conversationIdKey);
     return _invokeMap('input', <String, dynamic>{
-      ...Map<String, dynamic>.from(arguments),
+      ...payload,
       ...auditArguments(assistantId, conversationId),
     });
   }
@@ -190,6 +195,11 @@ class PhoneAgentClient {
     }
   }
 
+  /// 审计身份参数的键名。宿主侧是唯一合法来源：`input()` 会先从模型参数里剔除
+  /// 这两个键，再叠加宿主值。
+  static const String assistantIdKey = 'assistant_id';
+  static const String conversationIdKey = 'conversation_id';
+
   /// 审计身份参数。两项都只在非空时发送；原生侧缺失即如实记为未知，
   /// 由原生侧自行截断与清洗，这里不做内容识别。
   static Map<String, dynamic> auditArguments(
@@ -198,9 +208,9 @@ class PhoneAgentClient {
   ) {
     return <String, dynamic>{
       if (assistantId != null && assistantId.trim().isNotEmpty)
-        'assistant_id': assistantId,
+        assistantIdKey: assistantId,
       if (conversationId != null && conversationId.trim().isNotEmpty)
-        'conversation_id': conversationId,
+        conversationIdKey: conversationId,
     };
   }
 }

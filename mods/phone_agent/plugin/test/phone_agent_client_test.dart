@@ -582,5 +582,82 @@ void main() {
         'node_id': 'n1',
       });
     });
+
+    test(
+      'model-supplied identity is stripped when the host has none',
+      () async {
+        mock(
+          (call) async => <String, dynamic>{
+            'success': true,
+            'action': 'tap',
+            'message': 'ok',
+          },
+        );
+
+        // 宿主侧取不到身份（assistantId/conversationId 为 null）时，模型自带的同名
+        // 参数不得存活到原生侧，否则会被写成审计事实。
+        await PhoneAgentClient().input(<String, dynamic>{
+          'action': 'tap',
+          'node_id': 'n1',
+          'assistant_id': 'forged-assistant',
+          'conversation_id': 'forged-conversation',
+        });
+
+        final arguments = calls.single.arguments as Map<Object?, Object?>;
+        expect(arguments.containsKey('assistant_id'), isFalse);
+        expect(arguments.containsKey('conversation_id'), isFalse);
+        expect(arguments.values, isNot(contains('forged-assistant')));
+        expect(arguments.values, isNot(contains('forged-conversation')));
+      },
+    );
+
+    test('host identity always wins over model-supplied identity', () async {
+      mock(
+        (call) async => <String, dynamic>{
+          'success': true,
+          'action': 'tap',
+          'message': 'ok',
+        },
+      );
+
+      await PhoneAgentClient().input(
+        <String, dynamic>{
+          'action': 'tap',
+          'node_id': 'n1',
+          'assistant_id': 'forged-assistant',
+          'conversation_id': 'forged-conversation',
+        },
+        assistantId: 'assistant-a',
+        conversationId: 'conversation-1',
+      );
+
+      expect(calls.single.arguments, <String, dynamic>{
+        'action': 'tap',
+        'node_id': 'n1',
+        'assistant_id': 'assistant-a',
+        'conversation_id': 'conversation-1',
+      });
+    });
+
+    test('model-supplied identity cannot inject blank keys', () async {
+      mock(
+        (call) async => <String, dynamic>{
+          'success': true,
+          'action': 'tap',
+          'message': 'ok',
+        },
+      );
+
+      await PhoneAgentClient().input(<String, dynamic>{
+        'action': 'tap',
+        'node_id': 'n1',
+        'assistant_id': '',
+        'conversation_id': '   ',
+      });
+
+      final arguments = calls.single.arguments as Map<Object?, Object?>;
+      expect(arguments.containsKey('assistant_id'), isFalse);
+      expect(arguments.containsKey('conversation_id'), isFalse);
+    });
   });
 }

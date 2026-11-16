@@ -271,6 +271,11 @@ internal class AuditLog(
             val record = decode(line) ?: continue
             entries += record
         }
+        // 加载即裁剪：外部写入、旧版本遗留或被手工编辑的超限文件在读入时就收敛到
+        // 「30 天 / 最近 2000 条」。以文件中最新一条记录的时间戳为基准，而不是当前
+        // 时钟——否则整份历史会在应用长期未运行后一次性被判为过旧。
+        val newest = entries.maxOfOrNull { it.occurredAtMillis } ?: return
+        prune(newest)
     }
 
     private fun encode(): String = buildString {

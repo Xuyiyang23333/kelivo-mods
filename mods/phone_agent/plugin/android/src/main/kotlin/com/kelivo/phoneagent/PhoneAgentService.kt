@@ -384,16 +384,17 @@ class PhoneAgentService : AccessibilityService() {
      * 不影响工具结果、白名单或边界判定。记录内容是固定七字段，见 [AuditRecord]。
      *
      * `reply` 的收口常常在主线程执行（超时、提前返回都会走那里），而审计包含
-     * `PackageManager` 签名解析与一次文件写入，因此优先投递到 worker 线程执行；
-     * worker 已关闭时退化为就地执行。时间戳在结果时刻捕获，不随后入队漂移。
+     * 惰性初始化（`noBackupFilesDir` 首次会创建目录）、`PackageManager` 签名解析
+     * 与一次文件写入。因此 `auditLog(this)` 与实际写入都在 [Runnable] 内部完成，
+     * 优先投递到 worker 线程；worker 已关闭时退化为就地执行。时间戳在结果时刻
+     * 捕获，不随后入队漂移。
      */
     private fun recordAudit(context: AuditContext?, resultCode: String?) {
         if (context == null) return
         val code = resultCode ?: AUDIT_OK
         val now = System.currentTimeMillis()
-        val log = auditLog(this)
         val write = Runnable {
-            log.recordSafely(
+            auditLog(this).recordSafely(
                 context = context,
                 resultCode = code,
                 now = now,

@@ -70,14 +70,15 @@ await agent.revokeApp('com.example.app');
 
 ### 审计元数据（M35）
 
-`readTree` / `screenshot` / `input` 的可选参数 `assistant_id`、`conversation_id` 只用于原生侧的**审计元数据**，不参与任何授权判定（批准是按应用、全局共享的，见应用白名单）。Dart 客户端只在非空时发送；原生侧缺失或畸形时记为未知（null），**不伪造**。
+`readTree` / `screenshot` / `input` 的可选参数 `assistant_id`、`conversation_id` 只用于原生侧的**审计元数据**，不参与任何授权判定（批准是按应用、全局共享的，见应用白名单）。Dart 客户端只在非空时发送；原生侧缺失或畸形时记为未知（null），**不伪造**。身份只能来自宿主调用侧：`input()` 在展开模型参数之前剔除这两个键（与 `snapshot_id` 同一处防护），模型自带的同名参数不会存活，宿主值永远优先。
 
 审计文件是 `noBackupFilesDir/phone_agent_audit.tsv`，每条记录**恰好七列**：时间戳、助手 id、会话 id、包名、签名证书 SHA-256 前 8 位、动作类型、结果码。
 
 - 动作类型是固定 token：`readTree`、`screenshot`、`input.tap`、`input.long_press`、`input.set_text`、`input.scroll`、`input.swipe`、`input.back`、`input.home`、`input.recents`；未知的输入动作降级为 `input`。**工具参数不进入记录**——节点 id、输入文本、坐标、时长、方向都没有落脚点。
 - **不记录**节点文本、输入文本、密码内容、截图或图片字节、界面内容摘要、坐标数值、窗口标题。
 - 滚动保留 **30 天或最近 2000 条，先到者生效**（恰好 30 天仍保留）。损坏行被丢弃而不是被信任。
-- 只在结果收口处记录一次：成功写 `ok`，失败写既有结构化错误码（如 `system_window_denied`、`permission_required`、`busy`、`timeout`），不新增审计专用错误码。取不到前台窗口的失败（`no_window`、`device_locked`、服务未连接）包名为空。
+- 只在结果收口处记录一次：成功写 `ok`，失败写既有结构化错误码（如 `system_window_denied`、`permission_required`、`busy`、`timeout`），不新增审计专用错误码。取不到前台窗口的失败（`no_window`、`device_locked`）包名为空。
+- **不产生记录的两类调用**：`interrupted`（服务中断、`onUnbind`、`onDestroy` 作废的调用，没有可归属的结果）与服务未连接（调用在建立审计上下文之前就返回，一条记录都没有）。白名单方法（`approvedApps` / `approveApp` / `revokeApp`）也不审计。
 - 审计失败**不阻断工具主路径**：构建、签名解析、读取与写入全程不外抛，失败只在本地计数，工具结果、白名单判定与边界策略都不受影响。
 - 本地状态：不进仓库、不进聊天备份、不进入工具结果、不发给模型、不上传、不同步。**没有读取审计的通道方法，也没有界面**。
 

@@ -186,12 +186,38 @@ class AuditLogTest {
         }
         storage.write(seed)
 
-        val log = AuditLog(storage)
-        log.record(record(9_000L), now = 9_000L)
+        // 只加载、不追加：裁剪必须发生在读取路径上，而不是靠后续 record 顺带完成。
+        val entries = AuditLog(storage).entries()
 
-        val entries = log.entries()
         assertEquals(AuditLog.MAX_ENTRIES, entries.size)
-        assertEquals(9_000L, entries.last().occurredAtMillis)
+        assertEquals(1_003L, entries.first().occurredAtMillis)
+        assertEquals(3_002L, entries.last().occurredAtMillis)
+    }
+
+    @Test
+    fun `loading prunes records older than thirty days relative to the newest record`() {
+        val newest = 100 * day
+        val storage = InMemoryAuditStorage(
+            buildString {
+                append(AuditRecord.HEADER)
+                append('\n')
+                append(newest - 31 * day)
+                append("\ta\tc\tcom.example.app\taaaaaaaa\treadTree\tok\n")
+                append(newest - 29 * day)
+                append("\ta\tc\tcom.example.app\taaaaaaaa\treadTree\tok\n")
+                append(newest)
+                append("\ta\tc\tcom.example.app\taaaaaaaa\treadTree\tok\n")
+            },
+        )
+
+        // 基准取文件里最新一条记录的时间戳，而不是当前时钟：应用长期未运行后
+        // 整份历史不应因为“现在很晚”而被一次性判为过旧。
+        val entries = AuditLog(storage).entries()
+
+        assertEquals(
+            listOf(newest - 29 * day, newest),
+            entries.map { it.occurredAtMillis },
+        )
     }
 
     @Test
