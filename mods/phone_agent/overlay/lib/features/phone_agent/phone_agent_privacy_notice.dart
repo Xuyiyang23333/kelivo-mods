@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/services/notification_service.dart';
 import '../../l10n/app_localizations.dart';
 import 'phone_agent_service.dart';
 
@@ -18,7 +19,7 @@ import 'phone_agent_service.dart';
 class PhoneAgentPrivacyNotice {
   const PhoneAgentPrivacyNotice._();
 
-  /// 如果用户从未确认过，弹出一次性提示。
+  /// 如果用户从未确认过，弹出一次性提示；确认后顺带请求一次通知权限。
   ///
   /// 返回 true 表示已经确认（此前确认过，或本次确认）。取消/关闭对话框不写状态，
   /// 下次启用时会再次提示——**不静默放行**。写状态失败也不放行，由调用方决定是否
@@ -35,7 +36,12 @@ class PhoneAgentPrivacyNotice {
       // 读不到状态时按“未确认”处理（fail closed 到提示，而不是跳过告知）。
       acknowledged = false;
     }
-    if (acknowledged) return true;
+    if (acknowledged) {
+      // 已确认过的用户可能仍未给通知权限（例如上次拒绝、或从旧版本升级）：
+      // 每次启用都尝试一次，不重复弹对话框。
+      await _ensureNotificationPermission();
+      return true;
+    }
     if (!context.mounted) return false;
     final confirmed = await showDialog<bool>(
       context: context,
@@ -64,6 +70,19 @@ class PhoneAgentPrivacyNotice {
     } catch (_) {
       // 记录失败时不重试、不阻断选择：提示已经显示过，如实告知的目标已达成。
     }
+    await _ensureNotificationPermission();
     return true;
+  }
+
+  /// 请求一次 Android 13+ 通知权限。
+  ///
+  /// 批准通知是**可选增强**：拒绝后通知栏不出现，聊天卡片仍是唯一入口。这里因此
+  /// 只尝试一次、不重试、不阻断选择，也不假装通知可用。
+  static Future<bool> _ensureNotificationPermission() async {
+    try {
+      return await NotificationService.ensureAndroidNotificationsPermission();
+    } catch (_) {
+      return false;
+    }
   }
 }

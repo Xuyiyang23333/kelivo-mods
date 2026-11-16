@@ -108,11 +108,16 @@ class PhoneAgentService : AccessibilityService() {
          * 进程级批准请求状态机（plan 7.5.6/7.5.13）。不依赖无障碍服务连接：
          * 通知栏批准 action 与 Mods 页撤销在服务关闭时也必须可用。
          */
-        internal fun approvalRequests(): ApprovalRequests = synchronized(approvalRequestsLock) {
-            approvalRequestsOrNull ?: ApprovalRequests(
-                nowMillis = { System.currentTimeMillis() },
-            ).also { approvalRequestsOrNull = it }
-        }
+        internal fun approvalRequests(context: Context): ApprovalRequests =
+            synchronized(approvalRequestsLock) {
+                approvalRequestsOrNull ?: ApprovalRequests(
+                    nowMillis = { System.currentTimeMillis() },
+                    // 请求离开 pending 时撤下对应的常驻通知，避免堆叠无法关闭的通知。
+                    onLeftPending = { record ->
+                        approvalNotifier(context).cancel(record.id)
+                    },
+                ).also { approvalRequestsOrNull = it }
+            }
 
         private fun approvalNotifier(context: Context): PhoneAgentApprovalNotifier =
             synchronized(approvalRequestsLock) {
@@ -132,7 +137,7 @@ class PhoneAgentService : AccessibilityService() {
             approvalAssistantId: String?,
         ): ApprovalRequestRecord {
             val identity = signingIdentity(context, packageName)
-            val record = approvalRequests().create(
+            val record = approvalRequests(context).create(
                 packageName = packageName,
                 signingSha256Values = identity?.sha256Values.orEmpty(),
                 displayName = identity?.displayName,
@@ -153,14 +158,19 @@ class PhoneAgentService : AccessibilityService() {
             requestId: String,
             approve: Boolean,
         ): ApprovalResolution? {
-            val resolution = approvalRequests().resolve(requestId, approve) { record ->
-                considerPreApproved(context, record) ?: approvals(context).approve(
-                    packageName = record.packageName,
-                    now = System.currentTimeMillis(),
-                    sourceAssistantId = record.assistantId,
-                    expectedSha256Values = record.signingSha256Values
-                        .takeIf { it.isNotEmpty() },
-                )
+            val resolution = approvalRequests(context).resolve(requestId, approve) { record ->
+                when {
+                    // 签名从未解析成功的请求不能批准：空集合不能退化成“按当前签名写入”，
+                    // 否则签名绑定不变量被绕过（fail closed）。
+                    record.signingUnavailable ->
+                        ApproveResult(false, ApproveResult.REASON_SIGNING_UNAVAILABLE, null)
+                    else -> considerPreApproved(context, record) ?: approvals(context).approve(
+                        packageName = record.packageName,
+                        now = System.currentTimeMillis(),
+                        sourceAssistantId = record.assistantId,
+                        expectedSha256Values = record.signingSha256Values,
+                    )
+                }
             }
             // 任一端处理完就撤下另一端：通知在这里统一取消，聊天卡片由 Dart 侧
             // 的状态流刷新（同一 resolve 结果）。
@@ -184,9 +194,9 @@ class PhoneAgentService : AccessibilityService() {
         /** 本地清理（切换会话、应用重启、服务断连）：不写白名单、不通知模型。 */
         internal fun dismissApprovals(context: Context, conversationId: String? = null) {
             val ids = if (conversationId == null) {
-                approvalRequests().dismissAll()
+                approvalRequests(context).dismissAll()
             } else {
-                approvalRequests().dismissForConversation(conversationId)
+                approvalRequests(context).dismissForConversation(conversationId)
             }
             val notifier = approvalNotifier(context)
             ids.forEach { notifier.cancel(it) }

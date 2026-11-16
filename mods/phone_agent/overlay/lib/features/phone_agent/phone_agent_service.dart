@@ -360,14 +360,14 @@ class PhoneAgentService {
     String packageName, {
     String? toolCallId,
     String? conversationId,
-    String? assistantId,
+    String? approvalAssistantId,
   }) {
     return _run(
       () => client.requestApproval(
         packageName,
         toolCallId: toolCallId,
         conversationId: conversationId,
-        assistantId: assistantId,
+        approvalAssistantId: approvalAssistantId,
       ),
       'create the approval request',
     );

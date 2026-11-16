@@ -785,13 +785,20 @@ M34（2026-11-16）实现了本节与 7.5.13/7.5.14 的交互面。**没有任�
   - **清理**：`dismissForConversation` / `dismissAll` 置 `dismissed`，是本地清理、**不是用户拒绝**。
   - 保留上限 64 条，终态记录先被淘汰。
 - **`permission_required` 的结构化身份**：`PhoneAgentError` 新增 `details`，由 `PackagePolicy.requireApproved` 填 `package_name`、`signing_prefix`、`display_name`、`signing_available`、`observation` 五个字段，经 `MethodChannel.Result.error(code, message, details)` 传给 Dart，再进入工具结果的 `identity`。**字段严格限于 7.5.4 允许的应用身份**，有 JVM 断言固定字段集合（不含节点、窗口标题或界面内容）。签名解析失败时 `signing_prefix` 为 null 且 `signing_available=false`，不写哈希占位。
-- **通道面（M34 新增，均不依赖无障碍服务连接）**：`requestApproval` / `approvalRequests` / `resolveApproval` / `dismissApprovals` / `privacyNotice` / `acknowledgePrivacyNotice`。身份由**原生侧**解析并保存，Dart 只传包名与关联上下文（工具调用 id、会话 id、助手 id），**不传签名**——Dart 不是放行点。
+- **通道面（M34 新增，均不依赖无障碍服务连接）**：`requestApproval` / `approvalRequests` / `resolveApproval` / `dismissApprovals` / `privacyNotice` / `acknowledgePrivacyNotice`。身份由**原生侧**解析并保存，Dart 只传包名与关联上下文，**不传签名**——Dart 不是放行点。
+  - **助手 id 有两个语义（与 M35 合并后）**：批准请求带 `approval_assistant_id`（**创建请求时的助手快照**，写入白名单“首次批准来源”供 Mods 页分组）；审计带 `assistant_id`（**实时重读**的当前助手，只是审计标签）。两者键名与用途都不同，不互相覆盖。
 - **通知栏**：新增 `PhoneAgentApprovalNotifier`（独立渠道 `kelivo_phone_agent_approval`）+ `PhoneAgentApprovalReceiver`（`exported="false"`，`PendingIntent.getBroadcast`，两个 `Notification.Action`：“允许”与“拒绝”）。通知只显示包名、签名前缀与固定说明，文案在插件自己的 `strings.xml`（中英两套）；**未修改上游 `NotificationService`，也未使用 `AndroidNotificationAction`**——上游仍然只有“点击打开会话”。**通知是可选增强，不是主入口**：API 33+ 需运行时 `POST_NOTIFICATIONS`，M34 在选择 Phone Agent（隐私确认之后）请求一次；用户拒绝时通知发不出去，**聊天卡片是唯一入口**（这一点由 widget 测试锁定，不依赖通知权限）。API 24–25 没有通知渠道，同样只有卡片。
-- **聊天卡片**：`PhoneAgentApprovalCard`（overlay）。上游接缝**只有两处**：`chat_message_widget.dart` 在工具结果摘要位置插入组件（+ import），`home_page.dart` 在 `initState`/`dispose` 注册/注销续跑回调（+ import）。组件自身监听 `PhoneAgentApprovalService.instance`，没有 pending 时返回 `SizedBox.shrink()`，因此不需要在上游 provider 树里注册。卡片只显示包名、签名前缀（或“签名证书不可用”）与可选显示名。
+- **聊天卡片**：`PhoneAgentApprovalCard`（overlay）。上游接缝**两处两个文件**：`chat_message_widget.dart` 插入组件并用 `pendingExists()` 参与内容区判定（+ import），`home_page.dart` 注册/注销续跑回调、`resumed` 时 `refresh()`、切会话时清理旧会话（+ import）。
+  - **渲染位置（R1 P1-1）**：卡片原先只插在 `content` 列里，而该列在“摘要关闭（默认）+ 无图片 + 无上游 pending”时为 `null`，导致**默认设置下卡片从不进入 widget 树**。现在 `PhoneAgentApprovalCard.pendingExists()` 同时参与 `content` 的非空判定与 `expectContent`，工具步骤本身也包在 `ListenableBuilder(listenable: PhoneAgentApprovalCard.listenable)` 里，因此卡片出现/消失都会让父级重算。**有 widget 测试锁定“默认设置下可见”，不依赖通知权限。**
+  - 组件自身也监听 `PhoneAgentApprovalService.instance`，没有 pending 时返回 `SizedBox.shrink()`，因此不需要在上游 provider 树里注册。卡片只显示包名、签名前缀（或“签名证书不可用”）与可选显示名。
   - **不复用 `ToolApprovalService`**：它的 `requestApproval` 返回需要 `await` 的 Future，而本设计的工具调用已同步返回 `permission_required`；套用会让 pending 永驻。M34 的 `PhoneAgentApprovalService` 复用**模式**（`ChangeNotifier` + pending 列表 + `notifyListeners()` 刷新）而**不复用等待语义**。
 - **「允许并继续」（M34 按 7.5.10 落地，仍属设计提案语义）**：卡片上的“允许并继续”先批准，再触发 `PhoneAgentApprovalService` 上**由首页注册**的回调；回调只向当前会话发送一条 `phoneAgentApprovalResumeMessage` 用户消息，要求模型**重新读取当前屏幕**并从真实界面状态继续，**不重放**批准前被拒绝的点击/输入/手势。会话已不是当前会话、发送被拒绝或没有注册回调时，只保存授权并提示“任务在等待批准时已中止，请让助手继续”——**不切换会话、不伪造续跑**。通知栏批准只能表达“批准”，因此那里的批准不续跑。
+- **双向撤下与清理（R1 P1-3）**：卡片→通知由原生 `resolveApproval` 末尾 `cancel(requestId)` 实现；**通知→卡片**没有事件通道，改为**回到前台时 `refresh()`**（`home_page` 的 `didChangeAppLifecycleState`）重新对齐原生 pending，已处理的请求从卡片消失。**切会话**调 `onForegroundConversationChanged()`（只在真换会话时清理旧会话），**服务断连**由 Mods 页在 `connected` 由 true→false 时调 `onServiceDisconnected()`。`refresh()` 在通道失败时**保留**现有 pending（不清空），并发调用合并为一次。
 - **Mods 页白名单管理**：`PhoneAgentApprovedAppsPage` 按**来源助手分组**（未知来源单列），逐条显示包名、签名前缀、批准时间、最后批准时间，并提供撤销；撤销后立即刷新（下一次判定重新读原生存储）。这是 7.5.5 第 (2) 项承诺的缓解措施。
 - **首次启用隐私确认（方案 B）**：`PhoneAgentPrivacyNotice.ensureAcknowledged` 在 Mods 页选择 Phone Agent 时检查原生状态（`noBackupFilesDir/phone_agent_privacy_notice.tsv`，值为 `acknowledged-v1`），未确认则弹一次性对话框。取消**不写状态**，下次选择时再次提示；读不到状态按**未确认**处理（fail closed 到提示而不是跳过告知）。文案写明“只是告知，不是技术控制”，并说明密码涂黑与安全窗口黑屏是限制而不是保证。
+- **批准失败不塌缩成成功（R1 P2）**：`resolve` 返回 `resumed` / `approvalOnly` / `denied` / `failed` 四值；原生 `approvalRequestPayload` 补 `failure_reason`（`signing_unavailable` / `signing_mismatch` / `pre_approved`），卡片对 `failed` 显示“无法保存批准”而不是“已批准”。
+- **签名缺失 fail closed（R1 P2）**：签名从未解析成功的请求在批准时直接返回 `signing_unavailable`，**不再**把空集合退化成“按当前签名写入”。
+- **过期/被取代的通知会被撤下（R1 P2）**：`ApprovalRequests` 注入 `onLeftPending` 回调，`expired` / `superseded` / `dismissed` / 终态都会 `cancel` 对应常驻通知，避免模型重试时堆叠无法关闭的通知。
 - **预批准防护**：`AppApprovals` 新增 `preApprovedPackages` 参数，`approve`/`revoke` 对构建期预批准成员直接返回 `pre_approved`（撤销返回 false），不写用户白名单。`PackagePolicy` 仍然直接放行预批准成员，因此它们既不会产生批准提示，也没有不可撤销的冗余条目。
 - **文案与 ARB**：新增 33 个键（含续跑提示语），英文与中文原文写在 `l10n-source` 增量补丁，四个目标语言（ko/ru/tr/zh_Hant）由本机网关 `mistral/deepseek-v4-1-flash-1017` 译出，`translate.py check` 四语言 **0 pending**。`llama-cpp/llama-cpp` 后端当轮不可用（网关报 Cloudflare 隧道不可达），**未使用付费服务**。
 - **未验证**：通知权限与 action 的真实行为（含进程被杀后重放）、`POST_NOTIFICATIONS` 被拒时的表现、卡片在真实对话流中的布局、通知与卡片同时存在时的撤下时序、Mods 页在服务关闭时的撤销链路、`pre_approved` 之外的批准失败在 UI 上的表现。**M34 未跑任何设备**。
@@ -1772,7 +1779,7 @@ JVM 测试（无 Robolectric、无新依赖）：
 
 最终验收已完成（就 M32 之前的契约与 M32 的设备证据而言）；M33 的门控与签名绑定、M34 的批准交互与隐私确认**都只有单元测试与静态检查，没有任何设备证据**，因此仍不宣称第二阶段全部完成，未验证项见 10.2。
 
-**M34 的检查结果（2026-11-16 R1 返工后，仅单元与静态检查）**：@@M34_CHECK_RESULTS@@
+**M34 的检查结果（2026-11-16 R1 返工后，仅单元与静态检查）**：Loader `dart format --output=none --set-exit-if-changed tool test` 0 变更、`dart analyze tool test` 无问题、`dart test` **173 通过**；合成树 `dart analyze --fatal-infos lib test integration_test tool` **No issues found**；手机 Agent + Mods + 设置入口 Flutter **152 通过**；上游 seam（`tool_handler_service_test`、`tool_handler_workspace_gating_test`、`request_consistency_test`）**56 通过**；插件 Dart **33 通过**；插件 Kotlin `:kelivo_phone_agent:testDebugUnitTest --rerun-tasks` **223 通过、0 失败**（含 M35 的审计测试）；ARB 四目标语言 `translate.py check` **0 pending**；`modsetHash` `cde912d77ca6c81dd977d180ee0c54da8248c3c0fc5ccc9b8c54466d67c855d2`（合成树 `.build/worktrees/cde912d77ca6c81d`）的 `plan`/`apply`/`verify` 通过。本轮 R1 返工修了三项 P1（卡片渲染位置、通知权限可达性、双向撤下与清理接线）与九项 P2，新增卡片/隐私/失败态 widget 测试。**未运行 integration_test、未构建 APK、未接设备。**
 
 ### 10.2 已知限制
 

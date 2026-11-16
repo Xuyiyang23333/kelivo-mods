@@ -74,7 +74,7 @@ class _FakePhoneAgentClient implements PhoneAgentClient {
     String packageName, {
     String? toolCallId,
     String? conversationId,
-    String? assistantId,
+    String? approvalAssistantId,
   }) => throw UnimplementedError();
 
   @override

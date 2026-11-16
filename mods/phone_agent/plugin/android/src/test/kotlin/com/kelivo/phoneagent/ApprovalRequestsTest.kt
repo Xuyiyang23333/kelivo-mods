@@ -236,4 +236,58 @@ class ApprovalRequestsTest {
         assertTrue(approvals.approve("com.example.app", now, null).approved)
         assertEquals(1, approvals.approvedApps().size)
     }
+
+    private fun requestsNotifying(seen: MutableList<String>, ttlMillis: Long = ApprovalRequests.DEFAULT_TTL_MILLIS) =
+        ApprovalRequests(
+            nowMillis = { now },
+            idFactory = { "r${++seq}" },
+            ttlMillis = ttlMillis,
+            onLeftPending = { seen += it.id },
+        )
+
+    @Test
+    fun `expiring a request reports it so its notification can be cancelled`() {
+        val seen = mutableListOf<String>()
+        val store = requestsNotifying(seen, ttlMillis = 100L)
+        val record = store.create("com.example.app", listOf(hashA), null, null, null, null)
+        now += 100L
+
+        store.pending()
+
+        assertEquals(listOf(record.id), seen)
+    }
+
+    @Test
+    fun `superseding a request reports the old one`() {
+        val seen = mutableListOf<String>()
+        val store = requestsNotifying(seen)
+        val first = store.create("com.example.app", listOf(hashA), null, null, null, null)
+
+        store.create("com.example.app", listOf(hashA), null, null, null, null)
+
+        assertEquals(listOf(first.id), seen)
+    }
+
+    @Test
+    fun `dismissing a conversation reports its pending requests`() {
+        val seen = mutableListOf<String>()
+        val store = requestsNotifying(seen)
+        val record = store.create("com.example.app", listOf(hashA), null, null, "c1", null)
+
+        store.dismissForConversation("c1")
+
+        assertEquals(listOf(record.id), seen)
+    }
+
+    @Test
+    fun `resolving reports the request once and only once`() {
+        val seen = mutableListOf<String>()
+        val store = requestsNotifying(seen)
+        val record = store.create("com.example.app", listOf(hashA), null, null, null, null)
+
+        store.resolve(record.id, approve = false) { approveAlways(it) }
+        store.resolve(record.id, approve = true) { approveAlways(it) }
+
+        assertEquals(listOf(record.id), seen)
+    }
 }

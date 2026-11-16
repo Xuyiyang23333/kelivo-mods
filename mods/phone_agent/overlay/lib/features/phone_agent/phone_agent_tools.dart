@@ -63,6 +63,7 @@ class PhoneAgentTools {
     String? assistantId,
     String? conversationId,
     String? toolCallId,
+    String? approvalAssistantId,
   }) async {
     try {
       switch (name) {
@@ -113,7 +114,7 @@ class PhoneAgentTools {
         failure,
         toolCallId: toolCallId,
         conversationId: conversationId,
-        assistantId: assistantId,
+        approvalAssistantId: approvalAssistantId,
       );
       return failure.toToolResult(tool: name);
     }
@@ -127,7 +128,7 @@ class PhoneAgentTools {
     PhoneAgentToolFailure failure, {
     String? toolCallId,
     String? conversationId,
-    String? assistantId,
+    String? approvalAssistantId,
   }) async {
     final identity = failure.identity;
     if (identity == null) return;
@@ -136,7 +137,7 @@ class PhoneAgentTools {
         identity,
         toolCallId: toolCallId,
         conversationId: conversationId,
-        approvalAssistantId: assistantId,
+        approvalAssistantId: approvalAssistantId,
       );
     } catch (_) {
       // 通知权限、通道超时等都不应把工具结果变成另一种失败。

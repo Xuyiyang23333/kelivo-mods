@@ -39,7 +39,7 @@ void main() {
       _identity,
       toolCallId: 'call-1',
       conversationId: 'c1',
-      assistantId: 'a1',
+      approvalAssistantId: 'a1',
     );
 
     expect(entry, isNotNull);
@@ -99,7 +99,8 @@ void main() {
 
     final outcome = await approvals.resolve(entry!.requestId, approve: false);
 
-    expect(outcome, PhoneAgentResumeOutcome.approvalOnly);
+    // 拒绝必须区别于“已批准但无法续跑”：否则界面会显示成功。
+    expect(outcome, PhoneAgentResumeOutcome.denied);
     expect(approvals.hasPending, isFalse);
     expect(approvals.pendingFor(toolCallId: 'call-1'), isNull);
   });
@@ -154,7 +155,7 @@ void main() {
       resume: true,
     );
 
-    expect(outcome, PhoneAgentResumeOutcome.approvalOnly);
+    expect(outcome, PhoneAgentResumeOutcome.denied);
   });
 
   test('refresh adopts native pending requests and drops resolved ones',
@@ -251,5 +252,59 @@ void main() {
     );
 
     expect(decoded.containsKey('identity'), isFalse);
+  });
+  test('a failed native write reports failed, never approvalOnly', () async {
+    final entry = await approvals.register(_identity, toolCallId: 'call-1');
+    client.resolveOutcomeState = 'failed';
+    client.resolveFailureReason = 'signing_mismatch';
+
+    final outcome = await approvals.resolve(entry!.requestId, approve: true);
+
+    expect(outcome, PhoneAgentResumeOutcome.failed);
+  });
+
+  test('a denied request reports denied', () async {
+    final entry = await approvals.register(_identity, toolCallId: 'call-1');
+
+    final outcome = await approvals.resolve(entry!.requestId, approve: false);
+
+    expect(outcome, PhoneAgentResumeOutcome.denied);
+  });
+
+  test('switching conversation dismisses only the previous conversation', () async {
+    await approvals.register(_identity, toolCallId: 'c1', conversationId: 'c1');
+    await approvals.register(
+      const PhoneAgentPermissionIdentity(
+        packageName: 'com.example.other',
+        signingPrefix: 'bbbbbbbb',
+        signingAvailable: true,
+      ),
+      toolCallId: 'c2',
+      conversationId: 'c2',
+    );
+
+    await approvals.onForegroundConversationChanged('c1');
+    await approvals.onForegroundConversationChanged('c2');
+
+    expect(approvals.pendingFor(toolCallId: 'c1'), isNull);
+    expect(approvals.pendingFor(toolCallId: 'c2'), isNotNull);
+    expect(client.dismissedConversations, contains('c1'));
+  });
+
+  test('a refresh failure keeps pending cards instead of clearing them', () async {
+    await approvals.register(_identity, toolCallId: 'call-1');
+    client.approvalRequestsError = Exception('channel down');
+
+    await approvals.refresh();
+
+    expect(approvals.hasPending, isTrue);
+  });
+
+  test('service disconnect clears every pending request', () async {
+    await approvals.register(_identity, toolCallId: 'call-1');
+
+    await approvals.onServiceDisconnected();
+
+    expect(approvals.hasPending, isFalse);
   });
 }

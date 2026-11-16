@@ -15,6 +15,7 @@ import '../../shared/widgets/snackbar.dart';
 import '../../theme/app_font_weights.dart';
 import '../home/services/local_tool_toggle.dart';
 import '../home/services/local_tools_service.dart';
+import '../phone_agent/phone_agent_approval_service.dart';
 import '../phone_agent/phone_agent_approved_apps_page.dart';
 import '../phone_agent/phone_agent_local_tool.dart';
 import '../phone_agent/phone_agent_privacy_notice.dart';
@@ -152,6 +153,7 @@ class _ModsViewState extends State<ModsView> with WidgetsBindingObserver {
       });
       return;
     }
+    final wasConnected = _status?.connected ?? false;
     setState(() {
       _loading = true;
       _unavailable = false;
@@ -164,6 +166,11 @@ class _ModsViewState extends State<ModsView> with WidgetsBindingObserver {
         _loading = false;
         _unavailable = false;
       });
+      // 服务刚断开：待批准请求无法再执行，清理本地 pending 与通知（不写白名单，
+      // 不通知模型）。清理不等于拒绝。
+      if (wasConnected && !status.connected) {
+        unawaited(PhoneAgentApprovalService.instance.onServiceDisconnected());
+      }
     } on PhoneAgentToolFailure {
       _markUnavailable(request, notify);
     } catch (_) {

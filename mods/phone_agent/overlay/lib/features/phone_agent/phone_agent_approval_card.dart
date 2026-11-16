@@ -45,7 +45,8 @@ class PhoneAgentApprovalCard extends StatelessWidget {
         null;
   }
 
-  /// pending 状态变化时通知上游重建（通知栏批准后卡片要立即消失）。
+  /// pending 状态变化时通知上游重建（通知栏批准后卡片要立即消失，否则父级内容区
+  /// 会留一块空白）。
   static Listenable get listenable => PhoneAgentApprovalService.instance;
 
   @override
@@ -96,24 +97,31 @@ class _PhoneAgentApprovalBodyState extends State<_PhoneAgentApprovalBody> {
         approve: approve,
         resume: resume,
       );
-      if (!approve) {
-        _toast(messenger, l10n?.phoneAgentApprovalDenied);
-        return;
-      }
-      if (outcome == PhoneAgentResumeOutcome.resumed) {
-        final conversationId = entry.conversationId;
-        final handler = PhoneAgentApprovalService.instance;
-        if (conversationId != null && handler.hasResumeHandler) {
+      switch (outcome) {
+        case PhoneAgentResumeOutcome.denied:
+          _toast(messenger, l10n?.phoneAgentApprovalDenied);
+        case PhoneAgentResumeOutcome.failed:
+          // 白名单没有写入（签名读不到或已变化）。必须如实说“没批准”，
+          // 不能落成“已批准”。
+          _toast(messenger, l10n?.phoneAgentApprovalFailed);
+        case PhoneAgentResumeOutcome.resumed:
+          final conversationId = entry.conversationId;
+          if (conversationId == null) {
+            _toast(messenger, l10n?.phoneAgentApprovalResumeUnavailable);
+            return;
+          }
           _toast(messenger, l10n?.phoneAgentApprovalResumed);
           await _resume(conversationId, entry.packageName);
-          return;
-        }
-        // 没有续跑入口（例如通知栏批准后回到聊天）：只保存了授权，如实提示需要
-        // 重新观察，不假装任务已经继续。
-        _toast(messenger, l10n?.phoneAgentApprovalResumeUnavailable);
-        return;
+        case PhoneAgentResumeOutcome.approvalOnly:
+          // 用户点了“允许并继续”但没有续跑入口：只保存了授权，如实提示需要
+          // 让助手继续（它会先重新观察），不假装任务已经继续。
+          _toast(
+            messenger,
+            resume && !PhoneAgentApprovalService.instance.hasResumeHandler
+                ? l10n?.phoneAgentApprovalResumeUnavailable
+                : l10n?.phoneAgentApprovalApproved,
+          );
       }
-      _toast(messenger, l10n?.phoneAgentApprovalApproved);
     } catch (_) {
       _toast(messenger, l10n?.phoneAgentApprovalFailed);
     } finally {

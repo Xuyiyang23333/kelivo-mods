@@ -151,6 +151,7 @@ class PhoneAgentMod extends ToolMod {
           // “首次批准来源”，必须反映发起请求时的助手，而不是批准时的当前助手。
           toolCallId: toolCallId,
           approvalAssistantId: context.assistant?.id,
+          // 与审计 id 分开传：上面的 assistantId 只喂审计，这里只写批准来源。
         );
       } on PhoneAgentToolFailure catch (failure) {
         return failure.toToolResult(tool: name);

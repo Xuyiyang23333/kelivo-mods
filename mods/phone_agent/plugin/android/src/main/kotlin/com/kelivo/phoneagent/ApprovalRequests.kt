@@ -86,6 +86,14 @@ internal class ApprovalRequests(
     private val idFactory: () -> String = { java.util.UUID.randomUUID().toString() },
     private val ttlMillis: Long = DEFAULT_TTL_MILLIS,
     private val maxRetained: Int = MAX_RETAINED,
+    /**
+     * 请求离开 pending 时的回调（过期、被取代、清理、终态）。
+     *
+     * 用途是撤下通知：`setOngoing(true)` 的通知不可滑走，若不在这些路径取消，
+     * 模型重试同一调用会不断堆叠无法关闭的通知，按钮点下去只会落到终态。
+     * 状态机本身保持纯 JVM，撤下通知由注入的回调完成。
+     */
+    private val onLeftPending: (ApprovalRequestRecord) -> Unit = {},
 ) {
     private val records = linkedMapOf<String, ApprovalRequestRecord>()
 
@@ -163,6 +171,7 @@ internal class ApprovalRequests(
                 resolvedAtMillis = now,
             )
             records[id] = denied
+            onLeftPending(denied)
             return ApprovalResolution(denied)
         }
         val result = onApprove(record)
@@ -176,6 +185,7 @@ internal class ApprovalRequests(
             )
         }
         records[id] = outcome
+        onLeftPending(outcome)
         return ApprovalResolution(outcome, result)
     }
 
@@ -189,6 +199,7 @@ internal class ApprovalRequests(
             resolvedAtMillis = nowMillis(),
         )
         records[id] = dismissed
+        onLeftPending(dismissed)
         return dismissed
     }
 
@@ -222,10 +233,12 @@ internal class ApprovalRequests(
         for ((id, record) in records.entries.toList()) {
             if (record.state != ApprovalRequestState.PENDING) continue
             if (!record.sameTarget(packageName, sha256Values)) continue
-            records[id] = record.copy(
+            val superseded = record.copy(
                 state = ApprovalRequestState.SUPERSEDED,
                 resolvedAtMillis = now,
             )
+            records[id] = superseded
+            onLeftPending(superseded)
         }
     }
 
@@ -233,10 +246,12 @@ internal class ApprovalRequests(
         for ((id, record) in records.entries.toList()) {
             if (record.state != ApprovalRequestState.PENDING) continue
             if (now < record.expiresAtMillis) continue
-            records[id] = record.copy(
+            val expired = record.copy(
                 state = ApprovalRequestState.EXPIRED,
                 resolvedAtMillis = record.expiresAtMillis,
             )
+            records[id] = expired
+            onLeftPending(expired)
         }
     }
 

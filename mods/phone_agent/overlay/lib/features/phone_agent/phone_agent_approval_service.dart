@@ -25,17 +25,24 @@ class PhoneAgentPendingApproval {
   String? get displayName => request.displayName;
   String? get toolCallId => request.toolCallId;
   String? get conversationId => request.conversationId;
-
-  bool get canApprove => identity.signingAvailable;
 }
 
-/// 「允许并继续」的结果：批准是否写入、关联任务能否恢复。
+/// 处理一条批准请求的结果。
+///
+/// 必须区分「写入失败」与「已批准但无法续跑」：把 `failed` 塌缩成“已批准”会让界面
+/// 对用户说谎（原生可能返回 `signing_mismatch` / `signing_unavailable`）。
 enum PhoneAgentResumeOutcome {
   /// 已批准并请求继续；调用方应重新观察后再继续。
   resumed,
 
   /// 已批准，但该任务已不可恢复（会话已切走、任务已取消或已完成）。
   approvalOnly,
+
+  /// 用户拒绝。
+  denied,
+
+  /// 白名单**没有**写入：签名解析失败、签名已变化，或目标属构建期预批准条目。
+  failed,
 }
 
 /// 续跑入口：由首页注册，调用方只需提供会话 id 与目标包名。
@@ -76,6 +83,8 @@ class PhoneAgentApprovalService extends ChangeNotifier {
   Timer? _sweeper;
   bool _disposed = false;
   PhoneAgentResumeHandler? _resumeHandler;
+  String? _foregroundConversationId;
+  Future<void>? _refreshing;
 
   /// 注册「允许并继续」的续跑入口（由首页在启动时注入一次）。
   ///
@@ -142,9 +151,52 @@ class PhoneAgentApprovalService extends ChangeNotifier {
     return _adopt(request, identity);
   }
 
+  /// 当前前台会话发生变化时调用（首页在切换会话时通知）。
+  ///
+  /// 只在**确实换了会话**时清理旧会话的 pending 请求；同一会话重复调用是无操作。
+  /// 清理是本地行为，不写白名单、不通知模型（模型早已拿到 `permission_required`）。
+  Future<void> onForegroundConversationChanged(String? conversationId) async {
+    final next = conversationId?.trim();
+    final previous = _foregroundConversationId;
+    _foregroundConversationId = next;
+    if (previous == null || previous == next) return;
+    if (_pending.values.any((entry) => entry.conversationId == previous)) {
+      await dismissForConversation(previous);
+    }
+  }
+
+  /// 服务断连时清理全部 pending 请求（首页订阅服务状态时调用）。
+  Future<void> onServiceDisconnected() async {
+    if (_pending.isEmpty) return;
+    await dismissAll();
+  }
+
   /// 重新读取原生 pending 列表（应用回到前台、切换会话、服务状态变化时调用）。
+  ///
+  /// 这是「通知栏批准后聊天卡片随即消失」的实现点：通知 action 走原生
+  /// `resolveApproval`，Dart 侧没有事件通道，因此回到前台/切会话时重新对齐。
+  /// 并发调用合并成一次，避免重复通道往返。
   Future<void> refresh() async {
-    final requests = await _service.approvalRequests();
+    final inFlight = _refreshing;
+    if (inFlight != null) return inFlight;
+    final future = _refreshOnce();
+    _refreshing = future;
+    try {
+      await future;
+    } finally {
+      if (identical(_refreshing, future)) _refreshing = null;
+    }
+  }
+
+  Future<void> _refreshOnce() async {
+    final List<PhoneAgentApprovalRequest> requests;
+    try {
+      requests = await _service.approvalRequests();
+    } catch (_) {
+      // 通道暂时不可用（服务重启中、插件缺失）：保留现有 pending，不清空。
+      // 清空会让仍在等用户处理的卡片凭空消失；下次 refresh 会重新对齐。
+      return;
+    }
     final seen = <String>{};
     for (final request in requests) {
       if (!request.isPending) continue;
@@ -176,9 +228,14 @@ class PhoneAgentApprovalService extends ChangeNotifier {
 
   /// 批准或拒绝。**幂等**：请求已是终态时原生只返回既有状态，不写白名单。
   ///
-  /// [resume] 为 true 表示「允许并继续」：返回 [PhoneAgentResumeOutcome.resumed] 让
-  /// 调用方去续跑。续跑**由聊天侧执行**（发送一条“已批准，请重新观察再继续”的用户
-  /// 消息），原生不会重放被拒绝时的点击/输入/手势（plan 7.5.10）。
+  /// 返回值必须区分三种情况：拒绝 → [PhoneAgentResumeOutcome.denied]；原生没有写入
+  /// 白名单（`signing_mismatch` / `signing_unavailable` / `pre_approved`）→
+  /// [PhoneAgentResumeOutcome.failed]；写入成功 → 有续跑入口时 [resumed]，否则
+  /// [approvalOnly]。**不得**把失败报成“已批准”。
+  ///
+  /// [resume] 为 true 表示「允许并继续」：返回 [resumed] 让调用方去续跑。续跑**由
+  /// 聊天侧执行**（发送一条“已批准，请重新观察再继续”的用户消息），原生不会重放被
+  /// 拒绝时的点击/输入/手势（plan 7.5.10）。
   ///
   /// 通知栏 action 只能表达“批准”，那里的批准 `resume` 恒为 false——用户处理完通知
   /// 只会看到授权已生效，需要模型重新观察。这是如实行为，不伪造续跑。
@@ -193,12 +250,25 @@ class PhoneAgentApprovalService extends ChangeNotifier {
     );
     _pending.remove(requestId);
     _identityByRequest.remove(requestId);
-    final resumed =
-        approve && resume && resolved.isApproved && hasResumeHandler;
+    final outcome = _outcomeFor(resolved, approve: approve, resume: resume);
     _notify();
-    return resumed
-        ? PhoneAgentResumeOutcome.resumed
-        : PhoneAgentResumeOutcome.approvalOnly;
+    return outcome;
+  }
+
+  PhoneAgentResumeOutcome _outcomeFor(
+    PhoneAgentApprovalRequest resolved, {
+    required bool approve,
+    required bool resume,
+  }) {
+    if (!approve) return PhoneAgentResumeOutcome.denied;
+    if (resolved.state == 'failed') return PhoneAgentResumeOutcome.failed;
+    if (!resolved.isApproved) {
+      // 终态不是 approved 也不是 failed（例如请求已被取代或被清理）：批准没有生效，
+      // 不能报成成功。
+      return PhoneAgentResumeOutcome.failed;
+    }
+    if (resume && hasResumeHandler) return PhoneAgentResumeOutcome.resumed;
+    return PhoneAgentResumeOutcome.approvalOnly;
   }
 
   /// 切换会话或应用重启时的本地清理：不写白名单、不通知模型。
@@ -206,6 +276,10 @@ class PhoneAgentApprovalService extends ChangeNotifier {
     if (conversationId.isEmpty) return;
     await _service.dismissApprovals(conversationId: conversationId);
     _pending.removeWhere((_, entry) => entry.conversationId == conversationId);
+    _identityByRequest.removeWhere(
+      (id, _) => !_pending.containsKey(id),
+    );
+    _ensureSweeper();
     _notify();
   }
 
@@ -214,6 +288,7 @@ class PhoneAgentApprovalService extends ChangeNotifier {
     await _service.dismissApprovals();
     _pending.clear();
     _identityByRequest.clear();
+    _ensureSweeper();
     _notify();
   }
 

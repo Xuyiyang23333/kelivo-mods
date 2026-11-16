@@ -200,7 +200,7 @@ class PhoneAgentPlugin : FlutterPlugin {
     /** 当前仍待处理的请求（TTL 到期会在这里被置为过期）。不含已处理的历史。 */
     private fun approvalRequests(result: MethodChannel.Result) {
         try {
-            val requests = PhoneAgentService.approvalRequests()
+            val requests = PhoneAgentService.approvalRequests(appContext)
                 .pending()
                 .map(::approvalRequestPayload)
             result.success(linkedMapOf("requests" to requests))
@@ -311,6 +311,10 @@ class PhoneAgentPlugin : FlutterPlugin {
     /**
      * 请求载荷。只含应用身份（包名、签名前缀、可选显示名）与生命周期元数据，
      * 不含节点文本、窗口标题、截图或界面内容。
+     *
+     * `failure_reason` 只在批准写入被拒绝时出现（`signing_unavailable` /
+     * `signing_mismatch` / `pre_approved`）：Dart 侧据此把“已批准”与“没批准”分开，
+     * 不能让失败塌缩成成功。
      */
     private fun approvalRequestPayload(record: ApprovalRequestRecord): LinkedHashMap<String, Any?> =
         linkedMapOf(
@@ -321,10 +325,11 @@ class PhoneAgentPlugin : FlutterPlugin {
             "display_name" to record.displayName,
             "tool_call_id" to record.toolCallId,
             "conversation_id" to record.conversationId,
-            "assistant_id" to record.assistantId,
+            "approval_assistant_id" to record.assistantId,
             "created_at" to record.createdAtMillis,
             "expires_at" to record.expiresAtMillis,
             "state" to record.state.wire,
+            "failure_reason" to record.failureReason,
         )
 
     private fun dispatch(

@@ -169,6 +169,12 @@ class RecordingPhoneAgentClient implements PhoneAgentClient {
   String? requestedSigningPrefix = 'aaaaaaaa';
   String? requestedDisplayName = 'Example';
 
+  /// `resolveApproval` 返回的终态；测试用它模拟原生写入失败。
+  String resolveOutcomeState = 'approved';
+
+  /// 写入失败时的原因（`signing_mismatch` 等）。
+  String? resolveFailureReason;
+
   @override
   Future<PhoneAgentAvailability> status() async {
     statusCalls++;
@@ -239,7 +245,7 @@ class RecordingPhoneAgentClient implements PhoneAgentClient {
     String packageName, {
     String? toolCallId,
     String? conversationId,
-    String? assistantId,
+    String? approvalAssistantId,
   }) async {
     final request = PhoneAgentApprovalRequest(
       requestId: 'r${approvalRequestsResult.length + 1}',
@@ -249,7 +255,7 @@ class RecordingPhoneAgentClient implements PhoneAgentClient {
       displayName: requestedDisplayName,
       toolCallId: toolCallId,
       conversationId: conversationId,
-      assistantId: assistantId,
+      approvalAssistantId: approvalAssistantId,
       createdAt: 0,
       expiresAt: DateTime.now().millisecondsSinceEpoch + 60000,
       state: 'pending',
@@ -258,9 +264,15 @@ class RecordingPhoneAgentClient implements PhoneAgentClient {
     return request;
   }
 
+  /// 模拟通道失败（插件缺失、服务重启中）。
+  Object? approvalRequestsError;
+
   @override
-  Future<List<PhoneAgentApprovalRequest>> approvalRequests() async =>
-      List<PhoneAgentApprovalRequest>.of(approvalRequestsResult);
+  Future<List<PhoneAgentApprovalRequest>> approvalRequests() async {
+    final error = approvalRequestsError;
+    if (error != null) throw error;
+    return List<PhoneAgentApprovalRequest>.of(approvalRequestsResult);
+  }
 
   @override
   Future<PhoneAgentApprovalRequest> resolveApproval({
@@ -276,8 +288,20 @@ class RecordingPhoneAgentClient implements PhoneAgentClient {
         'This approval request is no longer pending.',
       );
     }
-    final resolved = approvalRequestsResult[index].copyWith(
-      state: approve ? 'approved' : 'denied',
+    final base = approvalRequestsResult[index];
+    final resolved = PhoneAgentApprovalRequest(
+      requestId: base.requestId,
+      packageName: base.packageName,
+      signingPrefix: base.signingPrefix,
+      signingAvailable: base.signingAvailable,
+      displayName: base.displayName,
+      toolCallId: base.toolCallId,
+      conversationId: base.conversationId,
+      approvalAssistantId: base.approvalAssistantId,
+      createdAt: base.createdAt,
+      expiresAt: base.expiresAt,
+      state: approve ? resolveOutcomeState : 'denied',
+      failureReason: approve ? resolveFailureReason : null,
     );
     approvalRequestsResult.removeAt(index);
     return resolved;
