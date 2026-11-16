@@ -19,6 +19,13 @@
 | `driver.py` | 异常套件（`phone_agent_exception_test.dart`）的宿主驱动 |
 | `run_official.py` | 官方测试（`phone_agent_test.dart`）的最小宿主包装，只负责授权并拒绝随后的通知权限弹窗 |
 | `run_approval_chain.py` | 应用批准链路（`phone_agent_approval_chain_test.dart`）的宿主驱动：只做 `KEYCODE_HOME` 与证据抓取 |
+
+`run_approval_chain.py` 的 `evidence()` 抓的 `approval-chain-*.png/.xml` 可能拍在
+`KEYCODE_HOME` 落定之前（实测拿到的是测试应用自己的界面），因此它们只作「应用内
+状态」旁证，**不作为 launcher 前台证据**。目标前台的真正证据是测试打印
+`PHONE_AGENT_APPROVAL_OBSERVED: package=<目标包> nodes=<N>`（断言读树的
+`package_name` 等于目标包且节点非空）。目标包默认 Pixel Launcher，可用
+`--dart-define=PHONE_AGENT_TARGET_PACKAGE=<包名>` 覆盖（放进 `TEST_ARGS`）。
 | `_runs/` | 运行日志与 UI dump 输出目录（已 gitignore） |
 
 ## 用法
@@ -52,7 +59,7 @@ python3 mods/phone_agent/host/run_approval_chain.py
 
 1. **`adb()` 超时不再抛出**（`adb()`）。单次 `uiautomator dump` 超过 45 秒时
    原先从 `run_official.py` 的 enable 线程抛出 `TimeoutExpired`，线程静默死亡，
-   测试只能一直等 `setUpAll`。现在记录日志并返回空串（`check=True` 保留抛错）。
+   测试只能一直等 `setUpAll`。现在记录日志并返回空串，调用方按需重试。
 2. **`_find_service_entry` 的前台判断与回顶**。服务详情页与列表页同属一个
    Settings 任务，`am start -a ACCESSIBILITY_SETTINGS` 只把任务带到前台
    （`Activity not started, its current task has been brought to the front`），
@@ -64,10 +71,16 @@ python3 mods/phone_agent/host/run_approval_chain.py
    没有它时残留的 `am start` 会在 `HOME` 之后把应用拉回前台（1 秒内实测），
    让 `recents` 用例与批准链路的「未批准前台」都看到本应用。
 4. **隐私确认与通知权限**（`run_official.py`）。M34 首次启用会先弹一次性隐私
-   确认（测试侧负责点 `I understand`），随后产品请求 `POST_NOTIFICATIONS`；
-   该弹窗在 `flutter test` 下无人应答会挡住 `writeSelection`。宿主按约定
-   **拒绝**它（保持 `granted=false`，异常套件需要该权限未授予），不 grant、
-   不 revoke、不 clear。
+   确认（测试侧按 l10n 取按钮文案点击，不硬编码英文），随后产品请求
+   `POST_NOTIFICATIONS`。宿主按约定**拒绝**它（保持 `granted=false`，异常套件
+   需要该权限未授予），不 grant、不 revoke、不 clear。
+   **因果边界**：`run_official.py` 的 `dismiss_notification_prompt()` 是 240 秒
+   守护线程，只在 `permissioncontroller` 处于前台时动作（否则空转），因此理论上
+   可能碰到无关的权限弹窗，本轮日志只有 1 次命中、未造成干扰。r10 的真实时序是
+   Mods 断言（`00:40 +1`）**早于** `16:16:48` 的拒绝动作约 10 秒，所以「弹窗会
+   挡住 `writeSelection`」只是**代码路径**（`phone_agent_privacy_notice.dart` 的
+   `await _ensureNotificationPermission()`）支持的推断，**不由该轮日志证明**；
+   该轮日志能证明的只有「弹窗真实出现并被拒绝、权限保持 `granted=false`」。
 
 ## 六处行为修正（都是宿主侧，产品未改）
 

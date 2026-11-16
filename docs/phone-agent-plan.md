@@ -1752,7 +1752,8 @@ M36 的目标是给 M33（门控与签名绑定）、M34（批准交互与隐私
 
 - 命令：`APP_TREE=<tree> SERIAL=emulator-5554 python3 mods/phone_agent/host/run_official.py`；日志 `mods/phone_agent/host/_runs/official_api35_m36_r10.log`（EXIT=0，elapsed 155s）。
 - 覆盖：截图 → 读树 → 节点点击 → 坐标滑动 → 节点滚动 → 聚焦后 `set_text` → 二次读树，以及 Mods 页三态选择与服务状态。
-- **M34 的首次隐私确认在真实设备上被触发并走完**：测试点 `I understand` 后，`run_official.py` 观察到 `POST_NOTIFICATIONS` 系统弹窗并**拒绝**它（`dismissed POST_NOTIFICATIONS prompt (denied)`），权限保持 `granted=false`；日志随后是 `+2: All tests passed!`。这条路径证明：(1) 未确认时 `writeSelection` 不会执行（否则不需要拒绝弹窗）；(2) 确认后弹出的是真实系统权限弹窗，产品代码仍会继续写入选择。
+- **M34 的首次隐私确认在真实设备上被触发并走完**：测试点 `I understand`，随后 `run_official.py` **真实观察到并拒绝**了 `POST_NOTIFICATIONS` 系统弹窗（`[driver 16:16:48] dismissed POST_NOTIFICATIONS prompt (denied)`，elapsed 50s），权限保持 `granted=false`。这证明：确认分支真的执行过，而且确认后拉起的是真实系统权限弹窗。
+- **因果边界（R1 修正）**：该轮日志**不能**证明「拒绝弹窗是 `writeSelection` 得以执行的前提」。真实时序是 `00:40 +1: Mods 页真实服务状态与 Phone Agent 选择`（断言已通过）早于 `16:16:48` 的拒绝动作约 10 秒，即 Mods 断言在弹窗被处理之前就已通过。因此「通知权限弹窗会阻塞选择写入」这一门控**由代码路径支持**（`phone_agent_privacy_notice.dart` 的 `ensureAcknowledged` 在返回前 `await _ensureNotificationPermission()`），**不由该轮日志支持**；本轮日志只说明该弹窗确实出现且被拒绝。r7 同一交互之后的 `['phone_control']` 失败，其成因仍未定。
 - 无障碍授权由宿主在系统界面完成（`confirmed with Allow`、`enable_service: bound`），**未使用 `settings put secure`**。
 
 #### (b) 批准链路端到端：`+1`、`All tests passed!`、EXIT=0
@@ -1775,7 +1776,9 @@ APP_TREE=<tree> SERIAL=emulator-5554   python3 mods/phone_agent/host/run_approva
 | 撤销 | `approvedApps` 不再含目标包 | 原生 `revokeApp` 立即生效 |
 | 再次拒绝 | `PHONE_AGENT_APPROVAL_REVOKED: permission_required again` | 撤销后立即回到 `permission_required`，仍只回身份 |
 
-**证明边界**：本链路验证的是**聊天卡片**入口与原生白名单判定；**通知栏批准 action 没有被真实点击**（见未验证项）。测试自己打印标记、宿主只做 `KEYCODE_HOME` 与证据抓取，属既定分工。设备证据文件：`mods/phone_agent/host/_runs/approval-launcher-foreground.png` / `.xml`（`gitignore` 覆盖，不进仓库）。
+**证明边界**：本链路验证的是**聊天卡片**入口与原生白名单判定；**通知栏批准 action 没有被真实点击**（见未验证项）。测试自己打印标记、宿主只做 `KEYCODE_HOME` 与证据抓取，属既定分工。
+
+**关于截图/UI dump（R1 修正）**：`_runs/approval-chain-app-state.png` / `.xml` 里的前台其实是**测试应用本身**（驱动日志 `focus=com.psyche.kelivo.phoneagent`，xml 所有节点都是该包，画面是应用加批准成功 snackbar），`go_home()` 里的抓取相对 `KEYCODE_HOME` 落定得太早。它们只作「应用内批准后状态」的旁证，**不作为 launcher 前台证据**。launcher 前台的真正证据是本链路的测试打印与断言：`PHONE_AGENT_APPROVAL_OBSERVED: package=com.google.android.apps.nexuslauncher nodes=18`，即读树返回的 `tree['package_name']` 等于目标包且节点数为 18。
 
 #### (c) 产品 debug APK（设备验证同一棵树）
 
@@ -1783,7 +1786,8 @@ APP_TREE=<tree> SERIAL=emulator-5554   python3 mods/phone_agent/host/run_approva
 
 - 大小：**181,555,154 字节**
 - SHA-256：**`c911044f04fec935a73f579627cdb5d89abdacba311d330caab979e62f59b680`**
-- debug merged manifest：`SecureWindowFixtureActivity` 1 处、`PhoneAgentService` 1 处、`PhoneAgentApprovalReceiver` 1 处、`QUERY_ALL_PACKAGES` 2 处（`<uses-permission>` 与其合并副本）。**未构建 release**，因此签名 release 仍未验证。
+- **R1 后的树哈希变化不影响该 APK**：R1 返工只改 `integration_test/` 与宿主脚本（都在 `copy`/不进树的范围里），树变成 `724bbbc8b7b5f231`；已逐目录比对 `724bbbc8b7b5f231` 与 `39824fc9baf262e6` 的 `lib/` 与 `dependencies/kelivo_phone_agent/`，**产品代码完全相同**，只有测试文件不同。因此上面的 APK 记录仍是设备验证与产品代码对应的那一个，不重构建。
+- debug merged manifest：`SecureWindowFixtureActivity` 1 处、`PhoneAgentService` 1 处、`PhoneAgentApprovalReceiver` 1 处、`QUERY_ALL_PACKAGES` 1 条 `<uses-permission>` 声明（另有 1 处注释文本）。**未构建 release**，因此签名 release 仍未验证。
 
 #### 本轮修的是宿主脚本与测试适配（产品代码零改动）
 
@@ -1795,9 +1799,40 @@ APP_TREE=<tree> SERIAL=emulator-5554   python3 mods/phone_agent/host/run_approva
 4. **隐私确认弹窗**（`phone_agent_test.dart`）：M34 首次启用会先弹一次性隐私确认，未确认时选择**不写入**；测试改为有界轮询等平台通道返回后点 `I understand`，并在宿主侧拒绝随后的 `POST_NOTIFICATIONS` 弹窗（保持 `granted=false`，异常套件需要该权限未授予）。
 5. **批准链路测试的重新前台**：点卡片是应用内动作，会把本应用带到前台，因此「重新观察」前要求宿主再次 `KEYCODE_HOME`，否则读到的是测试应用（第 4 轮实测）。
 
+#### R1 返工记录（reviewer `p2-5items` / fix-then-merge，reviewedCommit `c801485`）
+
+五项都是**文档对证据的表述**与**新测试可移植性**，不涉及产品代码，未重跑设备：
+
+1. **(a) 的 POST_NOTIFICATIONS 因果**：原写「拒绝弹窗是 `writeSelection` 得以执行的前提」，与 r10 日志不符（Mods 断言 `00:40 +1` 早于 `16:16:48` 的拒绝约 10 秒）。已改为「弹窗真实出现并被拒绝、权限保持 `granted=false`；门控由代码路径（`ensureAcknowledged` 里的 `await _ensureNotificationPermission()`）支持而非该轮日志」，删掉「否则不需要拒绝弹窗」的反向推断，并同步 `host/README.md` 第 4 条与 `run_official.py` 的注释。
+2. **证据文件正名**：`_runs/approval-launcher-foreground.png/.xml` 实际拍的是测试应用自己（驱动日志 `focus=com.psyche.kelivo.phoneagent`、xml 全部节点是该包）。默认前缀改为 `approval-chain-app-state`，文档明确它们只作「应用内状态」旁证；launcher 前台的真证据是测试打印 `PHONE_AGENT_APPROVAL_OBSERVED: package=<目标> nodes=18`（断言读树 `package_name` 等于目标包）。
+3. **`QUERY_ALL_PACKAGES` 计数**：merged manifest 只有 **1 条 `<uses-permission>`**，第二处是插件 manifest 的注释文本；plan 9.3.8、`AGENTS.md`、handoff 三处已改为「1 条声明（另有 1 处注释文本）」，「一次声明」的契约表述不变。
+4. **异常套件归因降级**：原写「单独 `+1` 说明问题在宿主时序」。已改为「与残留 `am start` 竞态**一致**」，并直接引 r2 日志 `15:56:38 marker PHONE_AGENT_RECENTS` → `15:56:41 return_to_app` 这行；同时纠正一处事实——两轮 `+7 -1` 都跑在 `_nav_generation` 修复**之前**，修复后的整轮（`exc_api35_m36_r3.log`）因模拟器掉线未跑成，所以**修复从未在整轮里被验证**，不写「已修复」。
+5. **测试可移植性**：官方测试的隐私弹窗不再硬编码英文，改从 `AppLocalizations.delegate.load(Locale('en'))` 取文案键，诊断串区分「已确认」「刚点掉（含 locale 名）」「超时未出现（直接 fail，说明是找不到弹窗而非选择失败）」；批准链路的目标包改为 `String.fromEnvironment('PHONE_AGENT_TARGET_PACKAGE')`，默认仍是 Pixel Launcher，可用 `--dart-define` 覆盖。
+
+顺手项：删掉 `driver.adb()` 无调用点的 `check` 参数（并去掉 README 里的对应描述）；给 `run_official.py` 的 `dismiss_notification_prompt` 补注释，说明它是 240 秒守护线程、**只在 `permissioncontroller` 前台时动作**（否则空转），因此理论上可能碰到无关权限弹窗，本轮只命中 1 次。
+
+R1 后仓库树 `724bbbc8b7b5f231`（`copy` 里的集成测试变了，故 `modsetHash` 变化）；已确认新树的 `lib/` 与 `dependencies/kelivo_phone_agent/` 与设备验证树 `39824fc9baf262e6` **逐文件相同**，产品 APK 记录继续有效。改动后复跑：Loader `dart format` 0 变更、`dart analyze tool test` 无问题、`dart test` 173 通过；合成树 `dart analyze --fatal-infos integration_test/phone_agent_test.dart integration_test/phone_agent_approval_chain_test.dart` **No issues found**；`plan`/`apply`/`verify` 通过。
+
+#### tower 的范围裁定（2026-11-16，R1 返工写入）
+
+mission 原文要求「API35 官方测试、完整异常套件、物理 MIUI 官方测试、至少一轮 VLM 固定任务（含完整批准链路）」。tower 的收敛指令把本轮范围缩为三项，并给出裁定：
+
+- **本轮接受为已验收**：API35 官方 `phone_agent_test.dart`、应用批准链路端到端（API35）、产品 debug APK。
+- **维持未验证**：物理 MIUI、VLM 轮次、异常套件整轮绿、通知栏按钮点击、两端撤下、跨 UID 签名解析、审计设备行为、签名 release。
+- **性质**：任务原话里的**物理 MIUI 与 VLM 两项要求本轮未完成，属未验收项，不是通过**。若坚持原话范围，这条链路仍属未验收。本节的「未验证」清单与这一口径一致，不把任何缩小范围的项写成已完成。
+
 #### 未验证（本轮明确未做，不得写成通过）
 
-- **完整异常套件整轮绿**：两轮均为 `+7 -1`、EXIT=1。7 个用例稳定通过（FLAG_SECURE、叠加层不污染截图、叠加层触摸穿透、旋转、权限窗口 `no_window`、锁屏 `device_locked`、服务禁用/重启）；唯一失败固定在 `home 与 recents 后输入被包名策略拒绝` 的 **`recents`** 分支，失败句为「recents 后前台仍停留在 com.psyche.kelivo.phoneagent」。该用例**单独运行 `+1`、EXIT=0**，说明问题在宿主时序（第 3 项修复针对它，但修复后未再取得整轮绿）。据此只能写「7/8 用例已验证、整轮绿未取得」，不写成套件通过。
+- **完整异常套件整轮绿**：两轮均为 `+7 -1`、EXIT=1。7 个用例稳定通过（FLAG_SECURE、叠加层不污染截图、叠加层触摸穿透、旋转、权限窗口 `no_window`、锁屏 `device_locked`、服务禁用/重启）；唯一失败固定在 `home 与 recents 后输入被包名策略拒绝` 的 **`recents`** 分支，失败句为「recents 后前台仍停留在 com.psyche.kelivo.phoneagent」。
+
+  该失败的**支持证据**是 r2 日志里宿主的 bring-up 晚了 3 秒把应用拉回前台：
+
+  ```
+  15:56:38 marker PHONE_AGENT_RECENTS
+  15:56:41 return_to_app: focus=(...MainActivity...)     ← 残留 am start 落在 recents 之后
+  ```
+
+  这与「残留 `am start` 竞态」**一致**，但**不构成因果证明**：同一用例单独运行 `+1`、EXIT=0 只证明它是**间歇性**的。针对该竞态新增的 `_nav_generation` **从未在一整轮里被验证**——两轮 `+7 -1`（`exc_api35_m36_r1.log`、`exc_api35_m36_r2.log`）都跑在修复**之前**，修复后的整轮（`exc_api35_m36_r3.log`）因模拟器掉线**没跑成**（日志只有 `No supported devices found with name or id matching 'emulator-5554'`）。因此结论只能是「7/8 用例已验证、整轮绿未取得、失败与宿主 bring-up 竞态一致」，**不写成已修复，也不写成修复有效**。
 - **物理 MIUI `1960cd68`**：未安装 `com.kelivo.phoneagent.securefixture`，因此异常套件未运行；官方测试与批准链路本轮**均未在 MIUI 运行**。MIUI 本轮完全未参与验证。
 - **VLM 固定任务**：本轮未运行任何 VLM 轮次（含「未批准 → 只回身份 → 批准 → 重新观察 → 撤销 → 重新 `permission_required`」的模型驱动链路）。9.4 与 10.1 的 VLM 结果仍只对应旧代码，不能用于宣称新边界已验证。
 - **通知栏批准**：`PhoneAgentApprovalReceiver` + `Notification.Action` 的真实点击、进程被杀后的 action 重放、两端撤下时序、`POST_NOTIFICATIONS` 被拒时只有卡片可用，全部**未在设备上验证**。

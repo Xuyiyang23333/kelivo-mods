@@ -25,6 +25,8 @@
 > (a) API35 官方 `phone_agent_test.dart` **`+2`、`All tests passed!`、EXIT=0**（树 `a4c355aef96366ee`，`official_api35_m36_r10.log`）：截图/读树/节点点击/坐标滑动/滚动/聚焦后 `set_text`/二次读树，以及 Mods 页三态选择，含 M34 首次隐私确认的真实弹窗与通知权限拒绝。
 > (b) 新增 `integration_test/phone_agent_approval_chain_test.dart` + `host/run_approval_chain.py`，在 API35 上跑通**批准链路端到端** **`+1`、EXIT=0**（树 `39824fc9baf262e6`，`approval_chain_m36_r6.log`）：未批准的 Pixel Launcher 读树只回身份（`package=com.google.android.apps.nexuslauncher signing=a86bdb05 display=Pixel Launcher`，无节点/窗口标题/截图）→ pending 请求登记 → 真实卡片渲染 → 点「Allow」写入白名单 → 重新观察返回真实树（18 节点）→ 撤销 → 再次 `permission_required`。
 > (c) 产品 debug APK 在**设备验证同一棵树** `39824fc9baf262e6` 于全部设备测试后 `flutter clean` + 显式 `flutter build apk --debug` 重建，大小/SHA-256 与 manifest 检查见 `docs/phone-agent-plan.md` 9.3.8。
+> **tower 范围裁定（R1 返工写入）**：本轮接受 API35 官方 + 批准链路 + 产品 APK 三项为已验收；物理 MIUI、VLM、异常套件整轮绿、通知栏按钮点击、两端撤下、跨 UID 签名解析、审计设备行为、签名 release 全部维持未验证。任务原话要求的物理 MIUI 与 VLM 属未完成/未验收项，不是通过。
+>
 > **仍未验证**：完整异常套件整轮绿（M36 两轮均为 `+7 -1`，唯一失败是 `home 与 recents` 的 `recents` 分支宿主竞态；该用例单独跑 `+1`、EXIT=0）、物理 MIUI 异常套件、VLM 固定任务与批准链路的 VLM 轮、通知栏批准 action 的真实点击、卡片在真实对话流中的布局、签名 release。**通知权限与通知 action 的真实行为未验证**。
 >
 > 本轮 M34（2026-11-16，仅单元与静态检查，**无设备证据**）：实现了批准交互与首次隐私确认——原生 `ApprovalRequests` 七态状态机（TTL 30 分钟、单终态、迟到回调不写白名单）、`permission_required` 的结构化身份（包名/签名前缀/可选显示名）、通知栏批准 action + 独立 `BroadcastReceiver`、聊天内批准卡片（上游两处实例化 + 一个回调注册）、Mods 页“已批准的应用”管理页（按来源助手分组、逐条撤销）、“允许并继续”（只发一条要求重新观察的用户消息，不重放动作）、首次启用 Phone Agent 的一次性隐私确认（方案 B）、预批准成员不可写入用户白名单。新增 33 个 ARB 键，四目标语言 0 pending（本机网关 `mistral/deepseek-v4-1-flash-1017`；当轮 `llama-cpp/llama-cpp` 后端不可用，未用付费服务）。**审计由 M35 实现（本轮 M34 时仍未实现）；M34 未跑任何设备。**

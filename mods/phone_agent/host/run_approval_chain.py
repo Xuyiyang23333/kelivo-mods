@@ -40,11 +40,19 @@ LOG = os.path.join(driver.RUN_DIR, os.environ.get("DRIVER_LOG", "approval_chain.
 TEST_FILE = os.environ.get(
     "TEST_FILE", "integration_test/phone_agent_approval_chain_test.dart"
 )
-EVIDENCE_PREFIX = os.environ.get("EVIDENCE_PREFIX", "approval")
+EVIDENCE_PREFIX = os.environ.get("EVIDENCE_PREFIX", "approval-chain-app-state")
 
 
 def evidence(name):
-    """Dump the UI tree and take a screenshot for the report."""
+    """Dump the UI tree and take a screenshot for the report.
+
+    R1: these captures can land *before* `KEYCODE_HOME` settles (observed: the
+    PNG/XML showed the test app itself, `focus=com.psyche.kelivo.phoneagent`).
+    They are therefore only "app-side state" side evidence — the real proof
+    that the target package is in the foreground is the suite's own assertion
+    `PHONE_AGENT_APPROVAL_OBSERVED: package=<target> nodes=<N>`. Do not cite
+    these files as launcher-foreground evidence.
+    """
     xml = driver.dump_ui(f"{EVIDENCE_PREFIX}-{name}")
     path = os.path.join(driver.RUN_DIR, f"{EVIDENCE_PREFIX}-{name}.png")
     try:

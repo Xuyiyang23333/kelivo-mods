@@ -36,8 +36,15 @@ void main() {
   final service = PhoneAgentService.instance;
   final approvals = PhoneAgentApprovalService.instance;
 
-  /// 未批准目标：Pixel Launcher（M28/M30 实测 `home` 后前台是它）。
-  const targetPackage = 'com.google.android.apps.nexuslauncher';
+  /// 未批准目标：默认 Pixel Launcher（M28/M30 实测 `home` 后前台是它）。
+  ///
+  /// 其他设备/ROM 的 launcher 包名不同，因此允许用
+  /// `--dart-define=PHONE_AGENT_TARGET_PACKAGE=<包名>` 覆盖；找不到目标时
+  /// 用例会明确报「等待目标前台超时」，而不是把 ROM 差异伪装成产品失败。
+  const targetPackage = String.fromEnvironment(
+    'PHONE_AGENT_TARGET_PACKAGE',
+    defaultValue: 'com.google.android.apps.nexuslauncher',
+  );
 
   setUpAll(() async {
     expect(Platform.isAndroid, isTrue, reason: '只在 Android 设备上运行。');

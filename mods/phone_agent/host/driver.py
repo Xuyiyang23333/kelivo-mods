@@ -63,7 +63,7 @@ def log(msg):
             fh.write(line + "\n")
 
 
-def adb(*args, timeout=60, check=False):
+def adb(*args, timeout=60):
     env = dict(os.environ)
     env["MSYS_NO_PATHCONV"] = "1"
     try:
@@ -76,8 +76,6 @@ def adb(*args, timeout=60, check=False):
         # thread and kill it silently, leaving the suite waiting for a service
         # that was never enabled. Log and keep going; the caller retries.
         log(f"adb timeout ({timeout}s): {' '.join(args)}")
-        if check:
-            raise
         return ""
     return proc.stdout
 
