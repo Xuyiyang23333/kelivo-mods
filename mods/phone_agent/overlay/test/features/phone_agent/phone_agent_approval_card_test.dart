@@ -1,3 +1,8 @@
+import 'dart:convert';
+
+import 'package:Kelivo/core/models/chat_message.dart';
+import 'package:Kelivo/core/providers/settings_provider.dart';
+import 'package:Kelivo/features/chat/widgets/chat_message_widget.dart';
 import 'package:Kelivo/features/home/services/tool_approval_service.dart';
 import 'package:Kelivo/features/phone_agent/phone_agent_approval_card.dart';
 import 'package:Kelivo/features/phone_agent/phone_agent_approval_service.dart';
@@ -8,37 +13,20 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:kelivo_phone_agent/kelivo_phone_agent.dart';
 import 'package:provider/provider.dart';
 
-/// 卡片的存在性不能依赖上游设置（`showToolResultSummary` 默认 false）或图片。
-/// 这里锁定两条：**默认设置下能渲染**、**请求消失后不留占位**。
+import '../../support/business_test_harness.dart';
+
+/// 卡片必须在**真实渲染路径**上出现：`ChatMessageWidget` 解析工具消息 → 工具步骤
+/// → 内容区。直接渲染 `PhoneAgentApprovalCard` 会绕过“内容区是否为 null”的判定，
+/// 上一轮正是因此漏网（默认设置下 content 为 null，卡片从不进入 widget 树）。
 ///
-/// 卡片读的是生产单例 `PhoneAgentApprovalService.instance`，因此测试劫持插件通道
-/// （`kelivo/phone_agent`）而不是替换单例：走的是与真实运行一致的路径。
+/// 这里锁定：默认设置（`showToolResultSummary=false`、无图片、无上游 pending）下，
+/// 工具消息里的批准卡片仍然可见。
 void main() {
   const channel = MethodChannel('kelivo/phone_agent');
   final pending = <Map<String, dynamic>>[];
   var nextId = 0;
   String resolveState = 'approved';
   String? resolveFailureReason;
-
-  Map<String, dynamic> request(String packageName, String toolCallId) {
-    final id = 'r${++nextId}';
-    final map = <String, dynamic>{
-      'request_id': id,
-      'package_name': packageName,
-      'signing_prefix': 'aaaaaaaa',
-      'signing_available': true,
-      'display_name': 'Example',
-      'tool_call_id': toolCallId,
-      'conversation_id': 'c1',
-      'approval_assistant_id': null,
-      'created_at': 0,
-      'expires_at':
-          DateTime.now().millisecondsSinceEpoch + 30 * 60 * 1000,
-      'state': 'pending',
-    };
-    pending.add(map);
-    return map;
-  }
 
   setUp(() {
     pending.clear();
@@ -50,10 +38,22 @@ void main() {
           switch (call.method) {
             case 'requestApproval':
               final args = call.arguments as Map;
-              return request(
-                args['package_name'] as String,
-                (args['tool_call_id'] as String?) ?? '',
-              );
+              final map = <String, dynamic>{
+                'request_id': 'r${++nextId}',
+                'package_name': args['package_name'],
+                'signing_prefix': 'aaaaaaaa',
+                'signing_available': true,
+                'display_name': 'Example',
+                'tool_call_id': args['tool_call_id'],
+                'conversation_id': args['conversation_id'],
+                'approval_assistant_id': args['approval_assistant_id'],
+                'created_at': 0,
+                'expires_at':
+                    DateTime.now().millisecondsSinceEpoch + 30 * 60 * 1000,
+                'state': 'pending',
+              };
+              pending.add(map);
+              return map;
             case 'approvalRequests':
               return <String, dynamic>{
                 'requests': pending
@@ -84,19 +84,45 @@ void main() {
         });
   });
 
-  tearDown(() async {
-    // 卡片会为 pending 请求启动 20 秒 TTL 清扫 timer；测试结束前清掉，避免
-    // “timers pending” 断言。
-    await PhoneAgentApprovalService.instance.dismissAll();
+  tearDown(() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, null);
     PhoneAgentApprovalService.instance.registerResumeHandler(null);
   });
 
-  Future<void> pumpCard(WidgetTester tester, {required Widget child}) async {
+  Future<void> clearPending(WidgetTester tester) async {
+    await PhoneAgentApprovalService.instance.dismissAll();
+    await tester.pump();
+  }
+
+  /// 渲染一条真实的工具消息：`_buildToolMessage` 用 `message.id` 作为工具步骤 id，
+  /// 因此它必须与登记时的 `toolCallId` 一致。
+  Future<SettingsProvider> pumpToolMessage(
+    WidgetTester tester, {
+    String toolCallId = 'call-1',
+  }) async {
+    final preferences = createBusinessTestPreferences();
+    final settings = SettingsProvider(preferences);
+    await settings.loaded;
+    addTearDown(settings.dispose);
+
+    final message = ChatMessage(
+      id: toolCallId,
+      role: 'tool',
+      conversationId: 'c1',
+      content: jsonEncode(<String, dynamic>{
+        'tool': 'phone_agent_tree',
+        'arguments': <String, dynamic>{'offset': 0},
+        'result':
+            '{"type":"tool_error","error":"permission_required",'
+            '"tool":"phone_agent_tree"}',
+      }),
+    );
+
     await tester.pumpWidget(
       MultiProvider(
         providers: [
+          ChangeNotifierProvider<SettingsProvider>.value(value: settings),
           ChangeNotifierProvider<ToolApprovalService>(
             create: (_) => ToolApprovalService(),
           ),
@@ -104,11 +130,16 @@ void main() {
         child: MaterialApp(
           localizationsDelegates: AppLocalizations.localizationsDelegates,
           supportedLocales: AppLocalizations.supportedLocales,
-          home: Scaffold(body: child),
+          home: Scaffold(
+            body: ListView(
+              children: [ChatMessageWidget(message: message)],
+            ),
+          ),
         ),
       ),
     );
     await tester.pumpAndSettle();
+    return settings;
   }
 
   Future<void> registerCall({
@@ -127,62 +158,39 @@ void main() {
     );
   }
 
+  testWidgets(
+    'the card is visible through ChatMessageWidget in the default settings',
+    (tester) async {
+      await registerCall();
+      final settings = await pumpToolMessage(tester);
 
-  /// 清空单例的 pending 请求，让 20 秒 TTL 清扫 timer 停止（否则 widget 测试会在
-  /// 销毁后判定“Timer is still pending”）。
-  Future<void> clearPending(WidgetTester tester) async {
-    await PhoneAgentApprovalService.instance.dismissAll();
-    await tester.pump();
-  }
+      // 默认设置：不显示工具结果摘要、不隐藏图片——内容区仍须为卡片保留。
+      expect(settings.showToolResultSummary, isFalse);
 
-  const card = PhoneAgentApprovalCard(
-    toolCallId: 'call-1',
-    conversationId: 'c1',
+      expect(find.byType(PhoneAgentApprovalCard), findsOneWidget);
+      expect(find.text('Allow "Example"?'), findsOneWidget);
+      expect(find.text('com.example.app'), findsOneWidget);
+      expect(find.textContaining('aaaaaaaa'), findsOneWidget);
+      expect(find.text('Allow'), findsOneWidget);
+      expect(find.text('Deny'), findsOneWidget);
+
+      await clearPending(tester);
+    },
   );
 
-  testWidgets('renders in the default settings when a request is pending', (
-    tester,
-  ) async {
-    await registerCall();
+  testWidgets('no card appears for a different tool call id', (tester) async {
+    await registerCall(toolCallId: 'other-call');
+    await pumpToolMessage(tester);
 
-    expect(
-      PhoneAgentApprovalCard.pendingExists(
-        toolCallId: 'call-1',
-        conversationId: 'c1',
-      ),
-      isTrue,
-    );
-
-    await pumpCard(tester, child: card);
-
-    expect(find.text('Allow "Example"?'), findsOneWidget);
-    expect(find.text('com.example.app'), findsOneWidget);
-    expect(find.textContaining('aaaaaaaa'), findsOneWidget);
-    expect(find.text('Allow'), findsOneWidget);
-    expect(find.text('Deny'), findsOneWidget);
-
-    await clearPending(tester);
-  });
-
-  testWidgets('an unrelated tool call renders nothing', (tester) async {
-    await registerCall();
-
-    await pumpCard(
-      tester,
-      child: const PhoneAgentApprovalCard(
-        toolCallId: 'other',
-        conversationId: 'c1',
-      ),
-    );
-
+    expect(find.byType(PhoneAgentApprovalCard), findsOneWidget);
     expect(find.textContaining('com.example.app'), findsNothing);
 
     await clearPending(tester);
   });
 
-  testWidgets('denying reports denial and removes the card', (tester) async {
+  testWidgets('denying removes the card from the chat message', (tester) async {
     await registerCall();
-    await pumpCard(tester, child: card);
+    await pumpToolMessage(tester);
 
     await tester.tap(find.text('Deny'));
     await tester.pumpAndSettle();
@@ -203,7 +211,7 @@ void main() {
     await registerCall();
     resolveState = 'failed';
     resolveFailureReason = 'signing_mismatch';
-    await pumpCard(tester, child: card);
+    await pumpToolMessage(tester);
 
     await tester.tap(find.text('Allow'));
     await tester.pumpAndSettle();
@@ -225,7 +233,7 @@ void main() {
       resumed.add('$conversationId:$packageName');
     });
     await registerCall();
-    await pumpCard(tester, child: card);
+    await pumpToolMessage(tester);
 
     await tester.tap(find.text('Allow and continue'));
     await tester.pumpAndSettle();

@@ -1,5 +1,5 @@
 diff --git a/lib/features/chat/widgets/chat_message_widget.dart b/lib/features/chat/widgets/chat_message_widget.dart
-index 8be8c35..45283ae 100644
+index 8be8c35..6f41efa 100644
 --- a/lib/features/chat/widgets/chat_message_widget.dart
 +++ b/lib/features/chat/widgets/chat_message_widget.dart
 @@ -93,6 +93,7 @@ import 'chat_suggestion_bubbles.dart';
@@ -10,7 +10,7 @@ index 8be8c35..45283ae 100644
  import 'tool_detail_text_section.dart';
  import 'produced_files_row.dart';
  import 'workspace_tool_detail.dart';
-@@ -6682,9 +6683,18 @@ class _ChainOfThoughtToolStepState extends State<_ChainOfThoughtToolStep>
+@@ -6682,15 +6683,30 @@ class _ChainOfThoughtToolStepState extends State<_ChainOfThoughtToolStep>
              ),
            )
          : null;
@@ -29,7 +29,19 @@ index 8be8c35..45283ae 100644
              !(isPendingApproval && !isWorkspace))
          ? null
          : Column(
-@@ -6745,31 +6755,37 @@ class _ChainOfThoughtToolStepState extends State<_ChainOfThoughtToolStep>
+             crossAxisAlignment: CrossAxisAlignment.start,
+             children: [
+               if (summaryContent != null) summaryContent,
++              // Phone Agent 的应用批准卡片：只在该工具调用的审批请求仍 pending 时
++              // 渲染；没有请求时组件本身返回 SizedBox.shrink()，不占位。
++              PhoneAgentApprovalCard(
++                toolCallId: widget.part.id,
++                conversationId: widget.conversationId,
++              ),
+               if (isPendingApproval && !isWorkspace)
+                 SwitchToFullAccess(conversationId: widget.conversationId),
+               if (summaryContent != null && imageThumbnails != null)
+@@ -6745,31 +6761,37 @@ class _ChainOfThoughtToolStepState extends State<_ChainOfThoughtToolStep>
          ? ToolPermissionResultStatus(metadata: widget.part.metadata)
          : null;
  
@@ -92,8 +104,21 @@ index 8be8c35..45283ae 100644
      );
    }
  }
+@@ -7182,6 +7204,12 @@ class _ToolCallItemState extends State<_ToolCallItem> {
+                 ),
+               ),
+             ],
++            // Phone Agent 的应用批准卡片：这条路径渲染 role='tool' 的独立工具消息，
++            // 与助手时间线的思考步骤是两条独立的渲染链，两处都要接。
++            PhoneAgentApprovalCard(
++              toolCallId: widget.part.id,
++              conversationId: widget.conversationId,
++            ),
+           ],
+         ),
+       ),
 diff --git a/lib/features/home/pages/home_page.dart b/lib/features/home/pages/home_page.dart
-index 6bedd00..27e2a28 100644
+index 6bedd00..33d48de 100644
 --- a/lib/features/home/pages/home_page.dart
 +++ b/lib/features/home/pages/home_page.dart
 @@ -39,6 +39,7 @@ import '../../../core/providers/instruction_injection_provider.dart';
@@ -104,7 +129,57 @@ index 6bedd00..27e2a28 100644
  import '../../../core/models/chat_message.dart';
  import '../../../core/models/compress_context_options.dart';
  import '../../../core/services/android_process_text.dart';
-@@ -319,7 +320,12 @@ class _HomePageState extends State<HomePage>
+@@ -262,6 +263,39 @@ class _HomePageState extends State<HomePage>
+   // Lifecycle
+   // ============================================================================
+ 
++  /// 「允许并继续」的续跑入口：注册到 Phone Agent 的批准服务。
++  ///
++  /// 只发送一条“已批准，请重新观察再继续”的用户消息，**不重放**被拒绝时的
++  /// 点击/输入/手势：批准发生在过去，旧句柄、截图与布局都不能假设仍然有效。
++  /// 会话已不是当前会话时只保存授权，不切换会话、不改写对话内容。
++  Future<void> _resumePhoneAgentTask(
++    String conversationId,
++    String packageName,
++  ) async {
++    final l10n = AppLocalizations.of(context);
++    if (!mounted || _controller.currentConversation?.id != conversationId) {
++      if (l10n != null) {
++        showAppSnackBar(
++          context,
++          message: l10n.phoneAgentApprovalResumeUnavailable,
++        );
++      }
++      return;
++    }
++    final message = (l10n?.phoneAgentApprovalResumeMessage(packageName) ?? '')
++        .trim();
++    if (message.isEmpty) return;
++    final result = await _controller.sendMessage(ChatInputData(text: message));
++    if (!mounted || result == ChatInputSubmissionResult.sent) return;
++    if (l10n != null) {
++      showAppSnackBar(
++        context,
++        message: l10n.phoneAgentApprovalResumeUnavailable,
++        type: NotificationType.warning,
++      );
++    }
++  }
++
+   @override
+   void initState() {
+     super.initState();
+@@ -279,6 +313,9 @@ class _HomePageState extends State<HomePage>
+       mediaController: _mediaController,
+       scrollController: _scrollController,
+     );
++    PhoneAgentApprovalService.instance.registerResumeHandler(
++      _resumePhoneAgentTask,
++    );
+ 
+     _quoteInteractions = QuoteInteractionController(
+       onQuote: _insertSelectionQuote,
+@@ -319,7 +356,12 @@ class _HomePageState extends State<HomePage>
    @override
    void didChangeAppLifecycleState(AppLifecycleState state) {
      _controller.onAppLifecycleStateChanged(state);
@@ -118,7 +193,15 @@ index 6bedd00..27e2a28 100644
    }
  
    @override
-@@ -526,6 +532,12 @@ class _HomePageState extends State<HomePage>
+@@ -347,6 +389,7 @@ class _HomePageState extends State<HomePage>
+     try {
+       WidgetsBinding.instance.removeObserver(this);
+     } catch (_) {}
++    PhoneAgentApprovalService.instance.registerResumeHandler(null);
+     _processTextSub?.cancel();
+     _incomingShares?.dispose();
+     _controller.removeListener(_onControllerChanged);
+@@ -526,6 +569,12 @@ class _HomePageState extends State<HomePage>
    void _onControllerChanged() {
      _observeCompression();
      final conversationId = _controller.currentConversation?.id;
