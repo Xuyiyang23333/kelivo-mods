@@ -21,7 +21,7 @@
 >
 > 上一轮 M10（API35 FLAG_SECURE/异常路径）：完整异常套件 `+5 ~1`、EXIT=0；权限窗口未验证。整屏 `takeScreenshot` 不保证对 `FLAG_SECURE` 报错，可能返回成功黑图或内容图；不保证检测、不承诺不发送黑图。记录见 `docs/phone-agent-plan.md` 9.3.1。
 >
-> 本轮 M34（2026-11-16，仅单元与静态检查，**无设备证据**）：实现了批准交互与首次隐私确认——原生 `ApprovalRequests` 七态状态机（TTL 30 分钟、单终态、迟到回调不写白名单）、`permission_required` 的结构化身份（包名/签名前缀/可选显示名）、通知栏批准 action + 独立 `BroadcastReceiver`、聊天内批准卡片（上游只插入一处 + 一个回调注册）、Mods 页“已批准的应用”管理页（按来源助手分组、逐条撤销）、“允许并继续”（只发一条要求重新观察的用户消息，不重放动作）、首次启用 Phone Agent 的一次性隐私确认（方案 B）、预批准成员不可写入用户白名单。新增 33 个 ARB 键，四目标语言 0 pending（本机网关 `mistral/deepseek-v4-1-flash-1017`；当轮 `llama-cpp/llama-cpp` 后端不可用，未用付费服务）。**审计仍未实现（属 M35）；M34 未跑任何设备。**
+> 本轮 M34（2026-11-16，仅单元与静态检查，**无设备证据**）：实现了批准交互与首次隐私确认——原生 `ApprovalRequests` 七态状态机（TTL 30 分钟、单终态、迟到回调不写白名单）、`permission_required` 的结构化身份（包名/签名前缀/可选显示名）、通知栏批准 action + 独立 `BroadcastReceiver`、聊天内批准卡片（上游两处实例化 + 一个回调注册）、Mods 页“已批准的应用”管理页（按来源助手分组、逐条撤销）、“允许并继续”（只发一条要求重新观察的用户消息，不重放动作）、首次启用 Phone Agent 的一次性隐私确认（方案 B）、预批准成员不可写入用户白名单。新增 33 个 ARB 键，四目标语言 0 pending（本机网关 `mistral/deepseek-v4-1-flash-1017`；当轮 `llama-cpp/llama-cpp` 后端不可用，未用付费服务）。**审计由 M35 实现（本轮 M34 时仍未实现）；M34 未跑任何设备。**
 >
 > 上一轮 VLM 验收（历史，API35 模拟器）：使用当时的 debug APK 与 magpie `llama-cpp/llama-cpp` 完成截图 → 图片请求 → 应用内固定任务 → 跨新用户轮次历史图片回放；该轮沿用旧树 `V:/coding/kelivo-private/.tower/worktrees/wt-6/.build/worktrees/5f0be65f98bb04e5` 和旧 APK 181369230 字节 / SHA-256 `3ea30ee9b46342305cf11e0574b76def9a42f23abe62dd3536b664dc4ec5caeb`，只作历史记录，不代表当前实现。该轮未验证的真实 `FLAG_SECURE` 已由 M10 在 API35 模拟器补充；物理 API30+ 的 VLM 与坐标手势已由本轮物理 MIUI 验收覆盖；权限窗口、原生超时和签名 release 仍未验证。
 >
@@ -244,11 +244,11 @@ dart tool/mod_loader.dart clean --modset <完整哈希或 16 位前缀>
 
 插件把原生结构化错误映射为 `PhoneAgentException(code, message)`。`phone_control_disabled` 已不再使用，统一改为 `phone_agent_disabled`。首版文档明确使用的错误码包括 `phone_agent_disabled`、`screenshot_required`、`stale_observation`、`stale_handle`、`rate_limited`、`screenshot_blocked`、`image_input_unsupported`、`unsupported_platform`、`timeout`、`plugin_unavailable`、`package_not_allowed`、`permission_required`、`system_window_denied`、`device_locked` 和 `budget_exceeded`。批准通道另有 `signing_unavailable` 与 `signing_mismatch` 两个写入失败码。其余错误码以适配层和插件返回为准。错误信息应给出可执行的下一步，例如重新截图、重新读树、在 Mods 页重新选择工具或请用户检查无障碍服务。
 
-`package_not_allowed` 只表示**构建期**硬禁止：M33 起构建期范围是 **deny 清单**（只拒绝明确不支持的包，当前成员清单为空），它**同时约束输入与观察**并排在用户白名单之前；`system_window_denied` 表示硬基线或不允许的窗口类型，**输入与观察（读树/截图）都会返回**。`permission_required` 表示“这个应用还没被用户批准”，M33 起**输入与观察都会返回**（观察侧只带应用身份，不带树节点或截图），详见下文「应用白名单与批准（门控已实现，界面未实现）」。
+`package_not_allowed` 只表示**构建期**硬禁止：M33 起构建期范围是 **deny 清单**（只拒绝明确不支持的包，当前成员清单为空），它**同时约束输入与观察**并排在用户白名单之前；`system_window_denied` 表示硬基线或不允许的窗口类型，**输入与观察（读树/截图）都会返回**。`permission_required` 表示“这个应用还没被用户批准”，M33 起**输入与观察都会返回**（观察侧只带应用身份，不带树节点或截图），详见下文「应用白名单与批准（M33 门控 + M34 批准交互 + M35 审计）」。
 
 ## 构建期白名单与预批准条目
 
-> 本节描述**当前实现（M33）**：构建期范围已从 `allowlist（只允许测试包）` 转为 `deny 清单（初始为空）`，用户白名单与签名绑定已落地；**批准界面仍未实现**。
+> 本节描述**当前实现（M33）**：构建期范围已从 `allowlist（只允许测试包）` 转为 `deny 清单（初始为空）`，用户白名单与签名绑定已落地；**批准界面由 M34 接入**（无设备证据）。
 
 - 私有测试应用 `com.psyche.kelivo.phoneagent` 是**构建配置的预批准条目**：直接视为已批准，但不写用户白名单、不产生批准提示、在 Mods 页不可撤销。该应用与上游正式包 `com.psyche.kelivo` 并存，启动名称为 `Kelivo Agent`，不会覆盖设备上已安装的 Kelivo。
 - 跨 UID 的 `FLAG_SECURE` 测试夹具包 `com.kelivo.phoneagent.securefixture` **只在可调试（debuggable）构建**预批准，用于异常集成测试；release 不预批准该包名，避免同名第三方应用被静默放行。
@@ -258,7 +258,7 @@ dart tool/mod_loader.dart clean --modset <完整哈希或 16 位前缀>
 - 通知栏不可观察**不等于**通知内容不会进入模型：同一条通知的文字可能出现在应用自己的界面里，那属于应用自身内容（该应用被批准后其界面对助手可见）。
 - 白名单只限制目标应用，不代表应用内部操作安全；它不能识别“发送、购买、删除”等业务语义。
 
-### 应用白名单与批准（M33 门控 + M34 批准交互；审计未实现）
+### 应用白名单与批准（M33 门控 + M34 批准交互 + M35 审计）
 
 > **状态分层，别混读。** 当前版本**已有**：硬基线（系统界面、权限控制器、包安装器、证书安装器、设置及其常见厂商变体、电话/短信默认应用、Kelivo 自身）、窗口类型判定（输入只允许 `TYPE_APPLICATION`，观察允许 `TYPE_APPLICATION` 与 `TYPE_INPUT_METHOD`）、构建期 deny 清单与预批准条目、用户白名单与签名绑定（本地持久化、幂等写入、撤销立即生效）、`permission_required`（输入与观察都返回）、原生 `approvedApps` / `approveApp` / `revokeApp` 通道方法，以及 **M34 的批准交互**：聊天内批准卡片、通知栏批准 action + `BroadcastReceiver`、待批准请求的 TTL 与单终态、Mods 页“已批准的应用”管理页（按来源助手分组、逐条撤销）、首次启用 Phone Agent 的一次性隐私确认。
 >
@@ -531,7 +531,7 @@ flutter test integration_test/phone_agent_exception_test.dart -d <android-device
 
 ## 验证状态
 
-### M32 批准契约文档修订（仅文档，未实现）
+### M32 批准契约文档修订（M32 当轮仅文档、未实现；后续 M33/M34/M35 已实现其中第 2、3、4、5、8 步）
 
 **M32（2026-11-15）只改文档**：`docs/phone-agent-plan.md`（7.5.1/7.5.2/7.5.4 反向、新增 7.5.9–7.5.14、7.6 风险 3/4/5、10.1/10.2、阶段 P6）、`AGENTS.md`、本文「应用白名单与批准」小节与已知限制、`docs/next-session-handoff.md`。**未改产品代码、测试或 `mod.json`**；`dart tool/mod_loader.dart plan` 复核 `modsetHash` 仍为 `474262a402cca985f216636ac8dbd0b8af9ffd31507acb7feb1614a103853fac`（文档不进 modset），未构建 APK、未接设备。因此本节的设备与 APK 记录仍对应 M32 之前的代码，不能用来宣称批准契约已验证。
 

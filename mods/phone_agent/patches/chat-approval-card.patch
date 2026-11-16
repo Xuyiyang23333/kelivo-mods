@@ -1,5 +1,5 @@
 diff --git a/lib/features/chat/widgets/chat_message_widget.dart b/lib/features/chat/widgets/chat_message_widget.dart
-index 8be8c35..ada78ca 100644
+index 8be8c35..eccca51 100644
 --- a/lib/features/chat/widgets/chat_message_widget.dart
 +++ b/lib/features/chat/widgets/chat_message_widget.dart
 @@ -93,6 +93,7 @@ import 'chat_suggestion_bubbles.dart';
@@ -10,7 +10,108 @@ index 8be8c35..ada78ca 100644
  import 'tool_detail_text_section.dart';
  import 'produced_files_row.dart';
  import 'workspace_tool_detail.dart';
-@@ -5055,6 +5056,7 @@ class _ChainOfThoughtCardState extends State<_ChainOfThoughtCard>
+@@ -1404,6 +1405,25 @@ class _ChatMessageWidgetState extends State<ChatMessageWidget> {
+   String? Function(String) _citationIndexResolver = (_) => null;
+   final _localTimelineStorage = PageStorageBucket();
+   final _thinkingWidgets = Expando<(Object, Widget)>();
++
++  /// 该消息的任一工具步骤是否还有 Phone Agent 待批准请求。
++  ///
++  /// block 级缓存（`_thinkingWidgets`）与步骤级缓存（`_CachedTimelineStep`）
++  /// 都必须感知它的变化，否则撤下后整块思考卡片被复用、残留空白。
++  bool _blockHasPhoneAgentApproval() {
++    final parts = widget.toolParts;
++    if (parts == null || parts.isEmpty) return false;
++    for (final part in parts) {
++      if (PhoneAgentApprovalCard.pendingExists(
++        toolCallId: part.id,
++        conversationId: widget.message.conversationId,
++      )) {
++        return true;
++      }
++    }
++    return false;
++  }
++
+   List<ReasoningSegment>? _currentReasoningSegments;
+   Future<void> _submitRecoveredAnswer(
+     ToolUIPart part,
+@@ -3537,6 +3557,10 @@ class _ChatMessageWidgetState extends State<ChatMessageWidget> {
+                       widget.message.modelId,
+                       widget.message.timestamp,
+                       widget.onRecoveredAskUserAnswer != null,
++                      // Phone Agent 批准请求的有/无必须先于 block 级缓存：否则整块
++                      // 思考卡片会被复用，内部的 _CachedTimelineStep 连 didUpdate 都
++                      // 收不到，撤下后残留空白。
++                      _blockHasPhoneAgentApproval(),
+                     );
+                     final cached = _thinkingWidgets[block];
+                     if (cached != null && cached.$1 == signature) {
+@@ -5013,6 +5037,63 @@ class _ChainOfThoughtCardState extends State<_ChainOfThoughtCard>
+ 
+   bool _showAllSteps = false;
+ 
++  /// Phone Agent 批准请求出现/消失时必须重建整块思考卡片：block 级缓存
++  /// （`_thinkingWidgets`）持有的是 widget 实例，父级不重建就不会重算签名，
++  /// 内部的 `_CachedTimelineStep` 连 `didUpdateWidget` 都收不到，撤下后残留空白。
++  late bool _phoneAgentApproval;
++
++  @override
++  void initState() {
++    super.initState();
++    _phoneAgentApproval = _hasPhoneAgentApproval(
++      widget.steps,
++      conversationId: widget.conversationId,
++    );
++    PhoneAgentApprovalCard.listenable.addListener(_onApprovalsChanged);
++  }
++
++  @override
++  void didUpdateWidget(covariant _ChainOfThoughtCard oldWidget) {
++    super.didUpdateWidget(oldWidget);
++    _phoneAgentApproval = _hasPhoneAgentApproval(
++      widget.steps,
++      conversationId: widget.conversationId,
++    );
++  }
++
++  @override
++  void dispose() {
++    PhoneAgentApprovalCard.listenable.removeListener(_onApprovalsChanged);
++    super.dispose();
++  }
++
++  void _onApprovalsChanged() {
++    if (!mounted) return;
++    final next = _hasPhoneAgentApproval(
++      widget.steps,
++      conversationId: widget.conversationId,
++    );
++    if (next == _phoneAgentApproval) return;
++    setState(() => _phoneAgentApproval = next);
++  }
++
++  static bool _hasPhoneAgentApproval(
++    List<_TimelineStepData> steps, {
++    String? conversationId,
++  }) {
++    for (final step in steps) {
++      final tool = step.tool;
++      if (tool == null) continue;
++      if (PhoneAgentApprovalCard.pendingExists(
++        toolCallId: tool.id,
++        conversationId: conversationId,
++      )) {
++        return true;
++      }
++    }
++    return false;
++  }
++
+   Object _reasoningStepSignature({
+     required ReasoningSegment step,
+     required int sourceIndex,
+@@ -5055,6 +5136,7 @@ class _ChainOfThoughtCardState extends State<_ChainOfThoughtCard>
      required bool showToolResultSummary,
      required bool hideToolResultImages,
      required bool pendingApproval,
@@ -18,7 +119,7 @@ index 8be8c35..ada78ca 100644
      required double textScale,
    }) {
      return Object.hash(
-@@ -5068,6 +5070,9 @@ class _ChainOfThoughtCardState extends State<_ChainOfThoughtCard>
+@@ -5068,6 +5150,9 @@ class _ChainOfThoughtCardState extends State<_ChainOfThoughtCard>
        showToolResultSummary,
        hideToolResultImages,
        pendingApproval,
@@ -28,7 +129,7 @@ index 8be8c35..ada78ca 100644
        textScale,
      );
    }
-@@ -5325,6 +5330,10 @@ class _ChainOfThoughtCardState extends State<_ChainOfThoughtCard>
+@@ -5325,6 +5410,10 @@ class _ChainOfThoughtCardState extends State<_ChainOfThoughtCard>
                          showToolResultSummary: showToolResultSummary,
                          hideToolResultImages: hideToolResultImages,
                          pendingApproval: pendingApprovalIds.contains(part.id),
@@ -39,7 +140,7 @@ index 8be8c35..ada78ca 100644
                          textScale: textScale,
                        ),
                        builder: () {
-@@ -6682,22 +6691,41 @@ class _ChainOfThoughtToolStepState extends State<_ChainOfThoughtToolStep>
+@@ -6682,22 +6771,41 @@ class _ChainOfThoughtToolStepState extends State<_ChainOfThoughtToolStep>
              ),
            )
          : null;
@@ -97,7 +198,7 @@ index 8be8c35..ada78ca 100644
  
      final extra = approvalRequest != null
          ? Row(
-@@ -6745,31 +6773,46 @@ class _ChainOfThoughtToolStepState extends State<_ChainOfThoughtToolStep>
+@@ -6745,31 +6853,46 @@ class _ChainOfThoughtToolStepState extends State<_ChainOfThoughtToolStep>
          ? ToolPermissionResultStatus(metadata: widget.part.metadata)
          : null;
  
@@ -169,7 +270,7 @@ index 8be8c35..ada78ca 100644
      );
    }
  }
-@@ -7182,6 +7225,12 @@ class _ToolCallItemState extends State<_ToolCallItem> {
+@@ -7182,6 +7305,12 @@ class _ToolCallItemState extends State<_ToolCallItem> {
                  ),
                ),
              ],

@@ -4,6 +4,8 @@ import 'package:Kelivo/core/models/chat_message.dart';
 import 'package:Kelivo/core/providers/settings_provider.dart';
 import 'package:Kelivo/features/chat/widgets/chat_message_widget.dart';
 import 'package:Kelivo/features/home/services/tool_approval_service.dart';
+import 'package:Kelivo/features/home/services/ask_user_interaction_service.dart';
+import 'package:Kelivo/core/providers/tts_provider.dart';
 import 'package:Kelivo/features/phone_agent/phone_agent_approval_card.dart';
 import 'package:Kelivo/features/phone_agent/phone_agent_approval_service.dart';
 import 'package:Kelivo/l10n/app_localizations.dart';
@@ -142,6 +144,55 @@ void main() {
     return settings;
   }
 
+  /// 渲染**助手时间线**：`role='assistant'` + `toolParts` → `_ChainOfThoughtCard`
+  /// → `_CachedTimelineStep` → `_ChainOfThoughtToolStepState`。
+  Future<void> pumpTimelineMessage(
+    WidgetTester tester, {
+    required SettingsProvider settings,
+    required List<ToolUIPart> parts,
+  }) async {
+    final message = ChatMessage(
+      id: 'msg-1',
+      role: 'assistant',
+      conversationId: 'c1',
+      content: 'thinking',
+    );
+    await tester.pumpWidget(
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider<SettingsProvider>.value(value: settings),
+          ChangeNotifierProvider(
+            create: (_) =>
+                TtsProvider(preferences: createBusinessTestPreferences()),
+          ),
+          ChangeNotifierProvider<ToolApprovalService>(
+            create: (_) => ToolApprovalService(),
+          ),
+          ChangeNotifierProvider<AskUserInteractionService>.value(
+            value: AskUserInteractionService(),
+          ),
+        ],
+        child: MaterialApp(
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: Scaffold(
+            body: ListView(
+              children: [
+                ChatMessageWidget(
+                  message: message,
+                  toolParts: parts,
+                  showThinkingCards: true,
+                  showToolCards: true,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+  }
+
   Future<void> registerCall({
     String toolCallId = 'call-1',
     String conversationId = 'c1',
@@ -260,12 +311,62 @@ void main() {
     await tester.pumpAndSettle();
 
     // 卡片 widget 仍挂在树上（内部渲染 SizedBox.shrink），关键是没有残留空白：
-    // 消息高度必须收缩回只有头部的高度。
+    // 消息高度必须收缩回只有头部的高度（实测 259 → 64）。
     expect(find.textContaining('com.example.app'), findsNothing);
     final heightWithoutCard = tester
         .getSize(find.byType(ChatMessageWidget))
         .height;
     expect(heightWithoutCard, lessThan(heightWithCard));
+    // 具体数值：头部单行工具卡约 64px；带卡片时约 259px。允许 1px 取整误差。
+    expect(heightWithoutCard, closeTo(64, 1));
+    expect(heightWithCard, greaterThan(200));
+
+    await clearPending(tester);
+  });
+  /// 助手时间线的工具步骤走 `_ChainOfThoughtCard` → `_CachedTimelineStep`，
+  /// 与 role='tool' 的 `_ToolCallItem` 是两条不同路径，**后者没有 widget 缓存**。
+  /// 这条测试专门锁住 R3 诊断的那条路径：撤下后步骤必须回到 header-only
+  /// （content == null，不再渲染空内容区）。
+  testWidgets('the assistant timeline step returns to header-only after removal', (
+    tester,
+  ) async {
+    await registerCall();
+    final preferences = createBusinessTestPreferences();
+    final settings = SettingsProvider(preferences);
+    await settings.loaded;
+    addTearDown(settings.dispose);
+
+    final part = ToolUIPart(
+      id: 'call-1',
+      toolName: 'phone_agent_tree',
+      arguments: const <String, dynamic>{'offset': 0},
+      content:
+          '{"type":"tool_error","error":"permission_required",'
+          '"tool":"phone_agent_tree"}',
+      loading: false,
+    );
+    await pumpTimelineMessage(tester, settings: settings, parts: [part]);
+
+    expect(find.byType(PhoneAgentApprovalCard), findsOneWidget);
+    final withCard = tester.getSize(find.byType(ChatMessageWidget)).height;
+    final buildsWithCard = debugTimelineToolStepBuilds;
+
+    pending.clear();
+    await PhoneAgentApprovalService.instance.refresh();
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    // 卡片消失，内容区收缩：步骤回到 header-only。
+    expect(find.textContaining('com.example.app'), findsNothing);
+    final withoutCard = tester.getSize(find.byType(ChatMessageWidget)).height;
+    expect(withoutCard, lessThan(withCard));
+    // 关键：步骤必须**真的重建过**。只靠 block 级缓存复用会让内部
+    // `_CachedTimelineStep` 连 didUpdateWidget 都收不到，撤下后残留旧子树。
+    expect(
+      debugTimelineToolStepBuilds,
+      greaterThan(buildsWithCard),
+      reason: '批准请求撤下后，助手时间线步骤必须重建（缓存签名须包含 pending）',
+    );
 
     await clearPending(tester);
   });
