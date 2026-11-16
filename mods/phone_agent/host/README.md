@@ -17,7 +17,8 @@
 | 文件 | 用途 |
 | --- | --- |
 | `driver.py` | 异常套件（`phone_agent_exception_test.dart`）的宿主驱动 |
-| `run_official.py` | 官方测试（`phone_agent_test.dart`）的最小宿主包装，只负责授权 |
+| `run_official.py` | 官方测试（`phone_agent_test.dart`）的最小宿主包装，只负责授权并拒绝随后的通知权限弹窗 |
+| `run_approval_chain.py` | 应用批准链路（`phone_agent_approval_chain_test.dart`）的宿主驱动：只做 `KEYCODE_HOME` 与证据抓取 |
 | `_runs/` | 运行日志与 UI dump 输出目录（已 gitignore） |
 
 ## 用法
@@ -35,11 +36,38 @@ python3 mods/phone_agent/host/run_official.py
 # 官方测试（物理 MIUI 例外设备：允许 settings put secure）
 APP_TREE=... SERIAL=1960cd68 USE_SETTINGS_PUT=1 \
 python3 mods/phone_agent/host/run_official.py
+
+# 应用批准链路（宿主只做 KEYCODE_HOME 与证据抓取）
+APP_TREE=... SERIAL=emulator-5554 \
+python3 mods/phone_agent/host/run_approval_chain.py
 ```
 
-环境变量：`APP_TREE`（必填）、`SERIAL`、`DRIVER_LOG`、`OUT_DIR`、
+环境变量（`run_official.py` / `driver.py` 同 `run_approval_chain.py`）：`APP_TREE`（必填）、`SERIAL`、`DRIVER_LOG`、`OUT_DIR`、
 `FLUTTER_BIN`、`TEST_ARGS`（正则测试名要放这里，多个 `--plain-name` 是 AND
 语义）、`TEST_FILE`、`USE_SETTINGS_PUT`。
+
+## M36 的四处补充修正（都是宿主/测试侧，产品未改）
+
+对应 `docs/phone-agent-plan.md` 9.3.8 的逐条失败：
+
+1. **`adb()` 超时不再抛出**（`adb()`）。单次 `uiautomator dump` 超过 45 秒时
+   原先从 `run_official.py` 的 enable 线程抛出 `TimeoutExpired`，线程静默死亡，
+   测试只能一直等 `setUpAll`。现在记录日志并返回空串（`check=True` 保留抛错）。
+2. **`_find_service_entry` 的前台判断与回顶**。服务详情页与列表页同属一个
+   Settings 任务，`am start -a ACCESSIBILITY_SETTINGS` 只把任务带到前台
+   （`Activity not started, its current task has been brought to the front`），
+   因此必须 BACK 才能回到列表；但无条件 BACK 会落到被测应用上（一轮把它 ANR），
+   在列表页 BACK 会退出无障碍设置。现在只在 **`com.android.settings` 且
+   `SubSettings` 聚焦**时 BACK，并用 8 次短拖真正回到列表顶部。
+3. **导航代次**（`_nav_generation` / `bump_navigation()`）。产品自己执行
+   `home`/`recents` 时递增代次，在途的 `ensure_app_foreground` 立即放弃；
+   没有它时残留的 `am start` 会在 `HOME` 之后把应用拉回前台（1 秒内实测），
+   让 `recents` 用例与批准链路的「未批准前台」都看到本应用。
+4. **隐私确认与通知权限**（`run_official.py`）。M34 首次启用会先弹一次性隐私
+   确认（测试侧负责点 `I understand`），随后产品请求 `POST_NOTIFICATIONS`；
+   该弹窗在 `flutter test` 下无人应答会挡住 `writeSelection`。宿主按约定
+   **拒绝**它（保持 `granted=false`，异常套件需要该权限未授予），不 grant、
+   不 revoke、不 clear。
 
 ## 六处行为修正（都是宿主侧，产品未改）
 

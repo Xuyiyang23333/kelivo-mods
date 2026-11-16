@@ -1740,6 +1740,73 @@ JVM 测试（无 Robolectric、无新依赖）：
 - 像素专属视觉证据：新建无历史会话，只允许一次 `phone_agent_screenshot`，禁止 tree/input，提示不透露颜色或文本；1017 回答 `bright cyan (light blue)` 和 `PHONE_AGENT_SECURE_FIXTURE`，与保存 PNG 的 rgb(0,200,255) 及完整文字一致。该轮请求只有一个截图 `tool_call`，`image_url` 为 `data:image/png;base64,<omitted 39204 chars>`，请求全文不含 `PHONE_AGENT`，构成后端视觉消费的直接支持证据，但不是对模型内部机制的绝对证明。
 - 边界：第一轮过渡帧出现黑色区域和文本裁切，后续截图应等界面稳定；`llama-cpp/llama-cpp` 的完整坐标 swipe 未验证；网关 `api_error` / 空响应属外部故障，不写成产品缺陷；文档不记录密钥、完整会话或图片字节。
 
+### 9.3.8 M36 应用批准契约设备验证（2026-11-16，API35 `emulator-5554`，**范围收敛为三项**）
+
+M36 的目标是给 M33（门控与签名绑定）、M34（批准交互与隐私确认）取得设备证据。按 tower 的收敛指令，本轮只做三项优先任务；未做的项目在下文「未验证」逐条列出，不写成通过。
+
+**设备与环境**：API35 模拟器 `emulator-5554`（Android 15，1080x2424，density 420，`MemTotal` 6,072,652 kB）。模拟器原配置 2 GB 内存，`lowmemorykiller` 反复杀进程并导致 `com.android.settings` 与 `com.psyche.kelivo.phoneagent` 连续 ANR（`Input dispatching timed out`）；本轮以 `-memory 4096 -no-window -gpu swiftshader_indirect -no-snapshot-load` 冷启动后稳定。**这是测试环境的资源问题，不是产品缺陷**，也不写成产品要求。
+
+**源码树**：`V:/coding/kelivo-private/.tower/worktrees/wt-36/.build/worktrees/a4c355aef96366ee`（官方测试）与 `39824fc9baf262e6`（批准链路 + 产品 APK），对应 `modsetHash` `a4c355aef96366ee324630a175f5c5b42373f9ec9163222d356b4afca15e069c` 与 `39824fc9baf262e63ba3d3b432aa6f639aeb9f42332b56f680e5d352f4c2d894`，`plan`/`apply`/`verify` 均通过。
+
+#### (a) 官方 `phone_agent_test.dart`：`+2`、`All tests passed!`、EXIT=0
+
+- 命令：`APP_TREE=<tree> SERIAL=emulator-5554 python3 mods/phone_agent/host/run_official.py`；日志 `mods/phone_agent/host/_runs/official_api35_m36_r10.log`（EXIT=0，elapsed 155s）。
+- 覆盖：截图 → 读树 → 节点点击 → 坐标滑动 → 节点滚动 → 聚焦后 `set_text` → 二次读树，以及 Mods 页三态选择与服务状态。
+- **M34 的首次隐私确认在真实设备上被触发并走完**：测试点 `I understand` 后，`run_official.py` 观察到 `POST_NOTIFICATIONS` 系统弹窗并**拒绝**它（`dismissed POST_NOTIFICATIONS prompt (denied)`），权限保持 `granted=false`；日志随后是 `+2: All tests passed!`。这条路径证明：(1) 未确认时 `writeSelection` 不会执行（否则不需要拒绝弹窗）；(2) 确认后弹出的是真实系统权限弹窗，产品代码仍会继续写入选择。
+- 无障碍授权由宿主在系统界面完成（`confirmed with Allow`、`enable_service: bound`），**未使用 `settings put secure`**。
+
+#### (b) 批准链路端到端：`+1`、`All tests passed!`、EXIT=0
+
+新增 `mods/phone_agent/overlay/integration_test/phone_agent_approval_chain_test.dart`（经 `mod.json` 的 `copy` 合成）与宿主脚本 `mods/phone_agent/host/run_approval_chain.py`。命令：
+
+```bash
+APP_TREE=<tree> SERIAL=emulator-5554   python3 mods/phone_agent/host/run_approval_chain.py
+```
+
+日志 `mods/phone_agent/host/_runs/approval_chain_m36_r6.log`（EXIT=0）。逐环节真实设备证据：
+
+| 环节 | 测试打印 / 证据 | 结论 |
+| --- | --- | --- |
+| 未批准 → 只回身份 | `PHONE_AGENT_APPROVAL_DENIED: package=com.google.android.apps.nexuslauncher signing=a86bdb05 display=Pixel Launcher` | `permission_required`，信封里没有 `result`、节点、窗口标题；消息含 `no screenshot`，明确说明没有截图/没有读取界面文本 |
+| 登记 pending 请求 | `PHONE_AGENT_APPROVAL_PENDING: request=af535236-a261-4237-91a2-6d9b2bf1ada4 package=… signing=a86bdb05` | 真实工具入口（`PhoneAgentTools.handleCall`）触发 `_registerApproval` |
+| 卡片渲染 | `PHONE_AGENT_APPROVAL_CARD: visible` | 真实 `PhoneAgentApprovalCard` 在默认设置下渲染出批准按钮与包名 |
+| 批准写入 | 点 `Allow` 后 `PHONE_AGENT_APPROVAL_APPROVED: prefix=a86bdb05`，`approvedApps` 含目标包 | `resolve`→原生 `resolveApproval` 写入白名单 |
+| 重新观察 | `PHONE_AGENT_APPROVAL_OBSERVED: package=com.google.android.apps.nexuslauncher nodes=18` | 已批准后返回真实树（18 个节点），不是空树占位 |
+| 撤销 | `approvedApps` 不再含目标包 | 原生 `revokeApp` 立即生效 |
+| 再次拒绝 | `PHONE_AGENT_APPROVAL_REVOKED: permission_required again` | 撤销后立即回到 `permission_required`，仍只回身份 |
+
+**证明边界**：本链路验证的是**聊天卡片**入口与原生白名单判定；**通知栏批准 action 没有被真实点击**（见未验证项）。测试自己打印标记、宿主只做 `KEYCODE_HOME` 与证据抓取，属既定分工。设备证据文件：`mods/phone_agent/host/_runs/approval-launcher-foreground.png` / `.xml`（`gitignore` 覆盖，不进仓库）。
+
+#### (c) 产品 debug APK（设备验证同一棵树）
+
+在全部设备测试结束后，于树 `39824fc9baf262e6` 执行 `flutter clean` → `flutter pub get` → `flutter pub get --directory tool/l10n --enforce-lockfile` → 显式 `flutter build apk --debug`（Gradle 177.9s），**构建后未再运行 integration_test**：
+
+- 大小：**181,555,154 字节**
+- SHA-256：**`c911044f04fec935a73f579627cdb5d89abdacba311d330caab979e62f59b680`**
+- debug merged manifest：`SecureWindowFixtureActivity` 1 处、`PhoneAgentService` 1 处、`PhoneAgentApprovalReceiver` 1 处、`QUERY_ALL_PACKAGES` 2 处（`<uses-permission>` 与其合并副本）。**未构建 release**，因此签名 release 仍未验证。
+
+#### 本轮修的是宿主脚本与测试适配（产品代码零改动）
+
+三处都在 `mods/phone_agent/host/` 与 `integration_test/` 内，不放宽任何断言或观察边界。每条都对应一次真实失败：
+
+1. **`adb()` 超时不再抛出**（`driver.py`）：单次 `uiautomator dump` 超过 45 秒时，`subprocess.TimeoutExpired` 从 `run_official.py` 的 enable 线程抛出，线程静默死亡，测试只能一直等 `setUpAll`（首轮实测）。
+2. **`_find_service_entry` 的前台判断与回顶**（`driver.py`）：服务详情页与列表页同属一个 Settings 任务，`am start -a ACCESSIBILITY_SETTINGS` 只把任务带到前台（实测 `Activity not started, its current task has been brought to the front`），因此必须 BACK 才能回到列表；但无条件 BACK 会落到被测应用上（一轮把它 ANR），在列表页 BACK 则会退出无障碍设置，所以只在 **`com.android.settings` 且 `SubSettings` 聚焦**时发 BACK，并用 8 次短拖真正回到列表顶部。
+3. **导航代次**（`driver.py`）：产品自己执行 `home`/`recents` 时递增 `_nav_generation`，在途的 `ensure_app_foreground` 立即放弃。没有它时，`HOME` 之后残留的 `am start` 会把应用拉回前台（`序 16:59:47 after enable` 与 `go_home` 相差 1 秒），`recents` 用例与批准链路的「未批准前台」都会看到本应用而不是目标应用。
+4. **隐私确认弹窗**（`phone_agent_test.dart`）：M34 首次启用会先弹一次性隐私确认，未确认时选择**不写入**；测试改为有界轮询等平台通道返回后点 `I understand`，并在宿主侧拒绝随后的 `POST_NOTIFICATIONS` 弹窗（保持 `granted=false`，异常套件需要该权限未授予）。
+5. **批准链路测试的重新前台**：点卡片是应用内动作，会把本应用带到前台，因此「重新观察」前要求宿主再次 `KEYCODE_HOME`，否则读到的是测试应用（第 4 轮实测）。
+
+#### 未验证（本轮明确未做，不得写成通过）
+
+- **完整异常套件整轮绿**：两轮均为 `+7 -1`、EXIT=1。7 个用例稳定通过（FLAG_SECURE、叠加层不污染截图、叠加层触摸穿透、旋转、权限窗口 `no_window`、锁屏 `device_locked`、服务禁用/重启）；唯一失败固定在 `home 与 recents 后输入被包名策略拒绝` 的 **`recents`** 分支，失败句为「recents 后前台仍停留在 com.psyche.kelivo.phoneagent」。该用例**单独运行 `+1`、EXIT=0**，说明问题在宿主时序（第 3 项修复针对它，但修复后未再取得整轮绿）。据此只能写「7/8 用例已验证、整轮绿未取得」，不写成套件通过。
+- **物理 MIUI `1960cd68`**：未安装 `com.kelivo.phoneagent.securefixture`，因此异常套件未运行；官方测试与批准链路本轮**均未在 MIUI 运行**。MIUI 本轮完全未参与验证。
+- **VLM 固定任务**：本轮未运行任何 VLM 轮次（含「未批准 → 只回身份 → 批准 → 重新观察 → 撤销 → 重新 `permission_required`」的模型驱动链路）。9.4 与 10.1 的 VLM 结果仍只对应旧代码，不能用于宣称新边界已验证。
+- **通知栏批准**：`PhoneAgentApprovalReceiver` + `Notification.Action` 的真实点击、进程被杀后的 action 重放、两端撤下时序、`POST_NOTIFICATIONS` 被拒时只有卡片可用，全部**未在设备上验证**。
+- **卡片在真实对话流中的布局**：本轮的卡片断言渲染的是卡片组件本身（`PhoneAgentApprovalCard` + 真实 l10n），**不是**上游 `chat_message_widget.dart` 里的完整时间线布局。
+- **「允许并继续」**：未验证；本轮卡片只点了 `Allow`（`approve`，不续跑）。
+- **服务关闭时 Mods 页撤销、跨 UID 前台包签名解析**（`QUERY_ALL_PACKAGES` 的通用能力）：未验证。本轮签名解析只在 launcher 上成功（`a86bdb05`），不构成「任意前台包都能解析」的证据。
+- **签名 release**：未构建。
+- **`package_not_allowed`（deny 清单）**：deny 清单初始为空，本轮没有触发路径，未验证。
+
 ### 9.5 M35 审计元数据自检（2026-11-16，仅单元与静态检查，**无设备证据**）
 
 - 改动：新增 `mods/phone_agent/plugin/android/src/main/kotlin/com/kelivo/phoneagent/AuditLog.kt`（七字段记录、固定动作 token、从不抛错的身份解析、30 天/2000 条滚动、文件存储、安全记录入口）；`PhoneAgentService` 在 `execute` 的 `reply` 收口处记录一次并只在取到前台窗口处填包名；通道 `readTree` / `screenshot` / `input` 新增可选 `assistant_id` / `conversation_id`；插件 Dart 客户端、`PhoneAgentService`（overlay 适配层，新增 `PhoneAgentAuditedClient` 能力接口）、`PhoneAgentTools.handleCall` 与 `PhoneAgentMod` 逐层转发。
@@ -1775,9 +1842,9 @@ JVM 测试（无 Robolectric、无新依赖）：
 - Loader verify 通过；最终 APK 已生成。
 - 前台可视化叠加层（M23）已实现：独立 `TYPE_ACCESSIBILITY_OVERLAY`、无文本图形、无设置开关；API35 模拟器和物理 MIUI API31 均验证官方测试、截图无污染和触摸穿透，未验证项见 10.2 和 9.3.7。
 - 中文维护文档与真实行为一致。
-- **应用批准契约（7.5.4/7.5.9）第 2、3 步已由 M33 实现**：`QUERY_ALL_PACKAGES` 一次声明、`(包名, 签名 SHA-256 集合)` 双匹配的用户白名单（本地存储、幂等写入、撤销立即生效、写入前重解析签名）、构建期 deny 清单（初始为空）与构建配置预批准条目、观察与输入两条路径的白名单门控、`permission_required`（输入与观察都返回，观察侧只带应用身份）、原生批准/撤销/查询通道方法。**M34 已实现批准交互与首次隐私确认**：聊天卡片、通知栏 action、pending 请求状态机（TTL + 单终态 + 迟到回调丢弃）、结构化身份、Mods 页白名单管理（按来源助手分组、逐条撤销）、首次启用隐私确认（方案 B）、预批准成员禁止写入用户白名单。**审计元数据已由 M35 实现**（七字段落盘、30 天/2000 条滚动、不进入工具结果与模型、无读取通道，见 7.5.5）。**仍未实现**：按任务的控制权、结果未知语义的专门文案与错误码、多窗口首版策略（拒绝方式未定稿）。**门控、签名绑定、批准交互与审计都没有任何设备证据**，因此不计入已完成验收项。
+- **应用批准契约（7.5.4/7.5.9）第 2、3 步已由 M33 实现**：`QUERY_ALL_PACKAGES` 一次声明、`(包名, 签名 SHA-256 集合)` 双匹配的用户白名单（本地存储、幂等写入、撤销立即生效、写入前重解析签名）、构建期 deny 清单（初始为空）与构建配置预批准条目、观察与输入两条路径的白名单门控、`permission_required`（输入与观察都返回，观察侧只带应用身份）、原生批准/撤销/查询通道方法。**M34 已实现批准交互与首次隐私确认**：聊天卡片、通知栏 action、pending 请求状态机（TTL + 单终态 + 迟到回调丢弃）、结构化身份、Mods 页白名单管理（按来源助手分组、逐条撤销）、首次启用隐私确认（方案 B）、预批准成员禁止写入用户白名单。**审计元数据已由 M35 实现**（七字段落盘、30 天/2000 条滚动、不进入工具结果与模型、无读取通道，见 7.5.5）。**仍未实现**：按任务的控制权、结果未知语义的专门文案与错误码、多窗口首版策略（拒绝方式未定稿）。**门控、签名绑定、批准交互已在 M36 取得 API35 设备证据**（见 9.3.8：官方 `+2`、批准链路端到端 `+1`，均 EXIT=0）；**审计仍没有任何设备证据**。M36 未取得完整异常套件整轮绿（`+7 -1`），未在物理 MIUI 运行，也未做 VLM 轮次，因此批准交互的通知栏入口与真实对话流布局仍属未验证。
 
-最终验收已完成（就 M32 之前的契约与 M32 的设备证据而言）；M33 的门控与签名绑定、M34 的批准交互与隐私确认**都只有单元测试与静态检查，没有任何设备证据**，因此仍不宣称第二阶段全部完成，未验证项见 10.2。
+最终验收已完成（就 M32 之前的契约与 M32 的设备证据而言）；M33 的门控与签名绑定、M34 的批准交互与隐私确认在 M36 取得 API35 设备证据（9.3.8），但 M36 范围收敛未覆盖完整异常套件整轮绿、物理 MIUI、VLM、通知栏批准与签名 release，因此仍不宣称第二阶段全部完成，未验证项见 10.2。
 
 **M34 的检查结果（2026-11-16 R3 返工后，仅单元与静态检查）**：Loader `dart format --output=none --set-exit-if-changed tool test` 0 变更、`dart analyze tool test` 无问题、`dart test` **173 通过**；合成树 `dart analyze --fatal-infos lib test integration_test tool` **No issues found**；手机 Agent + Mods + 设置入口 Flutter **154 通过**；上游 seam（`tool_handler_service_test`、`tool_handler_workspace_gating_test`、`request_consistency_test`）**56 通过**；插件 Dart **33 通过**；插件 Kotlin `:kelivo_phone_agent:testDebugUnitTest --rerun-tasks` **223 通过、0 失败**（含 M35 的审计测试）；ARB 四目标语言 `translate.py check` **0 pending**；`modsetHash` `9f735638675c7eea115cf4c4cd5a0d3e5f53d0078dc67b819c08d5b84089f6c1`（合成树 `.build/worktrees/9f735638675c7eea`）的 `plan`/`apply`/`verify` 通过。本轮 R1 返工修了三项 P1（卡片渲染位置、通知权限可达性、双向撤下与清理接线）与九项 P2，新增卡片/隐私/失败态 widget 测试。 **R2/R3 返工**：补回卡片实例化（`role='tool'` 的 `_ToolCallItem` 路径此前从未接卡）、恢复续跑链、把助手时间线的 pending 判定挪进 `ListenableBuilder` 内并纳入 `_toolStepSignature`（消除撤下后约 12px 残留空白），新增 7 项卡片 widget 测试（含真正的助手时间线 `_ChainOfThoughtCard` → `_CachedTimelineStep` 路径，断言撤下后步骤重建且回到 header-only；块级缓存与步骤级缓存都感知 pending）。**未运行 integration_test、未构建 APK、未接设备。**
 
@@ -1800,7 +1867,7 @@ JVM 测试（无 Robolectric、无新依赖）：
 - `supported` 仅表示 API 30+ 截图能力；API 29 可以 ready 并使用树/节点输入，但截图返回 `unsupported_os`，页面显示截图限制。
 - 非 Android 平台可以打开 Mods 页，但只显示平台不支持；不要用 `supported=false` 表示平台不可用。
 - ARB 翻译质量依赖上游 l10n 工具和目标语言审查；新增键必须保持英文和中文源键集合一致。
-- **批准交互没有设备证据（M34）**：通知权限（API 33+ `POST_NOTIFICATIONS`）与通知 action 的真实行为、系统在进程被杀后重放 action、通知与聊天卡片同时存在时的撤下时序、卡片在真实对话流中的布局、服务关闭时 Mods 页撤销链路、跨 UID 前台包签名解析，全部只经过单元测试与静态检查。没有通知权限时通知发不出去，判定不受影响，但这一点未在设备上验证。
+- **批准交互的设备证据范围（M34 实现，M36 部分验证）**：M36 已在 API35 验证「未批准 → 只回身份 → 卡片 → 批准 → 重新观察 → 撤销 → 再次 `permission_required`」全链路与首次隐私确认（含随后的系统通知权限弹窗），见 9.3.8。**仍未验证**：通知栏 `Notification.Action` 的真实点击与进程被杀后的 action 重放、通知与聊天卡片同时存在时的撤下时序、卡片在上游真实对话时间线中的布局（M36 断言的是卡片组件本身）、服务关闭时 Mods 页撤销链路、「允许并继续」的续跑、跨 UID 前台包签名解析（本轮签名解析只在 launcher 上成功）。没有通知权限时通知发不出去，判定不受影响，但这一点未在设备上验证。
 - **「允许并继续」不重放动作**：它只发送一条要求模型重新观察的用户消息。会话已切走、消息发送被拒绝或没有注册回调时只保存授权并如实提示，**不会切换会话、不会伪造续跑**。它不能保证模型重新观察后一定能完成任务。
 - **预批准成员不可写入用户白名单（M34）**：`approveApp` / `revokeApp` 对测试包与 debuggable 的 `securefixture` 返回 `pre_approved`，避免产生不可撤销的冗余条目。它们本来就直接放行，不需要批准。
 - API 30+ 截图与坐标手势已在 API 35 模拟器验证；物理 MIUI API31 真机由 `llama-cpp/llama-cpp` 的归一化坐标 tap 与 `mistral/deepseek-v4-1-flash-1017` 的归一化坐标 swipe 证实坐标 UI 效果；integration_test 的坐标手势 UI 滚动效果仍受绑定限制（不转发设备指针事件），不能把回调成功当 UI 效果。
@@ -1816,7 +1883,7 @@ JVM 测试（无 Robolectric、无新依赖）：
 - `system_window_denied` 同时约束输入与观察；`package_not_allowed` **M33 起也约束输入与观察**，只对构建期 deny 清单成员出现（清单初始为空），排在用户白名单之前。观察侧（读树与截图）允许 `TYPE_APPLICATION` 与 `TYPE_INPUT_METHOD`，其余类型返回 `system_window_denied` 并在消息里带 `window_type_*` 标识。**M33 起未批准应用的读树/截图返回 `permission_required` 且只带应用身份**（包名＋签名前 8 位），不建立观测、不占 `treeBudget`、不调用 `takeScreenshot`；签名解析失败时消息只写 `signing_unavailable`。无可访问 root 的权限弹窗读树/截图/输入均为 `no_window` 并带条件式人工提示。
 - 应用白名单与批准：**第 2、3 步（签名绑定＋白名单门控）已由 M33 实现**（本地白名单、幂等写入、撤销即时、deny 清单、预批准条目）；**审计元数据已由 M35 实现**（七字段落盘、30 天/2000 条滚动、不进入工具结果与模型、无读取界面）；**批准交互（聊天卡片、通知栏 action、pending 状态机）与首次启用隐私确认已由 M34 实现**，Mods 页提供“已批准的应用”管理页与逐条撤销。**仍未实现**：任务控制（同时只一个任务控制手机）、结果未知语义的专门文案与错误码、多窗口首版策略。所有新语义**未经设备验证**；通知权限被拒时只有聊天卡片可用。
 - `home`/`recents` 后前台离开本应用，**后续输入（包括 `back`）被拒绝**，模型无法自行恢复，需要用户或宿主切回测试应用。API35 实测 `home`/`recents` 后前台是启动器（`com.google.android.apps.nexuslauncher`，`TYPE_APPLICATION`）：M33 起它属**未批准第三方应用**，读树与输入都返回 `permission_required` 且只回身份（此前读树会成功）。**通知栏**这类窗口仍被观察层拒绝，且 systemui 属硬基线、硬基线先于窗口类型判定，标识是 `hard_baseline` 而非 `window_type_system`。
-- 应用白名单与批准的**设备验证仍未完成**：批准卡片/通知与首次启用隐私确认已由 M34 实现、审计已由 M35 实现，但三者**都没有设备证据**，审计也没有读取界面；任务控制（同时只一个任务控制手机）与结果未知语义的专门文案仍未实现；`QUERY_ALL_PACKAGES` 声明后交付代码能否在设备上解析任意前台包签名**未实测**（M29 只验证了探针 APK）。契约全文见 7.5.4 与 7.5.9–7.5.14。
+- 应用白名单与批准的**设备验证只完成一部分**：M36 在 API35 验证了门控、签名绑定（launcher `a86bdb05`）、卡片批准、撤销与首次隐私确认（9.3.8）；**审计没有任何设备证据**，也没有读取界面；通知栏批准 action、真实对话流布局、物理 MIUI、VLM 轮次与签名 release 仍未验证；`QUERY_ALL_PACKAGES` 声明后交付代码能否解析**任意**前台包签名**未实测**（M29 只验证了探针 APK，M36 只覆盖 launcher）。任务控制（同时只一个任务控制手机）与结果未知语义的专门文案仍未实现。契约全文见 7.5.4 与 7.5.9–7.5.14。
 - `SecureWindowFixtureActivity` 只是 debug 测试夹具，不是产品能力；release 不包含该 Activity。
 - API35 模拟器已验证旋转、home/recents、锁屏、服务禁用/重启；物理 MIUI API31 真机已验证旋转和物理 `FLAG_SECURE`，但锁屏、home/recents、服务禁用/重启未在物理设备运行，不能从模拟器结果推断；原生超时仍无法在设备上确定性触发。
 - 未执行带合法签名配置的 release 构建。

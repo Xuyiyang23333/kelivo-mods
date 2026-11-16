@@ -233,10 +233,12 @@ def _find_service_entry():
     # A leftover service-detail page sits in the same Settings task, so
     # `am start` only brings that task to the front (`Activity not started, its
     # current task has been brought to the front`) and the list is never shown.
-    # One BACK leaves the detail page and lands on the list — but only when
-    # Settings is actually focused: an unconditional BACK would land on the app
-    # under test (M36 round 5 finished/ANR'd the harness that way).
-    if "com.android.settings" in (foreground()[0] or ""):
+    # One BACK leaves the detail page and lands on the list — but only when the
+    # **detail page** is focused: an unconditional BACK landed on the app under
+    # test (M36 round 5) and BACK on the list page itself leaves Accessibility
+    # settings entirely (M36 round 11, `Sys2008`/`SubSettings` churn).
+    focus = foreground()[0] or ""
+    if "com.android.settings" in focus and "SubSettings" in focus:
         adb("shell", "input", "keyevent", "KEYCODE_BACK")
         time.sleep(1.0)
     adb("shell", "am", "start", "-a", "android.settings.ACCESSIBILITY_SETTINGS")
@@ -589,6 +591,11 @@ def bump_navigation(reason):
     global _nav_generation
     _nav_generation += 1
     log(f"navigation generation -> {_nav_generation} ({reason})")
+
+
+def navigation_generation():
+    """Current navigation generation, for callers that must not undo HOME."""
+    return _nav_generation
 
 
 def dispatch(marker, source):
