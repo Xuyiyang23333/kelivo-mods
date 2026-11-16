@@ -55,7 +55,7 @@
 - 节点输入优先，坐标输入作为视觉和自绘界面的补充。
 - 观察按需发生，不强制每个动作后重新读取完整界面。
 - 原生技术护栏尽量硬实现，业务风险识别不作虚假保证。
-- 首版只在显式测试包名中开放输入，不直接面向敏感应用（M32 已定（用户拍板）、未实现：用户按应用批准后，输入与观察都受同一批准约束，见 7.5.1/7.5.4）。
+- 首版只在显式测试包名中开放输入，不直接面向敏感应用（M32 已定（用户拍板）：用户按应用批准后，输入与观察都受同一批准约束；M33 已实现门控、M34 已补批准 UI，见 7.5.1/7.5.4）。
 - 工具选择与服务授权分离。Mods 页的三态选择只决定助手使用哪套工具，不代表系统无障碍服务已经授权。
 - 正常 UI 不允许原生手机控制和 Phone Agent 同时启用；两者互斥写入助手的 `localToolIds`。
 - 已有仅启用 `phone_control` 的助手保持原生行为，不自动迁移，不批量改写 `localToolIds`。
@@ -451,8 +451,8 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 - 截图、读树、手势和通道调用超时；
 - 每次生成过程中的动作预算和速率限制；
 - 默认仅允许显式配置的测试包名，当前为独立测试应用 `com.psyche.kelivo.phoneagent`；开发者只能在私有 Mod 中编辑白名单；
-- 输入与观察请求拒绝可取得包名的系统窗口、硬基线包与不允许的窗口类型（`system_window_denied`）；无可访问 root 的权限弹窗保持 `no_window` 并只做条件式人工提示；锁屏/息屏时读树、截图和输入都返回 `device_locked`；**当前实现**中读树和截图**不检查**构建期包名白名单，仍可观察普通第三方应用的前台窗口（M32 已定（用户拍板）、未实现：未批准应用的读树与截图改为返回 `permission_required` 与只含应用身份的结果，见 7.5.4）；
-- `home`/`recents` 执行后前台会离开白名单，**后续输入（包括 `back`）被拒绝**，模型无法自行把测试应用切回前台，需要用户或宿主动作恢复。但**读树与截图仍会成功**：API35 实测 `home`/`recents` 后前台是启动器（`com.google.android.apps.nexuslauncher`，`TYPE_APPLICATION`），而观察边界不判构建期白名单，只判硬基线与窗口类型。反过来说，“前台是 systemui / `TYPE_SYSTEM` 所以读树被拒”只适用于**通知栏**场景；而且由于 `com.android.systemui` 本身就在硬基线集合内、硬基线判定先于窗口类型，该场景返回的标识是 `hard_baseline`，**不会**是 `window_type_system`（详见 7.6 风险 2 的实测修正）。
+- 输入与观察请求拒绝可取得包名的系统窗口、硬基线包与不允许的窗口类型（`system_window_denied`）；无可访问 root 的权限弹窗保持 `no_window` 并只做条件式人工提示；锁屏/息屏时读树、截图和输入都返回 `device_locked`；**M33 起读树与截图也判构建期 deny 清单与用户白名单**，未批准返回 `permission_required` 且只带应用身份（见 7.5.4）；
+- `home`/`recents` 执行后前台会离开白名单，**后续输入（包括 `back`）被拒绝**，模型无法自行把测试应用切回前台，需要用户或宿主动作恢复。API35 实测 `home`/`recents` 后前台是启动器（`com.google.android.apps.nexuslauncher`，`TYPE_APPLICATION`）；它属未批准第三方应用，**读树返回 `permission_required` 且只回身份**（M33 起观察也判用户白名单）。反过来说，“前台是 systemui / `TYPE_SYSTEM` 所以读树被拒”只适用于**通知栏**场景；而且由于 `com.android.systemui` 本身就在硬基线集合内、硬基线判定先于窗口类型，该场景返回的标识是 `hard_baseline`，**不会**是 `window_type_system`（详见 7.6 风险 2 的实测修正）。
 - 结构化错误包含可执行的下一步，而非只返回笼统失败。
 
 ### 7.3 工具选择与服务授权边界
@@ -690,7 +690,7 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 - 这一形态比旧断言**更强**，不是更弱：旧写法只要求“读到的包名不是测试应用”，新写法要求观察边界给出**固定的来源标识**，等于同时验证了“前台确实切换了”和“观察层确实按新边界拒绝”。
 
 - （c）home/recents 用例（`:350-385` 经 `_expectSystemNavigationDenied`，helper 在 `:1010` 起）：**仍然读树**，但改用的是 `_waitForForegroundLeftApp`（`phone_agent_exception_test.dart:1108-1146`）——它轮询 `_tryTreePayload` 并接受三种结果之一：(1) 读树**成功**且 `package_name` 不是测试应用（实测 home/recents 落在启动器时的正常情况）；(2) `no_window`；(3) `system_window_denied` 且带真实观察标识（`hard_baseline` / `window_type_system` / `window_type_overlay` / `window_type_split_divider`）。**`window_type_unknown` 明确不在可接受集合内**，因为它表示窗口列表尚未稳定，把它当证据会吞掉真实时序缺陷。随后直接断言节点 `tap` 与 `back` 的错误码，并按“硬基线集合成员”区分 `system_window_denied` / `package_not_allowed`，要求两次判定一致；无法确定时不得退化成“只要报错就算通过”。
-- **为什么不能写成“不再读树取包名”**：实测 home/recents 后前台是启动器（可观察、读树成功），所以“前台已离开本应用”的**正向证据恰恰来自读树返回的包名**；只有前台不可观察时才退化为标识断言。**注意这条只对 M28 的观察边界成立**：M32 契约（批准=读＋操作一体，未实现）落地后，启动器属第三方、非 deny 成员、未批准，读树会返回 `permission_required`（只回身份），该分支判据必须同步改写（见上文「契约实现时的测试影响」）。
+- **为什么不能写成“不再读树取包名”**：实测 home/recents 后前台是启动器（可观察、读树成功），所以“前台已离开本应用”的**正向证据恰恰来自读树返回的包名**；只有前台不可观察时才退化为标识断言。**注意这条只对 M28 当轮的观察边界成立**：M33 起批准=读＋操作一体已实现，启动器属第三方、非 deny 成员、未批准，读树返回 `permission_required`（只回身份）。因此 `_waitForForegroundLeftApp` 的接受集合**已经包含** `permission_required`（且要求能从消息里解析出非本应用包名），该分支判据已同步改写（见上文「M33 同批的测试影响」）。
 
 
 不受影响、不得顺手改动：`phone_agent_test.dart`、异常套件的其余读树点（均在测试应用自身前台）、权限窗口用例（`no_window` 而非 `system_window_denied`）。

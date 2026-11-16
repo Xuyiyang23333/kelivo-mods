@@ -419,7 +419,7 @@ flutter gen-l10n
 - `system_window_denied` 同时约束输入与观察；`package_not_allowed` **M33 起也约束输入与观察**，只对构建期 deny 清单成员出现（清单初始为空），排在用户白名单之前。输入侧只允许 `TYPE_APPLICATION` 窗口；观察侧（读树与截图）允许 `TYPE_APPLICATION` 与 `TYPE_INPUT_METHOD`，其余类型返回 `system_window_denied` 并在消息里带 `window_type_*` 标识。**M33 起未批准应用的读树/截图返回 `permission_required` 且只带应用身份**（包名＋签名前 8 位），不建立观测、不占 `treeBudget`、不调用 `takeScreenshot`；签名解析失败时消息只写 `signing_unavailable`。无可访问 root 的权限弹窗读树/截图/输入均为 `no_window` 并带条件式人工提示。
 - 应用白名单与批准（上文「应用白名单与批准」）**门控与签名绑定已由 M33 实现，批准卡片/通知/Mods 白名单页/首次隐私确认已由 M34 实现，审计元数据已由 M35 实现**；**仍未实现**的是任务控制（同时只一个任务控制手机）与结果未知语义的专门文案。本文档中“会弹卡片”“会提示一次”的描述现在都有实现，但**全部未经设备验证**；API 33+ 通知权限被拒时只有聊天卡片可用。
 - 观察边界在厂商 ROM 上可能反向误伤：窗口类型只能按 `windowId` 从 `windows` 解析，解析失败一律按 `UNKNOWN` 拒绝观察，因此正常应用上的读树/截图也可能返回 `system_window_denied`；输入法窗口允许观察，但读树可能只拿到键盘与候选词而非目标应用界面（未实测）。
-- `home`/`recents` 后前台离开白名单，**后续输入（包括 `back`）被拒绝**，模型无法自行恢复，需要用户或宿主切回测试应用。**当前实现**下**读树与截图仍会成功**：API35 实测 `home`/`recents` 后前台是启动器（`com.google.android.apps.nexuslauncher`，`TYPE_APPLICATION`），观察边界不判构建期白名单。M32 契约（未实现）落地后，未批准的启动器读树改为返回 `permission_required`，这条描述随之改变。只有**通知栏**这类场景才会被观察层拒绝，且 systemui 属硬基线、硬基线先于窗口类型判定，标识是 `hard_baseline` 而非 `window_type_system`。
+- `home`/`recents` 后前台离开白名单，**后续输入（包括 `back`）被拒绝**，模型无法自行恢复，需要用户或宿主切回测试应用。API35 实测 `home`/`recents` 后前台是启动器（`com.google.android.apps.nexuslauncher`，`TYPE_APPLICATION`）；它属未批准第三方应用，**读树返回 `permission_required`（只回身份）**——M33 起观察也判构建期 deny 清单与用户白名单。只有**通知栏**这类场景才会被观察层以 `system_window_denied` 拒绝，且 systemui 属硬基线、硬基线先于窗口类型判定，标识是 `hard_baseline` 而非 `window_type_system`。
 - 应用白名单与批准的**门控与签名绑定已由 M33 实现**（本地白名单、幂等写入、撤销即时、deny 清单、预批准条目、观察与输入双路径门控）；**批准卡片、通知栏 action、Mods 页白名单页与首次启用隐私确认已由 M34 实现**；**审计元数据已由 M35 实现**（七字段落盘、30 天/2000 条滚动、不进入工具结果与模型、无读取界面）。**但都没有任何设备证据**；**任务控制与结果未知语义仍未实现**。API 33+ 通知权限被拒或 API 24–25 没有通知渠道时，聊天卡片是唯一批准入口。`QUERY_ALL_PACKAGES` 声明后交付代码能否在设备上解析任意前台包签名未实测。契约全文见 `docs/phone-agent-plan.md` 7.5.4 与 7.5.9–7.5.14。
 - `SecureWindowFixtureActivity` 只是 debug 测试夹具，不是产品能力；release 不包含该 Activity。
 - API35 模拟器已验证旋转、home/recents、锁屏、服务禁用/重启和权限弹窗保守拒绝（读树/截图/输入均 `no_window` + 条件式人工提示，未执行手势/系统导航）；物理 MIUI API31 真机已验证旋转和物理 `FLAG_SECURE`，但锁屏、home/recents、服务禁用/重启和权限弹窗未在物理设备运行，不能从模拟器结果推断；原生超时仍无法在设备上确定性触发。
@@ -535,7 +535,7 @@ flutter test integration_test/phone_agent_exception_test.dart -d <android-device
 
 **M32（2026-11-15）只改文档**：`docs/phone-agent-plan.md`（7.5.1/7.5.2/7.5.4 反向、新增 7.5.9–7.5.14、7.6 风险 3/4/5、10.1/10.2、阶段 P6）、`AGENTS.md`、本文「应用白名单与批准」小节与已知限制、`docs/next-session-handoff.md`。**未改产品代码、测试或 `mod.json`**；`dart tool/mod_loader.dart plan` 复核 `modsetHash` 仍为 `474262a402cca985f216636ac8dbd0b8af9ffd31507acb7feb1614a103853fac`（文档不进 modset），未构建 APK、未接设备。因此本节的设备与 APK 记录仍对应 M32 之前的代码，不能用来宣称批准契约已验证。
 
-### M28 观察边界 + M30 设备回归补齐（API35 模拟器 + 物理 MIUI API31）
+### M28 观察边界 + M30 设备回归补齐（M28 当轮；M33 起已判白名单）（API35 模拟器 + 物理 MIUI API31）
 
 **M28 实现了观察边界**：`PackagePolicy.requireObservable(packageName, windowType)`（`plugin/android/src/main/kotlin/com/kelivo/phoneagent/AppBoundary.kt`）的判定顺序是 `no_window` → 静态硬基线 → 观察窗口类型 `{APPLICATION, INPUT_METHOD}`，**不判用户白名单、不查询角色**；接入点是 `readTree`（仅 `offset == 0`）与 `captureScreenshot`（取前台窗口 → 边界 → 全窗口密码遮挡遍历 → 截图，三段独立）。因此读设置页、通知栏、输入法窗口的行为自 M28 起与 M27 不同。
 
