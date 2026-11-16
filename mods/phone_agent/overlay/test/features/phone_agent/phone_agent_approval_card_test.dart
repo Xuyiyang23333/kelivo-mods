@@ -242,4 +242,31 @@ void main() {
 
     await clearPending(tester);
   });
+  testWidgets('removing the request leaves no residual blank in the tool message', (
+    tester,
+  ) async {
+    await registerCall();
+    await pumpToolMessage(tester);
+
+    final heightWithCard = tester.getSize(find.byType(ChatMessageWidget)).height;
+    expect(find.byType(PhoneAgentApprovalCard), findsOneWidget);
+
+    // 通知栏批准等外部路径直接改原生状态：本地 refresh 后卡片消失，
+    // 内容区必须回到“只有头部”的高度，而不是留一块空白。
+    pending.clear();
+    await PhoneAgentApprovalService.instance.refresh();
+    // 服务层是异步的：让 microtask 与 ListenableBuilder 一起跑完再断言。
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    // 卡片 widget 仍挂在树上（内部渲染 SizedBox.shrink），关键是没有残留空白：
+    // 消息高度必须收缩回只有头部的高度。
+    expect(find.textContaining('com.example.app'), findsNothing);
+    final heightWithoutCard = tester
+        .getSize(find.byType(ChatMessageWidget))
+        .height;
+    expect(heightWithoutCard, lessThan(heightWithCard));
+
+    await clearPending(tester);
+  });
 }

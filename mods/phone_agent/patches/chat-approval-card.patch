@@ -1,5 +1,5 @@
 diff --git a/lib/features/chat/widgets/chat_message_widget.dart b/lib/features/chat/widgets/chat_message_widget.dart
-index 8be8c35..6f41efa 100644
+index 8be8c35..ada78ca 100644
 --- a/lib/features/chat/widgets/chat_message_widget.dart
 +++ b/lib/features/chat/widgets/chat_message_widget.dart
 @@ -93,6 +93,7 @@ import 'chat_suggestion_bubbles.dart';
@@ -10,38 +10,94 @@ index 8be8c35..6f41efa 100644
  import 'tool_detail_text_section.dart';
  import 'produced_files_row.dart';
  import 'workspace_tool_detail.dart';
-@@ -6682,15 +6683,30 @@ class _ChainOfThoughtToolStepState extends State<_ChainOfThoughtToolStep>
+@@ -5055,6 +5056,7 @@ class _ChainOfThoughtCardState extends State<_ChainOfThoughtCard>
+     required bool showToolResultSummary,
+     required bool hideToolResultImages,
+     required bool pendingApproval,
++    required bool phoneAgentApproval,
+     required double textScale,
+   }) {
+     return Object.hash(
+@@ -5068,6 +5070,9 @@ class _ChainOfThoughtCardState extends State<_ChainOfThoughtCard>
+       showToolResultSummary,
+       hideToolResultImages,
+       pendingApproval,
++      // Phone Agent 批准请求的有/无必须让 _CachedTimelineStep 重建：否则卡片撤
++      // 下后缓存仍返回旧子树，内容区残留空白。
++      phoneAgentApproval,
+       textScale,
+     );
+   }
+@@ -5325,6 +5330,10 @@ class _ChainOfThoughtCardState extends State<_ChainOfThoughtCard>
+                         showToolResultSummary: showToolResultSummary,
+                         hideToolResultImages: hideToolResultImages,
+                         pendingApproval: pendingApprovalIds.contains(part.id),
++                        phoneAgentApproval: PhoneAgentApprovalCard.pendingExists(
++                          toolCallId: part.id,
++                          conversationId: widget.conversationId,
++                        ),
+                         textScale: textScale,
+                       ),
+                       builder: () {
+@@ -6682,22 +6691,41 @@ class _ChainOfThoughtToolStepState extends State<_ChainOfThoughtToolStep>
              ),
            )
          : null;
-+    // Phone Agent 应用批准卡片是否存在，独立于「显示工具结果摘要」设置与图片：
+-    final Widget? content =
+-        (summaryContent == null &&
+-            imageThumbnails == null &&
+-            !(isPendingApproval && !isWorkspace))
+-        ? null
+-        : Column(
+-            crossAxisAlignment: CrossAxisAlignment.start,
+-            children: [
+-              if (summaryContent != null) summaryContent,
+-              if (isPendingApproval && !isWorkspace)
+-                SwitchToFullAccess(conversationId: widget.conversationId),
+-              if (summaryContent != null && imageThumbnails != null)
+-                const SizedBox(height: 8),
+-              if (imageThumbnails != null) imageThumbnails,
+-            ],
+-          );
++    // Phone Agent 应用批准卡片是否存在，独立于「显示工具结果摘要」设置与图片。
 +    // 未批准时工具结果是纯文本错误，默认设置下 summaryContent 为 null，若不参与
-+    // 这里的判定，卡片永远进不了 widget 树。
-+    final bool hasPhoneAgentApproval =
-+        PhoneAgentApprovalCard.pendingExists(
-+          toolCallId: widget.part.id,
-+          conversationId: widget.conversationId,
-+        );
-     final Widget? content =
-         (summaryContent == null &&
-             imageThumbnails == null &&
-+            !hasPhoneAgentApproval &&
-             !(isPendingApproval && !isWorkspace))
-         ? null
-         : Column(
-             crossAxisAlignment: CrossAxisAlignment.start,
-             children: [
-               if (summaryContent != null) summaryContent,
-+              // Phone Agent 的应用批准卡片：只在该工具调用的审批请求仍 pending 时
-+              // 渲染；没有请求时组件本身返回 SizedBox.shrink()，不占位。
-+              PhoneAgentApprovalCard(
-+                toolCallId: widget.part.id,
-+                conversationId: widget.conversationId,
-+              ),
-               if (isPendingApproval && !isWorkspace)
-                 SwitchToFullAccess(conversationId: widget.conversationId),
-               if (summaryContent != null && imageThumbnails != null)
-@@ -6745,31 +6761,37 @@ class _ChainOfThoughtToolStepState extends State<_ChainOfThoughtToolStep>
++    // 判定，卡片永远进不了 widget 树。
++    //
++    // 判定必须在 ListenableBuilder 的 builder 内**重新求值**：请求撤下后若继续用
++    // 外部捕获的旧值，`content` 仍非 null，助手时间线会残留约 12px 空白。
++    Widget? buildContent() {
++      final hasPhoneAgentApproval = PhoneAgentApprovalCard.pendingExists(
++        toolCallId: widget.part.id,
++        conversationId: widget.conversationId,
++      );
++      if (summaryContent == null &&
++          imageThumbnails == null &&
++          !hasPhoneAgentApproval &&
++          !(isPendingApproval && !isWorkspace)) {
++        return null;
++      }
++      return Column(
++        crossAxisAlignment: CrossAxisAlignment.start,
++        children: [
++          if (summaryContent != null) summaryContent,
++          // Phone Agent 的应用批准卡片：只在该工具调用的审批请求仍 pending 时
++          // 渲染；没有请求时组件本身返回 SizedBox.shrink()，不占位。
++          PhoneAgentApprovalCard(
++            toolCallId: widget.part.id,
++            conversationId: widget.conversationId,
++          ),
++          if (isPendingApproval && !isWorkspace)
++            SwitchToFullAccess(conversationId: widget.conversationId),
++          if (summaryContent != null && imageThumbnails != null)
++            const SizedBox(height: 8),
++          if (imageThumbnails != null) imageThumbnails,
++        ],
++      );
++    }
+ 
+     final extra = approvalRequest != null
+         ? Row(
+@@ -6745,31 +6773,46 @@ class _ChainOfThoughtToolStepState extends State<_ChainOfThoughtToolStep>
          ? ToolPermissionResultStatus(metadata: widget.part.metadata)
          : null;
  
@@ -74,7 +130,15 @@ index 8be8c35..6f41efa 100644
 +    // 会留一块空白（父级仍以为有内容）。
 +    return ListenableBuilder(
 +      listenable: PhoneAgentApprovalCard.listenable,
-+      builder: (context, _) => _TimelineStepShell(
++      builder: (context, _) {
++        // 每次重建都重新求值：撤下后 content 必须变回 null，否则残留空白。
++        final content = buildContent();
++        final hasPhoneAgentApproval = content != null &&
++            PhoneAgentApprovalCard.pendingExists(
++              toolCallId: widget.part.id,
++              conversationId: widget.conversationId,
++            );
++        return _TimelineStepShell(
 +        icon: icon,
 +        label: label,
 +        isFirst: widget.isFirst,
@@ -100,11 +164,12 @@ index 8be8c35..6f41efa 100644
 +            content != null ||
 +            (isWorkspace &&
 +                (widget.part.loading || isPendingApproval || content != null)),
-+      ),
++        );
++      },
      );
    }
  }
-@@ -7182,6 +7204,12 @@ class _ToolCallItemState extends State<_ToolCallItem> {
+@@ -7182,6 +7225,12 @@ class _ToolCallItemState extends State<_ToolCallItem> {
                  ),
                ),
              ],
