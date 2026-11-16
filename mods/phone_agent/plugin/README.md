@@ -21,17 +21,22 @@ final agent = KelivoPhoneAgent.instance;
 
 final PhoneAgentStatus status = await agent.status();
 await agent.openAccessibilitySettings();
-final PhoneAgentScreenshot shot = await agent.screenshot();
+final PhoneAgentScreenshot shot = await agent.screenshot(
+  assistantId: 'assistant-a',
+  conversationId: 'conversation-1',
+);
 await agent.clearScreenshot();
 final Map<String, dynamic> tree = await agent.readTree(
   offset: 0,
   maxNodes: 120,
   interactiveOnly: false,
+  assistantId: 'assistant-a',
+  conversationId: 'conversation-1',
 );
 final Map<String, dynamic> result = await agent.input({
   'action': 'tap',
   'node_id': 'n3',
-});
+}, assistantId: 'assistant-a', conversationId: 'conversation-1');
 
 final List<PhoneAgentApprovedApp> approved = await agent.approvedApps();
 await agent.approveApp('com.example.app', sourceAssistantId: 'assistant-a');
@@ -50,10 +55,10 @@ await agent.revokeApp('com.example.app');
 |---|---|---|
 | `status` | 无 | `{supported, enabled, connected, androidSdkInt}` |
 | `openAccessibilitySettings` | 无 | `null` |
-| `screenshot` | 无 | `{bytes: ByteArray, imageWidth, imageHeight, screenWidth, screenHeight, packageName}` |
+| `screenshot` | `{assistant_id?, conversation_id?}` | `{bytes: ByteArray, imageWidth, imageHeight, screenWidth, screenHeight, packageName}` |
 | `clearScreenshot` | 无 | `{cleared: true}` |
-| `readTree` | `{offset, max_nodes, interactive_only}` | `{offset, next_offset, total, truncated, text_truncated, package_name, width, height, nodes}` |
-| `input` | `{action, node_id?, text?, x?, y?, end_x?, end_y?, duration_ms?, direction?}` | `{success, action, message}` |
+| `readTree` | `{offset, max_nodes, interactive_only, assistant_id?, conversation_id?}` | `{offset, next_offset, total, truncated, text_truncated, package_name, width, height, nodes}` |
+| `input` | `{action, node_id?, text?, x?, y?, end_x?, end_y?, duration_ms?, direction?, assistant_id?, conversation_id?}` | `{success, action, message}` |
 | `approvedApps` | 无 | `{apps: [{package_name, signing_prefix, approved_at, last_approved_at, source_assistant_id}]}` |
 | `approveApp` | `{package_name, source_assistant_id?, expected_signing_sha256?}` | `{package_name, signing_prefix, approved_at, outcome: "approved"}` |
 | `revokeApp` | `{package_name}` | `{package_name, revoked}` |
@@ -62,6 +67,20 @@ await agent.revokeApp('com.example.app');
 
 - `approveApp` 写入幂等：同一 `(包名, 签名集合)` 重复批准只更新最后批准时间并保留首次来源，不产生第二条记录。写入前**重新解析当前签名**——解析失败返回 `signing_unavailable`，与 `expected_signing_sha256` 不一致返回 `signing_mismatch`，两者都**不写入**（fail closed）。不传 `expected_signing_sha256` 表示“按当前签名写入”。
 - `revokeApp` 立即生效：下一次判定即重新读存储。撤销阻止新的读树（`offset == 0`）、全部截图与全部输入；但它不撤回已发出的动作，也不清理已建立的树观测——已建立观测在 TTL 内 `offset > 0` 分页仍会回放撤销前的旧树（见下方原生行为的分页条目）。
+
+### 审计元数据（M35）
+
+`readTree` / `screenshot` / `input` 的可选参数 `assistant_id`、`conversation_id` 只用于原生侧的**审计元数据**，不参与任何授权判定（批准是按应用、全局共享的，见应用白名单）。Dart 客户端只在非空时发送；原生侧缺失或畸形时记为未知（null），**不伪造**。身份只能来自宿主调用侧：`input()` 在展开模型参数之前剔除这两个键（与 `snapshot_id` 同一处防护），模型自带的同名参数不会存活，宿主值永远优先。
+
+审计文件是 `noBackupFilesDir/phone_agent_audit.tsv`，每条记录**恰好七列**：时间戳、助手 id、会话 id、包名、签名证书 SHA-256 前 8 位、动作类型、结果码。
+
+- 动作类型是固定 token：`readTree`、`screenshot`、`input.tap`、`input.long_press`、`input.set_text`、`input.scroll`、`input.swipe`、`input.back`、`input.home`、`input.recents`；未知的输入动作降级为 `input`。**工具参数不进入记录**——节点 id、输入文本、坐标、时长、方向都没有落脚点。
+- **不记录**节点文本、输入文本、密码内容、截图或图片字节、界面内容摘要、坐标数值、窗口标题。
+- 滚动保留 **30 天或最近 2000 条，先到者生效**（恰好 30 天仍保留）。损坏行被丢弃而不是被信任。
+- 只在结果收口处记录一次：成功写 `ok`，失败写既有结构化错误码（如 `system_window_denied`、`permission_required`、`busy`、`timeout`），不新增审计专用错误码。取不到前台窗口的失败（`no_window`、`device_locked`）包名为空。
+- **不产生记录的两类调用**：`interrupted`（服务中断、`onUnbind`、`onDestroy` 作废的调用，没有可归属的结果）与服务未连接（调用在建立审计上下文之前就返回，一条记录都没有）。白名单方法（`approvedApps` / `approveApp` / `revokeApp`）也不审计。
+- 审计失败**不阻断工具主路径**：构建、签名解析、读取与写入全程不外抛，失败只在本地计数，工具结果、白名单判定与边界策略都不受影响。
+- 本地状态：不进仓库、不进聊天备份、不进入工具结果、不发给模型、不上传、不同步。**没有读取审计的通道方法，也没有界面**。
 
 节点字段：`node_id`、`bounds`、`class`、`parent_id?`、`text?`、`description?`、`hint?`、`state_description?`、`resource_id?`、`enabled`、`clickable?`、`long_clickable?`、`editable?`、`supports_set_text?`、`scrollable?`、`checkable?`、`checked?`、`focused?`、`selected?`、`password?`。密码节点不输出文本、描述、提示和状态描述，也不遍历子树。
 
@@ -134,7 +153,7 @@ flutter test
 ./gradlew :kelivo_phone_agent:testDebugUnitTest
 ```
 
-Dart 测试覆盖通道参数、默认值、错误映射、超时、`clearScreenshot`、`snapshot_id` 拒绝，以及白名单通道 `approvedApps` / `approveApp` / `revokeApp`（含畸形载荷、可选参数、本地校验与 `signing_mismatch` 映射）。Kotlin 测试覆盖有界 DFS、密码子树、文本预算、分页、TTL、窗口失效、句柄重验、清空截图后句柄复用、坐标换算、边界策略（硬基线、窗口类型两层、deny 清单、用户白名单、预批准）、签名身份与白名单存储（多签名、幂等、撤销即时、损坏行丢弃）、预算、截图限频、涂黑坐标、宽高比校验、多窗口密码收集和截图错误映射。
+Dart 测试覆盖通道参数、默认值、错误映射、超时、`clearScreenshot`、`snapshot_id` 拒绝，白名单通道 `approvedApps` / `approveApp` / `revokeApp`（含畸形载荷、可选参数、本地校验与 `signing_mismatch` 映射），以及审计身份参数转发（含空白值不发送、无身份时载荷与旧协议一致）。Kotlin 测试覆盖有界 DFS、密码子树、文本预算、分页、TTL、窗口失效、句柄重验、清空截图后句柄复用、坐标换算、边界策略（硬基线、窗口类型两层、deny 清单、用户白名单、预批准）、签名身份与白名单存储（多签名、幂等、撤销即时、损坏行丢弃）、预算、截图限频、涂黑坐标、宽高比校验、多窗口密码收集和截图错误映射，以及审计日志（字段集合精确断言含七项禁用字段、TSV 列数、30 天与 2000 条滚动、损坏行丢弃、写入/读取失败不阻断、签名解析抛异常降级为 null）。
 
 ## 未验证项与限制
 
@@ -147,6 +166,7 @@ Dart 测试覆盖通道参数、默认值、错误映射、超时、`clearScreen
 - 整屏 `AccessibilityService.takeScreenshot(Display.DEFAULT_DISPLAY)` 不保证对 `FLAG_SECURE` 报错：官方 `TakeScreenshotCallback.onFailure` 文档列出的错误码不含 `ERROR_TAKE_SCREENSHOT_SECURE_WINDOW`；该码是 API 34+ 窗口级 `takeScreenshotOfWindow` 的错误，AOSP 整屏路径没有 secure 检查。API35 模拟器实测同 UID/不同 UID 的 secure 夹具曾返回成功黑图，也观察到成功内容图；插件不根据像素猜 secure，不承诺不发送黑图，正常黑色页面保留；平台明确报错时仍映射为 `screenshot_blocked`，不发送图片。
 - secure 窗口的树在 API35 夹具上可读，但不是绝对保证；密码字段、自定义 View 和窗口变化仍会影响树。
 - 密码遮挡依赖应用正确标记 `isPassword`；自定义 View 和 WebView 可能遗漏，只能称为尽力而为。
+- **审计元数据（M35）没有设备证据**：真实设备上的文件写入、进程重启后的追加与 2000 条滚动、多签名包的前缀取值均未实测；M35 未构建 APK、未接设备。审计只写七项元数据，但**不得据此宣称审计不涉及隐私**——它仍能推断“用过哪些应用”。
 - **白名单同时限制输入与观察**（M33 起）：未批准应用的读树与截图返回 `permission_required` 且只回应用身份，不建立观测、不截图；批准后可以读树、截图并输入，同一 `(包名, 签名集合)` 一次批准覆盖这三种能力。已批准应用内部仍可能发生不可逆业务操作。
 - 手势 `onCompleted` 只代表系统接受并完成手势，不代表业务成功。
 - 后台悬浮胶囊可能出现在截图中或拦截坐标手势，首版不处理。

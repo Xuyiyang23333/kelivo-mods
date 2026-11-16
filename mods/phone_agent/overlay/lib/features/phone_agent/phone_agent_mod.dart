@@ -143,6 +143,10 @@ class PhoneAgentMod extends ToolMod {
           supportsImageInput:
               _imageSupportByConversation[context.conversationId ?? ''] ??
               false,
+          // 审计元数据的助手/会话身份。对话 id 在上游上下文里可得；助手 id 取当前
+          // 助手快照（可能已过期，只是审计标签，不参与任何授权判定）。
+          assistantId: context.readCurrentAssistant()?.id,
+          conversationId: context.conversationId,
         );
       } on PhoneAgentToolFailure catch (failure) {
         return failure.toToolResult(tool: name);

@@ -90,7 +90,35 @@ abstract interface class PhoneAgentClient {
   Future<Map<String, dynamic>> input(Map<String, dynamic> arguments);
 }
 
-class PluginPhoneAgentClient implements PhoneAgentClient {
+/// Optional capability: forward the executor identity that native code writes
+/// into its local audit metadata.
+///
+/// Audit identity is deliberately **not** part of [PhoneAgentClient]: a client
+/// that cannot carry it simply leaves the columns empty, and native code records
+/// them as unknown instead of inventing a value. Only the production client
+/// implements this.
+abstract interface class PhoneAgentAuditedClient implements PhoneAgentClient {
+  Future<PhoneAgentCapture> screenshotAudited({
+    String? assistantId,
+    String? conversationId,
+  });
+
+  Future<Map<String, dynamic>> readTreeAudited({
+    int offset = 0,
+    int maxNodes = 120,
+    bool interactiveOnly = false,
+    String? assistantId,
+    String? conversationId,
+  });
+
+  Future<Map<String, dynamic>> inputAudited(
+    Map<String, dynamic> arguments, {
+    String? assistantId,
+    String? conversationId,
+  });
+}
+
+class PluginPhoneAgentClient implements PhoneAgentAuditedClient {
   const PluginPhoneAgentClient();
 
   @override
@@ -109,8 +137,18 @@ class PluginPhoneAgentClient implements PhoneAgentClient {
       KelivoPhoneAgent.instance.openAccessibilitySettings();
 
   @override
-  Future<PhoneAgentCapture> screenshot() async {
-    final capture = await KelivoPhoneAgent.instance.screenshot();
+  Future<PhoneAgentCapture> screenshot() =>
+      screenshotAudited();
+
+  @override
+  Future<PhoneAgentCapture> screenshotAudited({
+    String? assistantId,
+    String? conversationId,
+  }) async {
+    final capture = await KelivoPhoneAgent.instance.screenshot(
+      assistantId: assistantId,
+      conversationId: conversationId,
+    );
     return PhoneAgentCapture(
       bytes: capture.bytes,
       imageWidth: capture.imageWidth,
@@ -138,8 +176,36 @@ class PluginPhoneAgentClient implements PhoneAgentClient {
   }
 
   @override
+  Future<Map<String, dynamic>> readTreeAudited({
+    int offset = 0,
+    int maxNodes = 120,
+    bool interactiveOnly = false,
+    String? assistantId,
+    String? conversationId,
+  }) {
+    return KelivoPhoneAgent.instance.readTree(
+      offset: offset,
+      maxNodes: maxNodes,
+      interactiveOnly: interactiveOnly,
+      assistantId: assistantId,
+      conversationId: conversationId,
+    );
+  }
+
+  @override
   Future<Map<String, dynamic>> input(Map<String, dynamic> arguments) =>
       KelivoPhoneAgent.instance.input(arguments);
+
+  @override
+  Future<Map<String, dynamic>> inputAudited(
+    Map<String, dynamic> arguments, {
+    String? assistantId,
+    String? conversationId,
+  }) => KelivoPhoneAgent.instance.input(
+    arguments,
+    assistantId: assistantId,
+    conversationId: conversationId,
+  );
 }
 
 /// Kelivo-side adapter around the independent phone agent plugin.
@@ -159,8 +225,26 @@ class PhoneAgentService {
   Future<void> openAccessibilitySettings() =>
       _run(client.openAccessibilitySettings, 'open accessibility settings');
 
-  Future<PhoneAgentCapture> screenshot() =>
-      _run(client.screenshot, 'screenshot');
+  /// Screenshot with optional audit identity.
+  ///
+  /// [assistantId] / [conversationId] only feed the native audit metadata. They
+  /// never reach the model, the tool result, or any upload; a client that cannot
+  /// carry them leaves the columns unknown rather than inventing a value.
+  Future<PhoneAgentCapture> screenshot({
+    String? assistantId,
+    String? conversationId,
+  }) {
+    final audited = client;
+    return _run(
+      () => audited is PhoneAgentAuditedClient
+          ? audited.screenshotAudited(
+              assistantId: assistantId,
+              conversationId: conversationId,
+            )
+          : audited.screenshot(),
+      'screenshot',
+    );
+  }
 
   Future<void> clearScreenshot() =>
       _run(client.clearScreenshot, 'clear the screenshot observation');
@@ -169,19 +253,45 @@ class PhoneAgentService {
     int offset = 0,
     int maxNodes = 120,
     bool interactiveOnly = false,
+    String? assistantId,
+    String? conversationId,
   }) {
+    final audited = client;
     return _run(
-      () => client.readTree(
-        offset: offset,
-        maxNodes: maxNodes,
-        interactiveOnly: interactiveOnly,
-      ),
+      () => audited is PhoneAgentAuditedClient
+          ? audited.readTreeAudited(
+              offset: offset,
+              maxNodes: maxNodes,
+              interactiveOnly: interactiveOnly,
+              assistantId: assistantId,
+              conversationId: conversationId,
+            )
+          : audited.readTree(
+              offset: offset,
+              maxNodes: maxNodes,
+              interactiveOnly: interactiveOnly,
+            ),
       'read the screen tree',
     );
   }
 
-  Future<Map<String, dynamic>> input(Map<String, dynamic> arguments) =>
-      _run(() => client.input(arguments), 'input');
+  Future<Map<String, dynamic>> input(
+    Map<String, dynamic> arguments, {
+    String? assistantId,
+    String? conversationId,
+  }) {
+    final audited = client;
+    return _run(
+      () => audited is PhoneAgentAuditedClient
+          ? audited.inputAudited(
+              arguments,
+              assistantId: assistantId,
+              conversationId: conversationId,
+            )
+          : audited.input(arguments),
+      'input',
+    );
+  }
 
   Future<T> _run<T>(Future<T> Function() call, String operation) async {
     try {

@@ -26,8 +26,14 @@ class PhoneAgentClient {
     await _invoke('openAccessibilitySettings');
   }
 
-  Future<PhoneAgentScreenshot> screenshot() async {
-    final map = await _invokeMap('screenshot');
+  Future<PhoneAgentScreenshot> screenshot({
+    String? assistantId,
+    String? conversationId,
+  }) async {
+    final map = await _invokeMap(
+      'screenshot',
+      auditArguments(assistantId, conversationId),
+    );
     return PhoneAgentScreenshot.fromMap(map);
   }
 
@@ -36,10 +42,16 @@ class PhoneAgentClient {
     await _invoke('clearScreenshot');
   }
 
+  /// 读取当前窗口节点。`offset == 0` 创建新观测并重新编号。
+  ///
+  /// [assistantId] / [conversationId] 只用于原生侧审计元数据；调用方拿不到就传 null，
+  /// 原生侧如实记为缺失，不伪造。
   Future<Map<String, dynamic>> readTree({
     int offset = 0,
     int maxNodes = 120,
     bool interactiveOnly = false,
+    String? assistantId,
+    String? conversationId,
   }) async {
     if (offset < 0) {
       throw const PhoneAgentException(
@@ -57,10 +69,15 @@ class PhoneAgentClient {
       'offset': offset,
       'max_nodes': maxNodes,
       'interactive_only': interactiveOnly,
+      ...auditArguments(assistantId, conversationId),
     });
   }
 
-  Future<Map<String, dynamic>> input(Map<String, dynamic> arguments) async {
+  Future<Map<String, dynamic>> input(
+    Map<String, dynamic> arguments, {
+    String? assistantId,
+    String? conversationId,
+  }) async {
     if (arguments.containsKey('snapshot_id')) {
       throw const PhoneAgentException(
         'invalid_argument',
@@ -75,7 +92,15 @@ class PhoneAgentClient {
         'action is required.',
       );
     }
-    return _invokeMap('input', Map<String, dynamic>.from(arguments));
+    // 审计身份只能来自宿主调用侧：模型参数里的同名键在这里剔除，否则宿主取不到
+    // 身份时模型自带的 assistant_id / conversation_id 会被原生侧写成审计事实。
+    final payload = Map<String, dynamic>.from(arguments)
+      ..remove(assistantIdKey)
+      ..remove(conversationIdKey);
+    return _invokeMap('input', <String, dynamic>{
+      ...payload,
+      ...auditArguments(assistantId, conversationId),
+    });
   }
 
   /// 已获用户批准的应用列表（不含构建配置的预批准条目）。
@@ -168,5 +193,24 @@ class PhoneAgentClient {
         error.message ?? 'The phone agent failed without a message.',
       );
     }
+  }
+
+  /// 审计身份参数的键名。宿主侧是唯一合法来源：`input()` 会先从模型参数里剔除
+  /// 这两个键，再叠加宿主值。
+  static const String assistantIdKey = 'assistant_id';
+  static const String conversationIdKey = 'conversation_id';
+
+  /// 审计身份参数。两项都只在非空时发送；原生侧缺失即如实记为未知，
+  /// 由原生侧自行截断与清洗，这里不做内容识别。
+  static Map<String, dynamic> auditArguments(
+    String? assistantId,
+    String? conversationId,
+  ) {
+    return <String, dynamic>{
+      if (assistantId != null && assistantId.trim().isNotEmpty)
+        assistantIdKey: assistantId,
+      if (conversationId != null && conversationId.trim().isNotEmpty)
+        conversationIdKey: conversationId,
+    };
   }
 }
