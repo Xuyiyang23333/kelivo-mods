@@ -402,7 +402,7 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 
 **当前实现（M33）**的输入路径错误码优先级固定为：空包名 → `no_window`；系统包 → `system_window_denied`；构建期 deny 成员 → `package_not_allowed`；未获用户批准 → `permission_required`；白名单内再校验句柄/截图，失效返回 `stale_handle` 或 `stale_observation`。因此系统窗口、deny 成员或未批准应用在前台时，即使句柄已经失效，也先返回包名策略错误，而不是句柄错误。锁屏/息屏在包名策略之前检查，所有方法（含读树和截图）返回 `device_locked`。
 
-以上是**当前实现**的链。7.5 的判定已全部插入 `no_window` 之后：**硬基线与输入窗口类型（M27 第 1 步，见 7.5.2/7.5.3）**、**观察边界（M28 第 2 步，见 7.5.4）**、**构建期 deny 清单与用户白名单（M33，见 7.5.1/7.5.4/7.5.9）**。M33 起读树与截图也判 `package_not_allowed` 与用户白名单，未批准返回 `permission_required` 且只带应用身份。**批准交互（卡片/通知）、首次隐私确认、任务控制与审计仍未实现**。
+以上是**当前实现**的链。7.5 的判定已全部插入 `no_window` 之后：**硬基线与输入窗口类型（M27 第 1 步，见 7.5.2/7.5.3）**、**观察边界（M28 第 2 步，见 7.5.4）**、**构建期 deny 清单与用户白名单（M33，见 7.5.1/7.5.4/7.5.9）**。M33 起读树与截图也判 `package_not_allowed` 与用户白名单，未批准返回 `permission_required` 且只带应用身份。**审计元数据已由 M35 实现**（见 7.5.5 的「M35 实现事实」）；**批准交互（卡片/通知）、首次隐私确认与任务控制仍未实现**。
 
 权限弹窗的处理边界（M20/M21 设备证伪 + M22 保守收尾）：
 
@@ -741,10 +741,15 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 
 - **字段集合精确固定为七项**：`AuditRecord` 的七个属性（`occurredAtMillis`、`assistantId`、`conversationId`、`packageName`、`signingPrefix`、`action`、`resultCode`），`AuditRecord.FIELD_NAMES` 是同一顺序的落盘列序，TSV 每行恰好 7 列（带表头 `# kelivo phone agent audit v1`）。JVM 测试用反射断言「声明的字段集合 == `FIELD_NAMES`」，并逐个断言七项禁用字段（`text`/`inputText`/`password`/`screenshot`/`imageBytes`/`summary`/`x`、`y`、`endX`、`endY`、`coordinates`/`windowTitle`）不是字段。
 - **七类禁内容没有进入记录的结构性路径**：`AuditAction.forCall(method, args)` 只读 `method` 与 `args["action"]`，输出固定 token（`readTree`、`screenshot`、`input.tap`、`input.set_text`、`input.swipe` 等）；未知输入动作降级为 `input`。记录构建器 `AuditRecorder.build(context, resultCode, now, signingPrefix)` **不接受参数对象**，节点 id、输入文本、坐标、持续时长、方向都无处落脚。签名前缀由调用方注入，生产实现在既有 `signingIdentity()` 上取 `signingPrefix`（前 8 位）；解析失败记 null，不阻断。
-- **记录时机**：在 `PhoneAgentService.execute` 的 `reply` 收口处记录一次，**且只在这一处**，成功写 `ok`、失败写既有结构化错误码（不新增审计专用错误码，`AUDIT_OK` 只是成功字的常量）。因此排队超时（`timeout`）、`busy`、`RejectedExecutionException` 造成的 `service_unavailable`、以及边界拒绝（`system_window_denied` / `permission_required` / `package_not_allowed`）都会留下一条带该码的记录。
+- **记录时机**：在 `PhoneAgentService.execute` 的 `reply` 收口处记录一次，**且只在这一处**，成功写 `ok`、失败写既有结构化错误码（不新增审计专用错误码，`AUDIT_OK` 只是成功字的常量）。因此排队超时（`timeout`）、`busy`、以及边界拒绝（`system_window_denied` / `permission_required` / `package_not_allowed`）都会留下一条带该码的记录。
 - **两类调用不产生记录（按实现如实说明，不是遗漏）**：
   - `interrupted`：`reply` 只在 `epoch == generation.get() && !destroyed` 时记录，`interruptPending()` 先递增 `generation` 再遍历 `requests`，所以服务中断、`onUnbind`、`onDestroy` 作废的调用走 else 分支，**不留审计**——那条调用没有产生可归属的结果，写一条 `interrupted` 只会把“被打断”误记成一次完成。也就是说 `interrupted` 不出现在审计文件里。
-  - **服务未连接**（`dispatch()` 的 `connected == null` 与 `execute()` 的 `destroyed` 两处提前返回）：两处都在 `AuditContext` 创建之前返回，**一条记录都没有**，不是“有记录但包名为空”。同理，`PhoneAgentPlugin` 的 `approvedApps` / `approveApp` / `revokeApp` 也不审计（它们是白名单身份操作，不是手机操作）。
+  - **`service_unavailable` 一律不产生记录**（三个出口，都不是“有记录但包名为空”）：
+    1. `dispatch()` 的 `connected == null` 提前返回；
+    2. `execute()` 的 `destroyed` 提前返回；
+    3. `execute()` 里 `worker.execute` 抛 `RejectedExecutionException` 后的 `reply(null, serviceUnavailable())`——`worker.shutdown()` 只在 `onDestroy()` 调用，而 `onDestroy()` 先置 `destroyed = true`、再经 `interruptPending()` 递增 `generation`，所以这个 `reply` 必然落进 else 分支（`epoch != generation.get()`），记录条件不成立。
+
+    前两处都在 `AuditContext` 创建之前返回。同理，`PhoneAgentPlugin` 的 `approvedApps` / `approveApp` / `revokeApp` 也不审计（它们是白名单身份操作，不是手机操作）。
 - **包名来源**：只在真正取到前台窗口的那一步写入 `readTree`（`windowState(root)` 之后）、`screenshot`（构造 `WindowState` 之后）、`input`（`currentWindow()` 之后）。因此 `no_window`、`device_locked` 这类取不到窗口的失败记录 `packageName` 与 `signingPrefix` 为空，**不猜测**。（服务未连接与 `interrupted` 属于上一条的“不产生记录”，不是“空包名记录”。）
 - **助手/会话 id 由 Dart 调用侧传入**：`readTree` / `screenshot` / `input` 三个通道方法的参数新增可选 `assistant_id` / `conversation_id`；插件 Dart 客户端只在非空时发送，原生侧用 `AuditIdentity`（**从不抛错**，畸形值记 null）读取，缺失如实记为未知而不是伪造。**身份只能来自宿主调用侧**：`PhoneAgentClient.input()` 在展开模型参数**之前**剔除这两个键（与 `snapshot_id` 同一处防护），否则宿主取不到身份时模型自带的同名参数会直达原生侧被写成审计事实；宿主值永远优先。`PhoneAgentMod` 传 `context.readCurrentAssistant()?.id` 与 `context.conversationId`。助手 id 取的是当前助手快照，**只作审计标签，不参与任何授权判定**（批准是全局共享、按应用判定，见 7.5.5 第 1 项）。
 - **保留策略**：`AuditLog` 每次追加后按「`occurredAtMillis < now - 30 天` 淘汰 → 仍超过 2000 条则从前淘汰」滚动；恰好 30 天的记录仍保留。**加载时也裁剪一次**：`ensureLoaded()` 在解码完成后按文件里**最新一条记录的时间戳**（不是当前时钟——否则应用长期未运行会让整份历史在下次启动时被一次性判为过旧）执行同一套 `prune`，因此外部写入、旧版本遗留或手工编辑的超限文件在读入路径上就收敛到「30 天 / 最近 2000 条」，不依赖后续是否还有一次追加。损坏行按“丢弃而非信任”处理：列数不是 7、时间戳不可解析、动作或结果码为空的记录直接忽略。
@@ -1048,7 +1053,7 @@ Loader 通用 `lib/modding/tool_mod.dart` 和 `mod_registry` 生成逻辑不 imp
 
 > 契约全文见 7.5.4、7.5.9–7.5.14 与 7.6 末的「M32 实现顺序与必须先定论的前提」。
 >
-> **M33 已完成第 2、3 步（含构建期 deny 清单与预批准条目）**，并用 JVM 测试覆盖；**第 4–8 步与设备验证仍全部未实现**：没有批准 UI、没有 pending 请求、没有审计、没有隐私确认，也没有任何设备证据。
+> **M33 已完成第 2、3 步（含构建期 deny 清单与预批准条目）、M35 已完成第 8 步审计元数据**，两者都有 JVM 测试覆盖；**第 4–7 步与设备验证仍未实现**：没有批准 UI、没有 pending 请求、没有隐私确认、没有任务控制与结果未知语义，也没有任何设备证据。
 
 1. **先定论三项未定稿**（7.5.12 多窗口是否拒绝、7.5.10 任务控制冲突的错误码、7.5.14 provider 更换是否重新提示），并回写本文，再动对应代码。观察侧判 `package_not_allowed` 与「构建期范围转 deny 清单」已定为 tower 定论（7.5.1/7.5.4），M33 已按契约实现；若用户推翻需先回写文档。**M33 没有因此改动这三项的任何一项**。
 2. **应用身份与签名绑定（✅ M33 已实现）**：manifest 一次声明 `QUERY_ALL_PACKAGES`；`(包名, 签名 SHA-256 集合)` 双匹配；同签名更新保留授权；签名变化或无法解析 → 未批准；首版明确不支持应用分身与工作资料（不做多用户查询）。设备能力（服务进程内解析任意前台包签名）**未实测**。
@@ -1164,7 +1169,7 @@ dart analyze --fatal-infos
 - 构建期范围（M33）：deny 清单初始为空且不与硬基线集合重叠；deny 成员在输入与观察两条路径都返回 `package_not_allowed`，且**排在用户白名单之前**（已批准也会被拒）；非 deny 成员未批准返回 `permission_required`；`package_not_allowed` 文案带固定标识 `build_denied`；
 - 构建配置预批准（M33）：测试包恒为预批准且不写用户白名单；跨 UID `securefixture` 只在 debuggable 构建预批准（release 返回 `permission_required`）；预批准不影响其他应用 `permission_required` 的可达性；
 - 观察侧白名单（M33）：未批准应用的读树/截图返回 `permission_required` 且消息含包名与签名前 8 位、明确“没有截图/没有读取界面文本”；签名解析失败时是 `signing_unavailable` 且不含哈希；批准后同包 `APPLICATION` 与 `INPUT_METHOD` 窗口可观察；硬基线与窗口类型仍排在白名单之前（已批准的系统包仍是 `system_window_denied`）；
-- 审计元数据（M35，`AuditLogTest` 14 项 + `AuditRecorderTest` 10 项）：`AuditRecord` 声明的字段集合**恰为契约七项**（反射断言），七类禁字段（节点文本、输入文本、密码、截图/图片字节、界面摘要、坐标、窗口标题）逐个断言不存在；TSV 每行恰好 7 列且带表头；空身份列往返后仍为 null；超过 30 天的记录被淘汰而**恰好 30 天仍保留**；超过 2000 条时从前淘汰、保留最近 2000 条；超限的历史文件在加载后被裁剪；损坏行（时间戳不可解析、列数不足、动作或结果码为空）被丢弃而不是被信任；字段内的制表符与换行不能破坏列数；字段截断到固定长度；写入失败与读取失败都不外抛（写入失败只增加本地计数）；`recordSafely` 在签名解析抛异常时把该字段降级为 null 且仍写入成功；`AuditAction` 只输出固定 token，未知输入动作降级为 `input`，且动作名不含文本/节点 id/坐标；`AuditIdentity` 对畸形值（非字符串、空白、缺失）返回 null 而不抛错；`clearScreenshot`、`status`、白名单三方法不产生审计动作；
+- 审计元数据（M35，`AuditLogTest` 15 项 + `AuditRecorderTest` 10 项）：`AuditRecord` 声明的字段集合**恰为契约七项**（反射断言），七类禁字段（节点文本、输入文本、密码、截图/图片字节、界面摘要、坐标、窗口标题）逐个断言不存在；TSV 每行恰好 7 列且带表头；空身份列往返后仍为 null；超过 30 天的记录被淘汰而**恰好 30 天仍保留**；超过 2000 条时从前淘汰、保留最近 2000 条；超限的历史文件在加载后被裁剪；损坏行（时间戳不可解析、列数不足、动作或结果码为空）被丢弃而不是被信任；字段内的制表符与换行不能破坏列数；字段截断到固定长度；写入失败与读取失败都不外抛（写入失败只增加本地计数）；`recordSafely` 在签名解析抛异常时把该字段降级为 null 且仍写入成功；`AuditAction` 只输出固定 token，未知输入动作降级为 `input`，且动作名不含文本/节点 id/坐标；`AuditIdentity` 对畸形值（非字符串、空白、缺失）返回 null 而不抛错；`clearScreenshot`、`status`、白名单三方法不产生审计动作；
 - debug 夹具 `SecureWindowFixtureActivity` 的 `FLAG_SECURE` 开关、纯色像素和权限请求（只请求、不授予、不使用敏感能力）；
 - 独立服务状态 supported/enabled/connected/sdk 的通道返回；API 29 上截图能力为 false，但 ready 状态与树/节点输入仍可用。
 
@@ -1741,7 +1746,7 @@ JVM 测试（无 Robolectric、无新依赖）：
 - Loader verify 通过；最终 APK 已生成。
 - 前台可视化叠加层（M23）已实现：独立 `TYPE_ACCESSIBILITY_OVERLAY`、无文本图形、无设置开关；API35 模拟器和物理 MIUI API31 均验证官方测试、截图无污染和触摸穿透，未验证项见 10.2 和 9.3.7。
 - 中文维护文档与真实行为一致。
-- **应用批准契约（7.5.4/7.5.9）第 2、3 步已由 M33 实现**：`QUERY_ALL_PACKAGES` 一次声明、`(包名, 签名 SHA-256 集合)` 双匹配的用户白名单（本地存储、幂等写入、撤销立即生效、写入前重解析签名）、构建期 deny 清单（初始为空）与构建配置预批准条目、观察与输入两条路径的白名单门控、`permission_required`（输入与观察都返回，观察侧只带应用身份）、原生批准/撤销/查询通道方法。**仍未实现**：批准卡片与通知栏两入口、pending 请求终态、审计、首次启用隐私确认、任务控制与恢复、结果未知语义、多窗口首版策略（拒绝方式未定稿）；**没有任何设备证据**，因此不计入已完成验收项。
+- **应用批准契约（7.5.4/7.5.9）第 2、3 步已由 M33 实现**：`QUERY_ALL_PACKAGES` 一次声明、`(包名, 签名 SHA-256 集合)` 双匹配的用户白名单（本地存储、幂等写入、撤销立即生效、写入前重解析签名）、构建期 deny 清单（初始为空）与构建配置预批准条目、观察与输入两条路径的白名单门控、`permission_required`（输入与观察都返回，观察侧只带应用身份）、原生批准/撤销/查询通道方法。**审计元数据已由 M35 实现**（七字段落盘、30 天/2000 条滚动、不进入工具结果与模型、无读取通道，见 7.5.5）。**仍未实现**：批准卡片与通知栏两入口、pending 请求终态、首次启用隐私确认、任务控制与恢复、结果未知语义、多窗口首版策略（拒绝方式未定稿）。**门控、签名绑定与审计都没有任何设备证据**，因此不计入已完成验收项。
 
 最终验收已完成（就 M32 之前的契约与 M32 的设备证据而言）；M33 的门控与签名绑定**只有单元测试与静态检查，没有任何设备证据**，因此仍不宣称第二阶段全部完成，未验证项见 10.2。
 
