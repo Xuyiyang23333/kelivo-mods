@@ -1,0 +1,367 @@
+diff --git a/lib/l10n/app_en.arb b/lib/l10n/app_en.arb
+index 2f0591a..b3e3c90 100644
+--- a/lib/l10n/app_en.arb
++++ b/lib/l10n/app_en.arb
+@@ -8318,6 +8318,39 @@
+   "phoneAgentSettingsUnavailable": "Unable to open accessibility settings. Open Android Settings → Accessibility manually.",
+   "phoneAgentNoAssistants": "No assistants yet. Create an assistant first.",
+   "phoneAgentConflict": "This assistant has both phone control implementations enabled. Choose one to resolve the conflict.",
++  "phoneAgentApprovalCardTitle": "Allow this app?",
++  "phoneAgentApprovalCardTitleNamed": "Allow \"{name}\"?",
++  "phoneAgentApprovalCardBody": "Approving lets the assistant read this app's screen and send taps, text and gestures. It stays valid until you revoke it in Mods.",
++  "phoneAgentApprovalSigning": "Signing certificate {prefix}",
++  "phoneAgentApprovalSigningUnavailable": "Signing certificate unavailable",
++  "phoneAgentApprovalAllow": "Allow",
++  "phoneAgentApprovalAllowAndContinue": "Allow and continue",
++  "phoneAgentApprovalDeny": "Deny",
++  "phoneAgentApprovalApproved": "Approved. The assistant will re-read the screen before continuing.",
++  "phoneAgentApprovalDenied": "Denied. Nothing was read or executed.",
++  "phoneAgentApprovalResumed": "Approved and continuing.",
++  "phoneAgentApprovalResumeUnavailable": "Approved. The task stopped when approval was needed, so ask the assistant to continue; it will re-read the screen first.",
++  "phoneAgentApprovalFailed": "Could not save the approval. Check that the app is still installed and not updating, then try again.",
++  "phoneAgentApprovedAppsTitle": "Approved apps",
++  "phoneAgentApprovedAppsRowSubtitle": "Review and revoke the apps the assistant may read and control.",
++  "phoneAgentApprovedAppsHint": "Approval covers reading the screen and sending taps, text and gestures. Revoking applies to the next request: anything already sent is not undone, and a screen already read may still be paged for a short time.",
++  "phoneAgentApprovedAppsEmpty": "No approved apps",
++  "phoneAgentApprovedAppsEmptyBody": "The assistant asks for approval the first time it needs to read or control an app.",
++  "phoneAgentApprovedAppsUnavailable": "Unable to read approved apps",
++  "phoneAgentApprovedAppsUnavailableBody": "Refresh to try again. The list is stored on this device only.",
++  "phoneAgentApprovedAppSigning": "Signing certificate {prefix}",
++  "phoneAgentApprovedAppApprovedAt": "Approved {time}",
++  "phoneAgentApprovedAppLastUsedAt": "Last approved {time}",
++  "phoneAgentApprovedAppNever": "never",
++  "phoneAgentApprovedAppUnknownSource": "Unknown assistant",
++  "phoneAgentApprovedAppRevoke": "Revoke",
++  "phoneAgentApprovedAppRevoked": "Revoked {package}.",
++  "phoneAgentApprovedAppRevokeFailed": "Could not revoke the app. Try again.",
++  "phoneAgentPrivacyNoticeTitle": "Before you enable Phone Agent",
++  "phoneAgentPrivacyNoticeBody": "Screenshots and on-screen text are sent as tool results to the model provider you configured for the conversation. That can include chats, message lists and other visible content.\n\nThis notice appears once. It is information, not a technical control: it does not change which apps need approval, and it does not mean screen content stays on this device. Password fields are masked and secure windows may appear black, but these are limits, not guarantees.",
++  "phoneAgentPrivacyNoticeConfirm": "I understand",
++  "phoneAgentPrivacyNoticeCancel": "Cancel",
++  "phoneAgentApprovalResumeMessage": "I approved {package}. Read the current screen again and continue the task from the real UI state. Do not replay the action that was blocked before approval.",
+   "@avatarInputInvalid": {
+     "description": "Inline error text under the icon-name/URL field in the avatar input dialog, shown when the entered icon name or HTTP(S) image URL is invalid."
+   },
+@@ -21769,5 +21802,139 @@
+   },
+   "@phoneAgentConflict": {
+     "description": "Message shown near the three-state phone control selection on the Mods page when the assistant has both native phone control and Phone Agent enabled, prompting the user to choose one option again."
++  },
++  "@phoneAgentApprovalCardTitle": {
++    "description": "Title of the in-chat approval card shown when the assistant needs approval for an unnamed app before it can read the screen or send input."
++  },
++  "@phoneAgentApprovalCardTitleNamed": {
++    "placeholders": {
++      "name": {
++        "type": "String"
++      }
++    },
++    "description": "Title of the in-chat approval card when the app has a display name; {name} is that app label."
++  },
++  "@phoneAgentApprovalCardBody": {
++    "description": "Explanatory body of the in-chat app approval card stating that approval covers reading the screen plus taps, text and gestures, and that it lasts until revoked."
++  },
++  "@phoneAgentApprovalSigning": {
++    "placeholders": {
++      "prefix": {
++        "type": "String"
++      }
++    },
++    "description": "Line on the approval card showing the app's signing certificate SHA-256 prefix used to identify the exact app; {prefix} is 8 hexadecimal characters."
++  },
++  "@phoneAgentApprovalSigningUnavailable": {
++    "description": "Line on the approval card shown when the app's signing certificate could not be read, so the app cannot be approved right now."
++  },
++  "@phoneAgentApprovalAllow": {
++    "description": "Primary button on the app approval card that grants approval without resuming the interrupted task."
++  },
++  "@phoneAgentApprovalAllowAndContinue": {
++    "description": "Button on the app approval card that grants approval and asks the assistant to continue the interrupted task after re-reading the screen."
++  },
++  "@phoneAgentApprovalDeny": {
++    "description": "Button on the app approval card that refuses approval; nothing is read or executed."
++  },
++  "@phoneAgentApprovalApproved": {
++    "description": "Confirmation shown after the user approves an app without continuing, reminding that the assistant re-reads the screen before acting."
++  },
++  "@phoneAgentApprovalDenied": {
++    "description": "Confirmation shown after the user denies app approval, stating that nothing was read or executed."
++  },
++  "@phoneAgentApprovalResumed": {
++    "description": "Confirmation shown after approval when the interrupted task is being resumed."
++  },
++  "@phoneAgentApprovalResumeUnavailable": {
++    "description": "Confirmation shown after approval when there is no task to resume, telling the user to ask the assistant to continue and that it will re-read the screen first."
++  },
++  "@phoneAgentApprovalFailed": {
++    "description": "Error shown when saving an app approval failed, for example because the app was uninstalled or is updating; advice to retry."
++  },
++  "@phoneAgentApprovedAppsTitle": {
++    "description": "Title of the settings page that lists apps the assistant is allowed to read and control, and its entry row on the Mods page."
++  },
++  "@phoneAgentApprovedAppsRowSubtitle": {
++    "description": "Subtitle of the approved apps row on the Mods page, inviting the user to review and revoke app approvals."
++  },
++  "@phoneAgentApprovedAppsHint": {
++    "description": "Introductory note on the approved apps page explaining that approval covers reading and input, and that revoking only affects the next request because already sent actions are not undone and an already read screen may still be paged briefly."
++  },
++  "@phoneAgentApprovedAppsEmpty": {
++    "description": "Empty-state title on the approved apps page when no app has been approved yet."
++  },
++  "@phoneAgentApprovedAppsEmptyBody": {
++    "description": "Empty-state body on the approved apps page explaining that approval is requested the first time the assistant needs an app."
++  },
++  "@phoneAgentApprovedAppsUnavailable": {
++    "description": "Error title on the approved apps page when the stored approvals could not be read."
++  },
++  "@phoneAgentApprovedAppsUnavailableBody": {
++    "description": "Error body on the approved apps page advising a refresh and noting that the list is device-local."
++  },
++  "@phoneAgentApprovedAppSigning": {
++    "placeholders": {
++      "prefix": {
++        "type": "String"
++      }
++    },
++    "description": "Line under an approved app showing the signing certificate SHA-256 prefix that identifies it; {prefix} is 8 hexadecimal characters."
++  },
++  "@phoneAgentApprovedAppApprovedAt": {
++    "placeholders": {
++      "time": {
++        "type": "String"
++      }
++    },
++    "description": "Line under an approved app showing when it was first approved; {time} is a formatted local date and time."
++  },
++  "@phoneAgentApprovedAppLastUsedAt": {
++    "placeholders": {
++      "time": {
++        "type": "String"
++      }
++    },
++    "description": "Line under an approved app showing when it was approved again most recently; {time} is a formatted local date and time. Ordinary approval reuse is not tracked."
++  },
++  "@phoneAgentApprovedAppNever": {
++    "description": "Placeholder shown instead of a timestamp when an approved app has no recorded time."
++  },
++  "@phoneAgentApprovedAppUnknownSource": {
++    "description": "Group heading on the approved apps page for approvals whose originating assistant is unknown, for example after the assistant was deleted."
++  },
++  "@phoneAgentApprovedAppRevoke": {
++    "description": "Button on an approved app row that revokes approval for that app."
++  },
++  "@phoneAgentApprovedAppRevoked": {
++    "placeholders": {
++      "package": {
++        "type": "String"
++      }
++    },
++    "description": "Snackbar confirming that approval was revoked for an app; {package} is the package name."
++  },
++  "@phoneAgentApprovedAppRevokeFailed": {
++    "description": "Snackbar shown when revoking an app approval failed, advising a retry."
++  },
++  "@phoneAgentPrivacyNoticeTitle": {
++    "description": "Title of the one-time dialog shown the first time the user enables Phone Agent, before a short privacy notice."
++  },
++  "@phoneAgentPrivacyNoticeBody": {
++    "description": "One-time privacy notice shown on first enabling Phone Agent: screenshots and screen text are sent to the configured model provider, it appears only once, it is information rather than a technical control, and password masking and secure-window blacking are limits rather than guarantees."
++  },
++  "@phoneAgentPrivacyNoticeConfirm": {
++    "description": "Button on the one-time privacy notice that acknowledges the notice and continues."
++  },
++  "@phoneAgentPrivacyNoticeCancel": {
++    "description": "Button on the one-time privacy notice that closes it without enabling Phone Agent; the notice appears again next time."
++  },
++  "@phoneAgentApprovalResumeMessage": {
++    "placeholders": {
++      "package": {
++        "type": "String"
++      }
++    },
++    "description": "User-style message sent to the model after the user taps Allow and continue on an app approval card; {package} is the approved package name. It asks the model to re-read the screen and continue without replaying the blocked action."
+   }
+ }
+diff --git a/lib/l10n/app_zh.arb b/lib/l10n/app_zh.arb
+index fa76ea9..76b39e9 100644
+--- a/lib/l10n/app_zh.arb
++++ b/lib/l10n/app_zh.arb
+@@ -6113,11 +6113,178 @@
+   "phoneAgentSettingsUnavailable": "无法打开无障碍设置，请手动进入 Android 系统设置 → 无障碍。",
+   "phoneAgentNoAssistants": "暂无助手，请先创建助手。",
+   "phoneAgentConflict": "这个助手同时启用了两套手机控制，请重新选择其中一项。",
++  "phoneAgentApprovalCardTitle": "允许操作这个应用？",
++  "phoneAgentApprovalCardTitleNamed": "允许操作“{name}”？",
++  "phoneAgentApprovalCardBody": "批准后助手可以读取该应用的屏幕，并发送点击、文字和手势。批准长期有效，直到你在 Mods 中撤销。",
++  "phoneAgentApprovalSigning": "签名证书 {prefix}",
++  "phoneAgentApprovalSigningUnavailable": "签名证书不可用",
++  "phoneAgentApprovalAllow": "允许",
++  "phoneAgentApprovalAllowAndContinue": "允许并继续",
++  "phoneAgentApprovalDeny": "拒绝",
++  "phoneAgentApprovalApproved": "已批准。助手会先重新读取屏幕再继续。",
++  "phoneAgentApprovalDenied": "已拒绝。没有读取任何内容，也没有执行任何操作。",
++  "phoneAgentApprovalResumed": "已批准，正在继续。",
++  "phoneAgentApprovalResumeUnavailable": "已批准。任务在等待批准时已中止，请让助手继续；它会先重新读取屏幕。",
++  "phoneAgentApprovalFailed": "无法保存批准。请确认该应用仍已安装且不在更新中，然后重试。",
++  "phoneAgentApprovedAppsTitle": "已批准的应用",
++  "phoneAgentApprovedAppsRowSubtitle": "查看并撤销助手可以读取和操作的应用。",
++  "phoneAgentApprovedAppsHint": "批准同时覆盖读屏幕与发送点击、文字和手势。撤销只对下一次请求生效：已发出的动作不会撤回，已读取的屏幕在短时间内仍可能被分页回放。",
++  "phoneAgentApprovedAppsEmpty": "暂无已批准的应用",
++  "phoneAgentApprovedAppsEmptyBody": "助手首次需要读取或操作某个应用时会请求你批准。",
++  "phoneAgentApprovedAppsUnavailable": "无法读取已批准的应用",
++  "phoneAgentApprovedAppsUnavailableBody": "请刷新后重试。该列表仅保存在这台设备上。",
++  "phoneAgentApprovedAppSigning": "签名证书 {prefix}",
++  "phoneAgentApprovedAppApprovedAt": "批准于 {time}",
++  "phoneAgentApprovedAppLastUsedAt": "最近批准 {time}",
++  "phoneAgentApprovedAppNever": "无记录",
++  "phoneAgentApprovedAppUnknownSource": "未知助手",
++  "phoneAgentApprovedAppRevoke": "撤销",
++  "phoneAgentApprovedAppRevoked": "已撤销 {package}。",
++  "phoneAgentApprovedAppRevokeFailed": "无法撤销该应用，请重试。",
++  "phoneAgentPrivacyNoticeTitle": "启用 Phone Agent 之前",
++  "phoneAgentPrivacyNoticeBody": "截图和屏幕上的文字会作为工具结果发送给你为当前对话配置的模型服务商，其中可能包含聊天记录、消息列表等可见内容。\n\n该提示只出现一次。它只是告知，不是技术控制：不改变哪些应用需要批准，也不代表屏幕内容会留在本机。密码字段会被涂黑、安全窗口可能显示为黑色，但这些都是限制而不是保证。",
++  "phoneAgentPrivacyNoticeConfirm": "我了解",
++  "phoneAgentPrivacyNoticeCancel": "取消",
++  "phoneAgentApprovalResumeMessage": "我已批准 {package}。请重新读取当前屏幕，并根据真实界面状态继续任务；不要重放批准前被拒绝的那一步动作。",
+   "@sideDrawerDeleteConfirmContent": {
+     "placeholders": {
+       "title": {
+         "type": "String"
+       }
+     }
++  },
++  "@phoneAgentApprovalCardTitle": {
++    "description": "Title of the in-chat approval card shown when the assistant needs approval for an unnamed app before it can read the screen or send input."
++  },
++  "@phoneAgentApprovalCardTitleNamed": {
++    "placeholders": {
++      "name": {
++        "type": "String"
++      }
++    },
++    "description": "Title of the in-chat approval card when the app has a display name; {name} is that app label."
++  },
++  "@phoneAgentApprovalCardBody": {
++    "description": "Explanatory body of the in-chat app approval card stating that approval covers reading the screen plus taps, text and gestures, and that it lasts until revoked."
++  },
++  "@phoneAgentApprovalSigning": {
++    "placeholders": {
++      "prefix": {
++        "type": "String"
++      }
++    },
++    "description": "Line on the approval card showing the app's signing certificate SHA-256 prefix used to identify the exact app; {prefix} is 8 hexadecimal characters."
++  },
++  "@phoneAgentApprovalSigningUnavailable": {
++    "description": "Line on the approval card shown when the app's signing certificate could not be read, so the app cannot be approved right now."
++  },
++  "@phoneAgentApprovalAllow": {
++    "description": "Primary button on the app approval card that grants approval without resuming the interrupted task."
++  },
++  "@phoneAgentApprovalAllowAndContinue": {
++    "description": "Button on the app approval card that grants approval and asks the assistant to continue the interrupted task after re-reading the screen."
++  },
++  "@phoneAgentApprovalDeny": {
++    "description": "Button on the app approval card that refuses approval; nothing is read or executed."
++  },
++  "@phoneAgentApprovalApproved": {
++    "description": "Confirmation shown after the user approves an app without continuing, reminding that the assistant re-reads the screen before acting."
++  },
++  "@phoneAgentApprovalDenied": {
++    "description": "Confirmation shown after the user denies app approval, stating that nothing was read or executed."
++  },
++  "@phoneAgentApprovalResumed": {
++    "description": "Confirmation shown after approval when the interrupted task is being resumed."
++  },
++  "@phoneAgentApprovalResumeUnavailable": {
++    "description": "Confirmation shown after approval when there is no task to resume, telling the user to ask the assistant to continue and that it will re-read the screen first."
++  },
++  "@phoneAgentApprovalFailed": {
++    "description": "Error shown when saving an app approval failed, for example because the app was uninstalled or is updating; advice to retry."
++  },
++  "@phoneAgentApprovedAppsTitle": {
++    "description": "Title of the settings page that lists apps the assistant is allowed to read and control, and its entry row on the Mods page."
++  },
++  "@phoneAgentApprovedAppsRowSubtitle": {
++    "description": "Subtitle of the approved apps row on the Mods page, inviting the user to review and revoke app approvals."
++  },
++  "@phoneAgentApprovedAppsHint": {
++    "description": "Introductory note on the approved apps page explaining that approval covers reading and input, and that revoking only affects the next request because already sent actions are not undone and an already read screen may still be paged briefly."
++  },
++  "@phoneAgentApprovedAppsEmpty": {
++    "description": "Empty-state title on the approved apps page when no app has been approved yet."
++  },
++  "@phoneAgentApprovedAppsEmptyBody": {
++    "description": "Empty-state body on the approved apps page explaining that approval is requested the first time the assistant needs an app."
++  },
++  "@phoneAgentApprovedAppsUnavailable": {
++    "description": "Error title on the approved apps page when the stored approvals could not be read."
++  },
++  "@phoneAgentApprovedAppsUnavailableBody": {
++    "description": "Error body on the approved apps page advising a refresh and noting that the list is device-local."
++  },
++  "@phoneAgentApprovedAppSigning": {
++    "placeholders": {
++      "prefix": {
++        "type": "String"
++      }
++    },
++    "description": "Line under an approved app showing the signing certificate SHA-256 prefix that identifies it; {prefix} is 8 hexadecimal characters."
++  },
++  "@phoneAgentApprovedAppApprovedAt": {
++    "placeholders": {
++      "time": {
++        "type": "String"
++      }
++    },
++    "description": "Line under an approved app showing when it was first approved; {time} is a formatted local date and time."
++  },
++  "@phoneAgentApprovedAppLastUsedAt": {
++    "placeholders": {
++      "time": {
++        "type": "String"
++      }
++    },
++    "description": "Line under an approved app showing when it was approved again most recently; {time} is a formatted local date and time. Ordinary approval reuse is not tracked."
++  },
++  "@phoneAgentApprovedAppNever": {
++    "description": "Placeholder shown instead of a timestamp when an approved app has no recorded time."
++  },
++  "@phoneAgentApprovedAppUnknownSource": {
++    "description": "Group heading on the approved apps page for approvals whose originating assistant is unknown, for example after the assistant was deleted."
++  },
++  "@phoneAgentApprovedAppRevoke": {
++    "description": "Button on an approved app row that revokes approval for that app."
++  },
++  "@phoneAgentApprovedAppRevoked": {
++    "placeholders": {
++      "package": {
++        "type": "String"
++      }
++    },
++    "description": "Snackbar confirming that approval was revoked for an app; {package} is the package name."
++  },
++  "@phoneAgentApprovedAppRevokeFailed": {
++    "description": "Snackbar shown when revoking an app approval failed, advising a retry."
++  },
++  "@phoneAgentPrivacyNoticeTitle": {
++    "description": "Title of the one-time dialog shown the first time the user enables Phone Agent, before a short privacy notice."
++  },
++  "@phoneAgentPrivacyNoticeBody": {
++    "description": "One-time privacy notice shown on first enabling Phone Agent: screenshots and screen text are sent to the configured model provider, it appears only once, it is information rather than a technical control, and password masking and secure-window blacking are limits rather than guarantees."
++  },
++  "@phoneAgentPrivacyNoticeConfirm": {
++    "description": "Button on the one-time privacy notice that acknowledges the notice and continues."
++  },
++  "@phoneAgentPrivacyNoticeCancel": {
++    "description": "Button on the one-time privacy notice that closes it without enabling Phone Agent; the notice appears again next time."
++  },
++  "@phoneAgentApprovalResumeMessage": {
++    "placeholders": {
++      "package": {
++        "type": "String"
++      }
++    },
++    "description": "User-style message sent to the model after the user taps Allow and continue on an app approval card; {package} is the approved package name. It asks the model to re-read the screen and continue without replaying the blocked action."
+   }
+ }

@@ -245,8 +245,30 @@ internal class PackagePolicy(
                 } else {
                     "Input into $identityText needs the user's approval. The action was not executed and is not queued. Ask the user to approve this app in Kelivo, then decide whether to retry. Do not retry the same call repeatedly."
                 }
-                throw PhoneAgentError("permission_required", message)
+                throw PhoneAgentError(
+                    "permission_required",
+                    message,
+                    approvalDetails(packageName, identity, observation),
+                )
             }
         }
     }
+
+    /**
+     * `permission_required` 的结构化身份。字段严格限于 7.5.4 允许的应用身份：
+     * 包名、签名证书 SHA-256 前 8 位、可选显示名。解析不到签名时只写
+     * `signing_prefix: null` 且 `signing_available: false`，不写任何哈希占位。
+     * 完整哈希不离开原生侧；这里也不带节点、窗口标题或界面内容。
+     */
+    private fun approvalDetails(
+        packageName: String,
+        identity: SigningIdentity?,
+        observation: Boolean,
+    ): Map<String, Any?> = linkedMapOf(
+        "package_name" to packageName,
+        "signing_prefix" to identity?.signingPrefix,
+        "display_name" to identity?.displayName,
+        "signing_available" to (identity != null),
+        "observation" to observation,
+    )
 }

@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:kelivo_phone_agent/kelivo_phone_agent.dart';
 import 'package:provider/provider.dart';
 
 import 'package:Kelivo/core/models/assistant.dart';
@@ -27,6 +28,8 @@ class _FakePhoneAgentClient implements PhoneAgentClient {
   Object? settingsError;
   int statusCalls = 0;
   int settingsCalls = 0;
+  bool privacyAcknowledged = false;
+  int acknowledgeCalls = 0;
 
   @override
   Future<PhoneAgentAvailability> status() async {
@@ -59,6 +62,49 @@ class _FakePhoneAgentClient implements PhoneAgentClient {
   @override
   Future<Map<String, dynamic>> input(Map<String, dynamic> arguments) =>
       throw UnimplementedError();
+
+  @override
+  Future<List<PhoneAgentApprovedApp>> approvedApps() async => const [];
+
+  @override
+  Future<void> revokeApp(String packageName) async {}
+
+  @override
+  Future<PhoneAgentApprovalRequest> requestApproval(
+    String packageName, {
+    String? toolCallId,
+    String? conversationId,
+    String? assistantId,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<List<PhoneAgentApprovalRequest>> approvalRequests() async => const [];
+
+  @override
+  Future<PhoneAgentApprovalRequest> resolveApproval({
+    required String requestId,
+    required bool approve,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<void> dismissApprovals({String? conversationId}) async {}
+
+  @override
+  Future<bool> privacyNoticeAcknowledged() async => privacyAcknowledged;
+
+  @override
+  Future<void> acknowledgePrivacyNotice() async {
+    privacyAcknowledged = true;
+    acknowledgeCalls++;
+  }
+}
+
+/// 首次启用 Phone Agent 会弹出一次性隐私确认（方案 B）；这里代替用户确认。
+Future<void> _acknowledgePrivacyNotice(WidgetTester tester) async {
+  final confirm = find.byType(FilledButton);
+  if (confirm.evaluate().isEmpty) return;
+  await tester.tap(confirm.last);
+  await tester.pumpAndSettle();
 }
 
 void main() {
@@ -324,6 +370,7 @@ void main() {
 
     await tester.tap(find.byType(IosCheckbox).at(2));
     await tester.pumpAndSettle();
+    await _acknowledgePrivacyNotice(tester);
     expect(provider.getById('a')!.localToolIds, [PhoneAgentLocalTool.id]);
 
     await tester.tap(find.byType(IosCheckbox).at(0));
@@ -446,6 +493,7 @@ void main() {
 
     await tester.tap(find.byType(IosCheckbox).at(2));
     await tester.pumpAndSettle();
+    await _acknowledgePrivacyNotice(tester);
 
     expect(provider.getById('b')!.localToolIds, [PhoneAgentLocalTool.id]);
     expect(provider.getById('a')!.localToolIds, isEmpty);

@@ -6,7 +6,16 @@
 
 > **M32（2026-11-15，仅文档）**：应用批准契约已修订为「批准 = 读＋操作一体」（未批准应用的读树/截图只返回应用身份与 `permission_required`），并新增应用身份（`QUERY_ALL_PACKAGES`）、批准后恢复与任务控制、结果未知语义、多窗口首版不支持、批准终态与防自我批准、首次隐私确认（方案 B）；观察侧也判 `package_not_allowed`，且构建期范围在批准上线时转为 deny 清单（两项均为 tower 定论，用户可推翻）。来源分层：用户拍板项、已定契约（早期设计）、tower 定论与设计提案（tower 建议）四档，不要把设计提案读成用户已同意。第 8 节是实现入口，含三项仍未定稿的取舍。
 
-## 0. M27 当前状态（2026-11-13，第 1 步实现）
+## 0. M34 当前状态（2026-11-16，批准交互与首次隐私确认；仅单元与静态检查）
+
+- 本轮目标：实现 M34 的批准交互与首次启用隐私确认（方案 B）；**不做审计（M35）、不做设备验证（M36）**。
+- 已完成：原生 `ApprovalRequests` 七态状态机（TTL 30 分钟、单终态、迟到回调不写白名单、同目标新请求取代旧请求、按会话清理、保留 64 条）；`permission_required` 结构化身份（`package_name`/`signing_prefix`/`display_name`/`signing_available`/`observation`，经 `result.error(code, message, details)` 到工具结果 `identity`）；通知栏批准（独立渠道 + `Notification.Action` + 新 `BroadcastReceiver`，`exported=false`，不复用上游 `NotificationService`）；聊天批准卡片（上游只动两处：`chat_message_widget.dart` 一处插入、`home_page.dart` 注册/注销续跑回调）；Mods 页“已批准的应用”管理页（按来源助手分组、逐条撤销）；「允许并继续」（只发一条要求模型重新观察的用户消息，不重放动作；会话切走或无回调时只保存授权并如实提示）；首次启用隐私确认（方案 B，取消不写状态、读不到按未确认）；预批准成员禁止写入用户白名单（`pre_approved`）。
+- 新增 33 个 ARB 键，四目标语言（ko/ru/tr/zh_Hant）**0 pending**；使用本机网关 `mistral/deepseek-v4-1-flash-1017`（当轮 `llama-cpp/llama-cpp` 后端报 Cloudflare 隧道不可达），**未使用付费服务**。
+- 检查结果：Loader `dart format` 0 变更、`dart analyze` 无问题、`dart test` **165 通过**；合成树 `dart analyze --fatal-infos lib test integration_test tool` **No issues found**；Phone Agent + Mods + 设置入口 **139 通过**（基线 121 + 新增 18）；上游 seam（`tool_handler_service` / `workspace_gating` / `request_consistency`）**56 通过**；插件 Dart **25 通过**；插件 Kotlin **194 通过、0 失败**（基线 170 + 新增 24）；`plan`/`apply`/`verify` 在 `modsetHash` `4a54bb1d9f60af728be69b7127edd597e35d35a8716868fef5ce1247e9ac4be2`（合成树 `.build/worktrees/4a54bb1d9f60af72`）**校验通过**。
+- **未做**：未运行 integration_test、未构建 APK、未接设备；**没有任何设备证据**。未验证：通知权限与 action 真实行为（含进程被杀后重放）、`POST_NOTIFICATIONS` 被拒表现、卡片真实对话流布局、两端同时存在时的撤下时序、服务关闭时 Mods 页撤销、跨 UID 前台包签名解析。
+- 本轮踩到并记录的环境问题：本机网关的 `llama-cpp/llama-cpp` 后端当轮不可用（`api_error: Cloudflare 隧道不可达`），改用 `mistral/deepseek-v4-1-flash-1017`；`translate.py sync` 末尾自动执行的 `flutter gen-l10n` 会因 `flutter` 不在 Python 子进程的 PATH 里失败（`WinError 2`），需手动跑一次 `flutter gen-l10n`，`check` 仍然可用。
+
+## 0.1 M27 当前状态（2026-11-13，第 1 步实现）
 
 - 本轮目标：只做第 8 节**第 1 步**——硬基线集合 + `WindowState.windowType`。不含观察边界、用户白名单、批准交互和审计（M35 后来补齐了审计，见开头 M35 段）。
 - 新增 `mods/phone_agent/plugin/android/src/main/kotlin/com/kelivo/phoneagent/AppBoundary.kt`：`WindowType`（平台常量→枚举，`else` 一律 `UNKNOWN`，`allowsInput` 仅 `APPLICATION`）、`HARD_BASELINE_PACKAGES`（原 5 个 AOSP 包 + 证书安装器 + settings 及其厂商变体 + MIUI 包安装器与权限授予界面，返工后共 21 项）、`KELIVO_PACKAGE` / `TEST_PACKAGE` 精确常量、`RoleHolders`（`Resolved` / `Unavailable`）、纯函数 `PackagePolicy.requireInputAllowed(packageName, windowType, roleHolders)`。
@@ -361,11 +370,10 @@ dart tool/mod_loader.dart verify
    **产品 debug APK（当前产品，未改动）**：最终树 `f26c1c7ed3238610`（`modsetHash` `f26c1c7ed32386105a763feeb3ea95accdd127b6041941b9f3d75f83abadafa9`），**181,410,150 字节**，SHA-256 `a6c2e51b73435af1de4f74d5e95807a9688e95cb3d78be2f47521d715971b70f`（M30 已复核未变）。M30 未改产品代码，因此未重建；integration_test 入口构建只在测试树内，不作为产品。
 3. **应用身份与签名校验 —— ✅ M33 已实现（无设备证据）**。插件 manifest 一次声明 `QUERY_ALL_PACKAGES`；实现用 `PackageManager.getPackageInfo(pkg, GET_SIGNING_CERTIFICATES)`（API < 28 回退 `GET_SIGNATURES`）解析前台包签名，`(包名, 签名证书 SHA-256 集合)` 双匹配，未命中（含签名变化、签名解析失败）返回 `permission_required`。多签名包要求整集合相等（M29 实测 `com.android.vending` 2 枚）。同签名更新保留授权；授权不随聊天备份迁移（`noBackupFilesDir`）；应用分身与工作资料首版不支持。**签名解析能力仍需设备实测**（见 7.6 风险 5），不得先写成“任意前台包都能解析”。
 4. **白名单门控接入观察与输入 —— ✅ M33 已实现（无设备证据）**。观察路径顺序 `device_locked` → `no_window` → 硬基线 → 窗口类型 → 构建期 deny 清单 → 用户白名单；未批准时结果只含应用身份，不建立观测、不占 `treeBudget`、不截图。**分页 `offset > 0` 沿用 M28 接入点不重复判定**（M32 曾把“分页也判定”列为未定稿设计提案），因此未批准时翻页返回 `stale_observation`；若后续改成分页也判定，须同时改 plan 7.5.4 与 JVM 断言。异常套件 home/recents 与跨 UID `securefixture` 相关断言已按新错误码同步（不是放宽）；settings 断言走硬基线、未改。
-5. **批准交互与终态（两入口方向为已定（用户拍板）；终态机制为设计提案。未实现）**。先做聊天内卡片（复用 `ToolApprovalService` 的请求结构、pending 存储与 `notifyListeners()` 刷新，**不复用其等待语义**——工具调用已返回 `permission_required`，卡片须自带 TTL 与“任一端批准即置终态”的收敛），再做通知栏（必须新增通知 action + `BroadcastReceiver`，现有 `NotificationService` 只有点击打开会话）。同批实现单终态、请求 id 幂等、迟到回调不写白名单、写入前重新解析签名（7.5.13）。
-6. **首次启用隐私确认（方案 B，已定（用户拍板），未实现）**。只在首次启用时一次性提示截图与界面文字会发往用户配置的 provider；不每张截图询问。文案进 ARB。provider 更换是否重新提示待定论。
-7. **任务控制与恢复、结果未知语义（设计提案（tower 建议、待实现），不是用户拍板项）**。「允许并继续」只恢复关联且仍可恢复的任务、恢复后先重新观察不重放动作；同时只一个任务控制手机，停止/撤销后未执行请求失效，已派发手势不承诺撤回；已派发后的超时/取消属结果未知，不盲目重试、先重新观察、区分动作完成与业务成功。
-8. **审计 —— ✅ M35 已实现（无设备证据）**。`AuditLog.kt` 落盘七项元数据（时间戳、助手 id、会话 id、包名、签名哈希前 8 位、动作类型、结果码），滚动保留 30 天或最近 2000 条先到者生效，写在 `noBackupFilesDir/phone_agent_audit.tsv`；助手/会话 id 由通道可选参数从 Dart 侧传入，缺失记 null；审计失败静默计数、不阻断主路径；**没有读取通道也没有界面**，因此也没有任何用户可见的审计视图。字段集合由 JVM 反射断言固定，七类禁内容没有进入记录的路径。
-
+5. **批准交互与终态**（两入口方向为已定（用户拍板）；终态机制为设计提案）—— ✅ **M34 已实现（无设备证据，R1 返工后）**。聊天内卡片 + 通知栏 action + 同一 pending 状态机（`ApprovalRequests`，TTL 30 分钟、单终态、迟到回调按请求 id 校验）；**通知→卡片** 由 `WidgetsBindingObserver` 在回到前台时 `refresh()` 对齐，**切会话/断连** 分别走 `dismissForConversation` / `dismissAll`；通知是**可选增强**（API 33+ 需权限，被拒时卡片是唯一入口）。
+6. **首次启用隐私确认**（方案 B，已定（用户拍板））—— ✅ **M34 已实现（无设备证据）**。只在首次选择 Phone Agent 时一次性提示，取消不写状态，读不到按未确认；确认后请求一次通知权限。文案进 ARB，四目标语言 0 pending。provider 更换是否重新提示仍未定稿。
+7. **任务控制与结果未知语义（设计提案（tower 建议、待实现），不是用户拍板项）**。「允许并继续」的**续跑路径**已接通（只发一条要求重新观察的用户消息、不重放动作、会话切走时只保存授权），但**任务控制**（同时只一个任务控制手机、停止后未执行请求失效）与**结果未知语义**（专门文案与错误码）仍未实现。
+8. **审计 —— ✅ M35 已实现（无设备证据）**。`AuditLog.kt` 落盘七项元数据（时间戳、助手 id、会话 id、包名、签名哈希前 8 位、动作类型、结果码），滚动保留 30 天或最近 2000 条先到者生效，写在 `noBackupFilesDir/phone_agent_audit.tsv`；助手/会话 id 由通道可选参数从 Dart 侧传入，缺失记 null；审计失败静默计数、不阻断主路径；**没有读取通道也没有界面**。**注意参数语义**：审计用实时重读的助手 id（`assistant_id`），批准来源用创建请求时的助手快照（`approval_assistant_id`），两者不互相覆盖。
 实现后必须重跑并把结果写入 9.3/9.4：API35 官方测试、完整异常套件、物理 MIUI 官方测试，以及至少一轮 VLM 固定任务（含“未批准 → 只回身份 → 批准 → 重新观察 → 撤销 → 重新 `permission_required`”的完整链路）。重跑前，9.4 与 10.1 的 VLM 结果**只能作为旧代码证据**，不得用于宣称新边界已验证。**M33 未跑任何设备**，因此现在能声明的只有“单元与静态检查通过”；官方测试、异常套件与 VLM 都必须重跑才能宣称门控生效。
 
 已定决策不要重新讨论：白名单全局共享、批准长期有效 + Mods 页显式撤销、审计落盘元数据滚动保留、systemui 等系统应用硬禁止、批准 = 读＋操作一体、`QUERY_ALL_PACKAGES` 一次声明、方案 B 首次隐私确认、聊天卡片 + 通知两入口、不用叠加层做批准界面。若实现中发现某项不可行，需要回写文档并请用户确认，不得静默改向。**M32 遗留的三项未定稿仍在（多窗口拒绝方式、任务控制冲突错误码、provider 更换是否重新提示）；观察侧判 `package_not_allowed` 与「构建期范围转 deny 清单」已由 M33 实现；分页门控属 M32 未定稿的设计提案，M33 选择了不重复判定并把选择写进了 plan 7.5.4。**

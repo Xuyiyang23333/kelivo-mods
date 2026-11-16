@@ -11,6 +11,7 @@ import 'package:Kelivo/modding/tool_mod.dart';
 import 'package:Kelivo/utils/mcp_structured_image.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:kelivo_phone_agent/kelivo_phone_agent.dart';
 
 import '../../support/business_test_harness.dart';
 
@@ -156,6 +157,18 @@ class RecordingPhoneAgentClient implements PhoneAgentClient {
       <({int offset, int maxNodes, bool interactiveOnly})>[];
   final List<Map<String, dynamic>> inputCalls = <Map<String, dynamic>>[];
 
+  /// 白名单与批准请求的假实现状态，供 Mods 页与批准服务测试使用。
+  final List<PhoneAgentApprovedApp> approvedAppsResult =
+      <PhoneAgentApprovedApp>[];
+  final List<PhoneAgentApprovalRequest> approvalRequestsResult =
+      <PhoneAgentApprovalRequest>[];
+  final List<String> revokedPackages = <String>[];
+  final List<String?> dismissedConversations = <String?>[];
+  bool privacyAcknowledged = false;
+  int acknowledgeCalls = 0;
+  String? requestedSigningPrefix = 'aaaaaaaa';
+  String? requestedDisplayName = 'Example';
+
   @override
   Future<PhoneAgentAvailability> status() async {
     statusCalls++;
@@ -209,5 +222,82 @@ class RecordingPhoneAgentClient implements PhoneAgentClient {
     final error = inputError;
     if (error != null) throw error;
     return inputResult;
+  }
+
+  @override
+  Future<List<PhoneAgentApprovedApp>> approvedApps() async =>
+      List<PhoneAgentApprovedApp>.of(approvedAppsResult);
+
+  @override
+  Future<void> revokeApp(String packageName) async {
+    revokedPackages.add(packageName);
+    approvedAppsResult.removeWhere((app) => app.packageName == packageName);
+  }
+
+  @override
+  Future<PhoneAgentApprovalRequest> requestApproval(
+    String packageName, {
+    String? toolCallId,
+    String? conversationId,
+    String? assistantId,
+  }) async {
+    final request = PhoneAgentApprovalRequest(
+      requestId: 'r${approvalRequestsResult.length + 1}',
+      packageName: packageName,
+      signingPrefix: requestedSigningPrefix,
+      signingAvailable: requestedSigningPrefix != null,
+      displayName: requestedDisplayName,
+      toolCallId: toolCallId,
+      conversationId: conversationId,
+      assistantId: assistantId,
+      createdAt: 0,
+      expiresAt: DateTime.now().millisecondsSinceEpoch + 60000,
+      state: 'pending',
+    );
+    approvalRequestsResult.add(request);
+    return request;
+  }
+
+  @override
+  Future<List<PhoneAgentApprovalRequest>> approvalRequests() async =>
+      List<PhoneAgentApprovalRequest>.of(approvalRequestsResult);
+
+  @override
+  Future<PhoneAgentApprovalRequest> resolveApproval({
+    required String requestId,
+    required bool approve,
+  }) async {
+    final index = approvalRequestsResult.indexWhere(
+      (entry) => entry.requestId == requestId,
+    );
+    if (index < 0) {
+      throw const PhoneAgentToolFailure(
+        'approval_not_found',
+        'This approval request is no longer pending.',
+      );
+    }
+    final resolved = approvalRequestsResult[index].copyWith(
+      state: approve ? 'approved' : 'denied',
+    );
+    approvalRequestsResult.removeAt(index);
+    return resolved;
+  }
+
+  @override
+  Future<void> dismissApprovals({String? conversationId}) async {
+    dismissedConversations.add(conversationId);
+    approvalRequestsResult.removeWhere(
+      (entry) =>
+          conversationId == null || entry.conversationId == conversationId,
+    );
+  }
+
+  @override
+  Future<bool> privacyNoticeAcknowledged() async => privacyAcknowledged;
+
+  @override
+  Future<void> acknowledgePrivacyNotice() async {
+    privacyAcknowledged = true;
+    acknowledgeCalls++;
   }
 }

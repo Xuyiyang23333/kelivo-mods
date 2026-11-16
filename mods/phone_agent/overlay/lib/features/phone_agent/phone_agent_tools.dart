@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:Kelivo/utils/mcp_structured_image.dart';
 
+import 'phone_agent_approval_service.dart';
 import 'phone_agent_screenshot.dart';
 import 'phone_agent_service.dart';
 
@@ -61,6 +62,7 @@ class PhoneAgentTools {
     required bool supportsImageInput,
     String? assistantId,
     String? conversationId,
+    String? toolCallId,
   }) async {
     try {
       switch (name) {
@@ -107,7 +109,37 @@ class PhoneAgentTools {
           );
       }
     } on PhoneAgentToolFailure catch (failure) {
+      await _registerApproval(
+        failure,
+        toolCallId: toolCallId,
+        conversationId: conversationId,
+        assistantId: assistantId,
+      );
       return failure.toToolResult(tool: name);
+    }
+  }
+
+  /// `permission_required` 是唯一会创建批准卡片的失败：登记一条独立请求。
+  ///
+  /// 登记失败（例如签名解析不到）不改变工具结果——模型侧看到的仍是原生错误文案
+  /// 与身份，只是没有卡片可点。绝不为“让卡片出现”而放宽任何判定。
+  static Future<void> _registerApproval(
+    PhoneAgentToolFailure failure, {
+    String? toolCallId,
+    String? conversationId,
+    String? assistantId,
+  }) async {
+    final identity = failure.identity;
+    if (identity == null) return;
+    try {
+      await PhoneAgentApprovalService.instance.register(
+        identity,
+        toolCallId: toolCallId,
+        conversationId: conversationId,
+        approvalAssistantId: assistantId,
+      );
+    } catch (_) {
+      // 通知权限、通道超时等都不应把工具结果变成另一种失败。
     }
   }
 

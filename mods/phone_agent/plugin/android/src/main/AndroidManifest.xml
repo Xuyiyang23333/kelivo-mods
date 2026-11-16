@@ -21,5 +21,16 @@
                 android:name="android.accessibilityservice"
                 android:resource="@xml/kelivo_phone_agent_service" />
         </service>
+
+        <!--
+            M34：通知栏批准 action 的接收端。上游 NotificationService 只有“点击打开会话”
+            （onDidReceiveNotificationResponse），AndroidNotificationAction 在交付代码里
+            零命中，所以批准 action + BroadcastReceiver 是新增基础设施。
+            `exported="false"`：只有本应用自己的 PendingIntent 能触发；幂等与终态校验在
+            ApprovalRequests 内完成，不依赖 intent 来源。
+        -->
+        <receiver
+            android:name="com.kelivo.phoneagent.PhoneAgentApprovalReceiver"
+            android:exported="false" />
     </application>
 </manifest>

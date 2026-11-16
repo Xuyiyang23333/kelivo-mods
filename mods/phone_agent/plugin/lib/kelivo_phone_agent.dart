@@ -84,4 +84,39 @@ class KelivoPhoneAgent {
 
   /// 撤销一条批准记录。立即生效；已发出的动作不受影响。
   Future<void> revokeApp(String packageName) => _client.revokeApp(packageName);
+
+  /// 创建一条待用户处理的批准请求（同时发通知）。
+  Future<PhoneAgentApprovalRequest> requestApproval(
+    String packageName, {
+    String? toolCallId,
+    String? conversationId,
+    String? approvalAssistantId,
+  }) => _client.requestApproval(
+    packageName,
+    toolCallId: toolCallId,
+    conversationId: conversationId,
+    approvalAssistantId: approvalAssistantId,
+  );
+
+  /// 当前仍待处理的批准请求。
+  Future<List<PhoneAgentApprovalRequest>> approvalRequests() =>
+      _client.approvalRequests();
+
+  /// 处理一条批准请求。幂等；请求已不存在时抛 `approval_not_found`。
+  Future<PhoneAgentApprovalRequest> resolveApproval({
+    required String requestId,
+    required bool approve,
+  }) => _client.resolveApproval(requestId: requestId, approve: approve);
+
+  /// 清理待处理请求（切换会话或应用重启）。
+  Future<void> dismissApprovals({String? conversationId}) =>
+      _client.dismissApprovals(conversationId: conversationId);
+
+  /// 首次启用隐私确认是否已读（方案 B）。
+  Future<bool> privacyNoticeAcknowledged() =>
+      _client.privacyNoticeAcknowledged();
+
+  /// 记录用户已读首次启用隐私确认。只是告知记录，不改变任何判定。
+  Future<void> acknowledgePrivacyNotice() =>
+      _client.acknowledgePrivacyNotice();
 }

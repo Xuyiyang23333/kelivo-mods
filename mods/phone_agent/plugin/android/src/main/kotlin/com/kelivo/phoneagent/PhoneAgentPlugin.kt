@@ -46,6 +46,12 @@ class PhoneAgentPlugin : FlutterPlugin {
             "approvedApps" -> approvedApps(result)
             "approveApp" -> approveApp(call.arguments, result)
             "revokeApp" -> revokeApp(call.arguments, result)
+            "requestApproval" -> requestApproval(call.arguments, result)
+            "approvalRequests" -> approvalRequests(result)
+            "resolveApproval" -> resolveApproval(call.arguments, result)
+            "dismissApprovals" -> dismissApprovals(call.arguments, result)
+            "privacyNotice" -> privacyNotice(result)
+            "acknowledgePrivacyNotice" -> acknowledgePrivacyNotice(result)
             else -> result.notImplemented()
         }
     }
@@ -159,6 +165,168 @@ class PhoneAgentPlugin : FlutterPlugin {
         }
     }
 
+    /**
+     * 创建一条待用户处理的批准请求并发出通知。身份由原生侧解析并保存，Dart 只提供
+     * 包名与关联上下文（工具调用 id、会话 id、助手 id）。
+     *
+     * 该入口**只供聊天卡片与通知栏**使用；模型无法触发它（Kelivo 包在硬基线内，
+     * 输入与观察都被拒绝）。
+     */
+    private fun requestApproval(rawArguments: Any?, result: MethodChannel.Result) {
+        val args = rawArguments as? Map<*, *>
+        val packageName = (args?.get("package_name") as? String)?.trim().orEmpty()
+        if (packageName.isEmpty()) {
+            result.error("invalid_argument", "package_name is required.", null)
+            return
+        }
+        try {
+            val record = PhoneAgentService.requestApproval(
+                appContext,
+                packageName = packageName,
+                toolCallId = (args?.get("tool_call_id") as? String)?.trim(),
+                conversationId = (args?.get("conversation_id") as? String)?.trim(),
+                approvalAssistantId = (args?.get("approval_assistant_id") as? String)?.trim(),
+            )
+            result.success(approvalRequestPayload(record))
+        } catch (error: Exception) {
+            result.error(
+                "internal_error",
+                error.message ?: "Could not create the approval request.",
+                null,
+            )
+        }
+    }
+
+    /** 当前仍待处理的请求（TTL 到期会在这里被置为过期）。不含已处理的历史。 */
+    private fun approvalRequests(result: MethodChannel.Result) {
+        try {
+            val requests = PhoneAgentService.approvalRequests()
+                .pending()
+                .map(::approvalRequestPayload)
+            result.success(linkedMapOf("requests" to requests))
+        } catch (error: Exception) {
+            result.error(
+                "internal_error",
+                error.message ?: "Could not read the approval requests.",
+                null,
+            )
+        }
+    }
+
+    /**
+     * 聊天卡片与通知栏共用的唯一判定入口。**幂等**：请求已是终态时只返回既有状态，
+     * 不写白名单。请求已不存在（进程重启后重放）返回 `approval_not_found`。
+     */
+    private fun resolveApproval(rawArguments: Any?, result: MethodChannel.Result) {
+        val args = rawArguments as? Map<*, *>
+        val requestId = (args?.get("request_id") as? String)?.trim().orEmpty()
+        if (requestId.isEmpty()) {
+            result.error("invalid_argument", "request_id is required.", null)
+            return
+        }
+        val approve = args?.get("approve") as? Boolean
+        if (approve == null) {
+            result.error("invalid_argument", "approve is required.", null)
+            return
+        }
+        try {
+            val resolution = PhoneAgentService.resolveApproval(appContext, requestId, approve)
+            if (resolution == null) {
+                result.error(
+                    "approval_not_found",
+                    "This approval request is no longer pending. Ask the assistant to try the action again so a new request is created.",
+                    null,
+                )
+                return
+            }
+            val payload = approvalRequestPayload(resolution.request)
+            payload["approve_result"] = resolution.approveResult?.let {
+                linkedMapOf<String, Any?>(
+                    "approved" to it.approved,
+                    "reason" to it.reason,
+                )
+            }
+            result.success(payload)
+        } catch (error: Exception) {
+            result.error(
+                "internal_error",
+                error.message ?: "Could not resolve the approval request.",
+                null,
+            )
+        }
+    }
+
+    /** 本地清理（切换会话 / 应用重启）：不写白名单、不通知模型。 */
+    private fun dismissApprovals(rawArguments: Any?, result: MethodChannel.Result) {
+        val args = rawArguments as? Map<*, *>
+        val conversationId = (args?.get("conversation_id") as? String)?.trim()
+            ?.takeIf { it.isNotEmpty() }
+        try {
+            PhoneAgentService.dismissApprovals(appContext, conversationId)
+            result.success(linkedMapOf("dismissed" to true))
+        } catch (error: Exception) {
+            result.error(
+                "internal_error",
+                error.message ?: "Could not dismiss the approval requests.",
+                null,
+            )
+        }
+    }
+
+    /** 首次启用隐私确认是否已读（plan 7.5.14，方案 B）。 */
+    private fun privacyNotice(result: MethodChannel.Result) {
+        try {
+            result.success(
+                linkedMapOf(
+                    "acknowledged" to
+                        PhoneAgentService.privacyNotice(appContext).acknowledged(),
+                ),
+            )
+        } catch (error: Exception) {
+            result.error(
+                "internal_error",
+                error.message ?: "Could not read the privacy notice state.",
+                null,
+            )
+        }
+    }
+
+    /**
+     * 记录用户已读首次启用隐私确认。**这只是告知记录**：不改变任何白名单判定，
+     * 也不阻断后续操作。
+     */
+    private fun acknowledgePrivacyNotice(result: MethodChannel.Result) {
+        try {
+            PhoneAgentService.privacyNotice(appContext).acknowledge()
+            result.success(linkedMapOf("acknowledged" to true))
+        } catch (error: Exception) {
+            result.error(
+                "internal_error",
+                error.message ?: "Could not record the privacy notice state.",
+                null,
+            )
+        }
+    }
+
+    /**
+     * 请求载荷。只含应用身份（包名、签名前缀、可选显示名）与生命周期元数据，
+     * 不含节点文本、窗口标题、截图或界面内容。
+     */
+    private fun approvalRequestPayload(record: ApprovalRequestRecord): LinkedHashMap<String, Any?> =
+        linkedMapOf(
+            "request_id" to record.id,
+            "package_name" to record.packageName,
+            "signing_prefix" to record.signingPrefix.takeIf { it.isNotEmpty() },
+            "signing_available" to !record.signingUnavailable,
+            "display_name" to record.displayName,
+            "tool_call_id" to record.toolCallId,
+            "conversation_id" to record.conversationId,
+            "assistant_id" to record.assistantId,
+            "created_at" to record.createdAtMillis,
+            "expires_at" to record.expiresAtMillis,
+            "state" to record.state.wire,
+        )
+
     private fun dispatch(
         method: String,
         rawArguments: Any?,
@@ -196,7 +364,7 @@ class PhoneAgentPlugin : FlutterPlugin {
                     if (finished.compareAndSet(false, true)) {
                         handler.removeCallbacks(timeout)
                         if (error != null) {
-                            result.error(error.code, error.message, null)
+                            result.error(error.code, error.message, error.details)
                         } else {
                             result.success(value)
                         }
