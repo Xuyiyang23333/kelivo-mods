@@ -18,15 +18,19 @@
 | --- | --- |
 | `driver.py` | 异常套件（`phone_agent_exception_test.dart`）的宿主驱动 |
 | `run_official.py` | 官方测试（`phone_agent_test.dart`）的最小宿主包装，只负责授权并拒绝随后的通知权限弹窗 |
-| `run_approval_chain.py` | 应用批准链路（`phone_agent_approval_chain_test.dart`）的宿主驱动：只做 `KEYCODE_HOME` 与证据抓取 |
+| `run_approval_chain.py` | 应用批准链路（`phone_agent_approval_chain_test.dart`）的宿主驱动：负责前台与授权编排（`KEYCODE_HOME`、`enable_service` 点系统 Allow、`svc power stayon`、`KEYCODE_WAKEUP`、`wm dismiss-keyguard`）与证据抓取 |
+| `_runs/` | 运行日志与 UI dump 输出目录（已 gitignore） |
 
-`run_approval_chain.py` 的 `evidence()` 抓的 `approval-chain-*.png/.xml` 可能拍在
-`KEYCODE_HOME` 落定之前（实测拿到的是测试应用自己的界面），因此它们只作「应用内
-状态」旁证，**不作为 launcher 前台证据**。目标前台的真正证据是测试打印
+`run_approval_chain.py` 的 `evidence()` 抓的 PNG/XML 可能拍在 `KEYCODE_HOME` 落定
+之前（实测拿到的是测试应用自己的界面），因此它们只作「应用内状态」旁证，**不作为
+launcher 前台证据**。目标前台的真正证据是测试打印
 `PHONE_AGENT_APPROVAL_OBSERVED: package=<目标包> nodes=<N>`（断言读树的
 `package_name` 等于目标包且节点非空）。目标包默认 Pixel Launcher，可用
 `--dart-define=PHONE_AGENT_TARGET_PACKAGE=<包名>` 覆盖（放进 `TEST_ARGS`）。
-| `_runs/` | 运行日志与 UI dump 输出目录（已 gitignore） |
+
+证据文件名：本轮留存的是 `approval-launcher-foreground.png/.xml`（真实存在）；
+R1 之后默认前缀已改为 `approval-chain-app-state`，但**没有再跑过**，新名文件
+下次运行起才生效。
 
 ## 用法
 
@@ -44,7 +48,7 @@ python3 mods/phone_agent/host/run_official.py
 APP_TREE=... SERIAL=1960cd68 USE_SETTINGS_PUT=1 \
 python3 mods/phone_agent/host/run_official.py
 
-# 应用批准链路（宿主只做 KEYCODE_HOME 与证据抓取）
+# 应用批准链路（宿主负责前台与授权编排 + 证据抓取）
 APP_TREE=... SERIAL=emulator-5554 \
 python3 mods/phone_agent/host/run_approval_chain.py
 ```

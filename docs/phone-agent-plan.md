@@ -1776,9 +1776,9 @@ APP_TREE=<tree> SERIAL=emulator-5554   python3 mods/phone_agent/host/run_approva
 | 撤销 | `approvedApps` 不再含目标包 | 原生 `revokeApp` 立即生效 |
 | 再次拒绝 | `PHONE_AGENT_APPROVAL_REVOKED: permission_required again` | 撤销后立即回到 `permission_required`，仍只回身份 |
 
-**证明边界**：本链路验证的是**聊天卡片**入口与原生白名单判定；**通知栏批准 action 没有被真实点击**（见未验证项）。测试自己打印标记、宿主只做 `KEYCODE_HOME` 与证据抓取，属既定分工。
+**证明边界**：本链路验证的是**聊天卡片**入口与原生白名单判定；**通知栏批准 action 没有被真实点击**（见未验证项）。测试自己打印标记、宿主只做**前台与授权编排**（`KEYCODE_HOME`、`enable_service` 点系统 Allow、`svc power stayon`、`KEYCODE_WAKEUP`、`wm dismiss-keyguard`）与证据抓取，属既定分工。
 
-**关于截图/UI dump（R1 修正）**：`_runs/approval-chain-app-state.png` / `.xml` 里的前台其实是**测试应用本身**（驱动日志 `focus=com.psyche.kelivo.phoneagent`，xml 所有节点都是该包，画面是应用加批准成功 snackbar），`go_home()` 里的抓取相对 `KEYCODE_HOME` 落定得太早。它们只作「应用内批准后状态」的旁证，**不作为 launcher 前台证据**。launcher 前台的真正证据是本链路的测试打印与断言：`PHONE_AGENT_APPROVAL_OBSERVED: package=com.google.android.apps.nexuslauncher nodes=18`，即读树返回的 `tree['package_name']` 等于目标包且节点数为 18。
+**关于截图/UI dump（R1/R2 修正）**：本轮留存的文件名是 `_runs/approval-launcher-foreground.png` / `.xml`（**这是磁盘上真实存在的两个文件**）；R1 之后脚本的默认前缀已改为 `approval-chain-app-state`，但**本轮没有再跑过**，因此新名文件尚未产出、**下次运行起才生效**。这两个文件里的前台其实是**测试应用本身**（驱动日志 `focus=com.psyche.kelivo.phoneagent`，xml 11 个节点全部是该包，画面是应用加批准成功 snackbar），`go_home()` 里的抓取相对 `KEYCODE_HOME` 落定得太早。它们只作「应用内批准后状态」的旁证，**不作为 launcher 前台证据**。launcher 前台的真正证据是本链路的测试打印与断言：`PHONE_AGENT_APPROVAL_OBSERVED: package=com.google.android.apps.nexuslauncher nodes=18`，即读树返回的 `tree['package_name']` 等于目标包且节点数为 18。
 
 #### (c) 产品 debug APK（设备验证同一棵树）
 
@@ -1804,7 +1804,7 @@ APP_TREE=<tree> SERIAL=emulator-5554   python3 mods/phone_agent/host/run_approva
 五项都是**文档对证据的表述**与**新测试可移植性**，不涉及产品代码，未重跑设备：
 
 1. **(a) 的 POST_NOTIFICATIONS 因果**：原写「拒绝弹窗是 `writeSelection` 得以执行的前提」，与 r10 日志不符（Mods 断言 `00:40 +1` 早于 `16:16:48` 的拒绝约 10 秒）。已改为「弹窗真实出现并被拒绝、权限保持 `granted=false`；门控由代码路径（`ensureAcknowledged` 里的 `await _ensureNotificationPermission()`）支持而非该轮日志」，删掉「否则不需要拒绝弹窗」的反向推断，并同步 `host/README.md` 第 4 条与 `run_official.py` 的注释。
-2. **证据文件正名**：`_runs/approval-launcher-foreground.png/.xml` 实际拍的是测试应用自己（驱动日志 `focus=com.psyche.kelivo.phoneagent`、xml 全部节点是该包）。默认前缀改为 `approval-chain-app-state`，文档明确它们只作「应用内状态」旁证；launcher 前台的真证据是测试打印 `PHONE_AGENT_APPROVAL_OBSERVED: package=<目标> nodes=18`（断言读树 `package_name` 等于目标包）。
+2. **证据文件正名**：`_runs/approval-launcher-foreground.png/.xml` 实际拍的是测试应用自己（驱动日志 `focus=com.psyche.kelivo.phoneagent`、xml 全部节点是该包）。默认前缀改为 `approval-chain-app-state`（**本轮未用新前缀跑过，因此新名文件尚未产出**），文档明确旧名文件只作「应用内状态」旁证；launcher 前台的真证据是测试打印 `PHONE_AGENT_APPROVAL_OBSERVED: package=<目标> nodes=18`（断言读树 `package_name` 等于目标包）。
 3. **`QUERY_ALL_PACKAGES` 计数**：merged manifest 只有 **1 条 `<uses-permission>`**，第二处是插件 manifest 的注释文本；plan 9.3.8、`AGENTS.md`、handoff 三处已改为「1 条声明（另有 1 处注释文本）」，「一次声明」的契约表述不变。
 4. **异常套件归因降级**：原写「单独 `+1` 说明问题在宿主时序」。已改为「与残留 `am start` 竞态**一致**」，并直接引 r2 日志 `15:56:38 marker PHONE_AGENT_RECENTS` → `15:56:41 return_to_app` 这行；同时纠正一处事实——两轮 `+7 -1` 都跑在 `_nav_generation` 修复**之前**，修复后的整轮（`exc_api35_m36_r3.log`）因模拟器掉线未跑成，所以**修复从未在整轮里被验证**，不写「已修复」。
 5. **测试可移植性**：官方测试的隐私弹窗不再硬编码英文，改从 `AppLocalizations.delegate.load(Locale('en'))` 取文案键，诊断串区分「已确认」「刚点掉（含 locale 名）」「超时未出现（直接 fail，说明是找不到弹窗而非选择失败）」；批准链路的目标包改为 `String.fromEnvironment('PHONE_AGENT_TARGET_PACKAGE')`，默认仍是 Pixel Launcher，可用 `--dart-define` 覆盖。
@@ -1812,6 +1812,16 @@ APP_TREE=<tree> SERIAL=emulator-5554   python3 mods/phone_agent/host/run_approva
 顺手项：删掉 `driver.adb()` 无调用点的 `check` 参数（并去掉 README 里的对应描述）；给 `run_official.py` 的 `dismiss_notification_prompt` 补注释，说明它是 240 秒守护线程、**只在 `permissioncontroller` 前台时动作**（否则空转），因此理论上可能碰到无关权限弹窗，本轮只命中 1 次。
 
 R1 后仓库树 `724bbbc8b7b5f231`（`copy` 里的集成测试变了，故 `modsetHash` 变化）；已确认新树的 `lib/` 与 `dependencies/kelivo_phone_agent/` 与设备验证树 `39824fc9baf262e6` **逐文件相同**，产品 APK 记录继续有效。改动后复跑：Loader `dart format` 0 变更、`dart analyze tool test` 无问题、`dart test` 173 通过；合成树 `dart analyze --fatal-infos integration_test/phone_agent_test.dart integration_test/phone_agent_approval_chain_test.dart` **No issues found**；`plan`/`apply`/`verify` 通过。
+
+#### R2 返工记录（reviewer `p2-3items` / fix-then-merge，reviewedCommit `7425b5c`）
+
+三项都是文档侧，R1 的 5 项已被 R2 逐条复核为**实质修好**；不改产品代码、不重跑设备：
+
+1. **证据文件名与磁盘不符**（R1 引入）：正文原把 `_runs/approval-chain-app-state.png/.xml` 当成已存在的文件引用，但本轮从未用新前缀跑过，磁盘上只有 `approval-launcher-foreground.*`。现改为引真实存在的旧名文件，并注明「前缀已改为 `approval-chain-app-state`，本轮未再跑、新名文件下次运行起才生效」；`host/README.md` 同口径。
+2. **`host/README.md` 表格被说明段落切断**（R1 引入）：6 行说明插在表格中间，`| _runs/ |` 行脱离表格会渲染成普通文本。说明整体移到表格之后，恢复完整 5 行表。
+3. **README / handoff 的 `recents` 归因口径**：原先直接写「宿主竞态」，与本节「一致但不构成因果证明」矛盾（`AGENTS.md` 规定最终验收以 plan 与 README 为准）。现两处都改为同一口径：与残留 `am start` 竞态一致、引 r2 日志两行、单跑只证间歇性、`_nav_generation` 修复未在整轮验证、**成因未确认**。
+
+顺手项：`plan` 与 `host/README.md` 把宿主描述从「只做 `KEYCODE_HOME` 与证据抓取」改为**前台与授权编排**并列全（`KEYCODE_HOME`、`enable_service` 点系统 Allow、`svc power stayon`、`KEYCODE_WAKEUP`、`wm dismiss-keyguard`）＋证据抓取——r6 日志确有 `confirmed with Allow` / `enable_service: bound`。
 
 #### tower 的范围裁定（2026-11-16，R1 返工写入）
 
