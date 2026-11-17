@@ -4,13 +4,6 @@ package com.kelivo.phoneagent
 internal class PhoneAgentError(
     val code: String,
     override val message: String,
-    /**
-     * 结构化载荷，随错误码一起返回给 Dart。当前只有 `permission_required` 使用：
-     * 它带上应用身份（包名、签名 SHA-256 前 8 位、可选显示名），供聊天卡片与
-     * 通知栏展示与写入批准。内容严格限于 plan 7.5.4 允许的身份字段——不含节点
-     * 文本、窗口标题、截图或界面内容摘要。
-     */
-    val details: Map<String, Any?>? = null,
 ) : Exception(message)
 
 internal object PhoneAgentArgs {
@@ -185,6 +178,25 @@ internal object PhoneAgentResult {
             "success" to true,
             "action" to action,
             "message" to message,
+        )
+
+    fun appsList(apps: List<Map<String, String>>): Map<String, Any?> =
+        linkedMapOf("apps" to apps)
+
+    fun openAppSuccess(packageName: String): Map<String, Any?> =
+        linkedMapOf(
+            "success" to true,
+            "action" to "open_app",
+            "package_name" to packageName,
+            "message" to "Launched $packageName.",
+        )
+
+    fun waitSuccess(durationMs: Long): Map<String, Any?> =
+        linkedMapOf(
+            "success" to true,
+            "action" to "wait",
+            "duration_ms" to durationMs,
+            "message" to "Waited ${durationMs}ms.",
         )
 
     fun screenshot(screenshot: CapturedScreenshot): Map<String, Any?> =

@@ -144,7 +144,6 @@ internal class NodeActionExecutor(
                 showVisual(OverlayEvent.Node(bounds, action), { true }, generation)
             },
         )
-        registry.clearScreenshot()
         if (!accepted) {
             throw PhoneAgentError(
                 "action_failed",
@@ -154,7 +153,7 @@ internal class NodeActionExecutor(
         complete(
             InputOutcome.Success(
                 request.action.wireName(),
-                "Action accepted. Read the tree or take a screenshot to verify the result.",
+                "Action accepted.",
             ),
         )
     }
@@ -171,9 +170,8 @@ internal class NodeActionExecutor(
                 "A gesture is still running. Wait for its result before the next call.",
             )
         }
-        val observation = registry.requireScreenshot(current)
-        val startX = CoordinateMapper.toPixel(request.x, observation.screenWidth, "x")
-        val startY = CoordinateMapper.toPixel(request.y, observation.screenHeight, "y")
+        val startX = CoordinateMapper.toPixel(request.x, current.width, "x")
+        val startY = CoordinateMapper.toPixel(request.y, current.height, "y")
         val path = Path().apply { moveTo(startX, startY) }
         var endX: Float? = null
         var endY: Float? = null
@@ -183,7 +181,7 @@ internal class NodeActionExecutor(
                     "invalid_argument",
                     "end_x is required for swipe.",
                 ),
-                observation.screenWidth,
+                current.width,
                 "end_x",
             )
             endY = CoordinateMapper.toPixel(
@@ -191,7 +189,7 @@ internal class NodeActionExecutor(
                     "invalid_argument",
                     "end_y is required for swipe.",
                 ),
-                observation.screenHeight,
+                current.height,
                 "end_y",
             )
             path.lineTo(endX, endY)
@@ -207,7 +205,6 @@ internal class NodeActionExecutor(
         if (request.action == GestureAction.LONG_PRESS && duration < 500) {
             throw PhoneAgentError("invalid_argument", "long_press requires at least 500 ms.")
         }
-        registry.clearScreenshot()
         val generation = visualGeneration()
         dispatchGesture(request.action, path, duration, complete) { isActive ->
             showVisual(

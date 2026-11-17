@@ -24,8 +24,6 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityManager
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
-import java.io.File
-import java.security.MessageDigest
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.atomic.AtomicBoolean
@@ -40,233 +38,14 @@ class PhoneAgentService : AccessibilityService() {
         private const val QUEUE_TIMEOUT_MS = 15_000L
 
         /**
-         * 窗口类型解析的有界重试预算。实测（M28，API35，服务重连后首次截图）
-         * `root.window` 返回 null，同时 `windows` 只列出别的窗口 id，两条来源
-         * 同时不可用，且窗口列表要滞后约 3 秒才包含目标窗口；原 3 次 × 25/50ms
-         * （共 75ms）在真实滞后面前必然失败，导致首次读树/截图返回
-         * `window_type_unknown`。
-         *
-         * 预算取实测滞后量级，仍远小于读树/截图 35s 通道超时与 15s 排队超时；
-         * 只在两条来源都失败时才消耗，正常路径无额外延迟。预算内拿不到仍是
-         * `UNKNOWN`（fail closed），不无限等待，也不为了让测试变绿而放宽判定。
+         * 窗口类型解析的有界重试预算。只用于短时等待系统 windows 列表同步，
+         * 避免长时间阻塞 worker。
          */
-        private const val WINDOW_TYPE_BUDGET_MS = 2_500L
+        private const val WINDOW_TYPE_BUDGET_MS = 300L
         private const val WINDOW_TYPE_RETRY_DELAY_MS = 40L
 
         @Volatile
         private var connected: PhoneAgentService? = null
-
-        private val approvalsLock = Any()
-
-        @Volatile
-        private var approvalsOrNull: AppApprovals? = null
-
-        private val auditLock = Any()
-
-        @Volatile
-        private var auditOrNull: AuditLog? = null
-
-        /**
-         * 审计日志。与白名单同目录策略（`noBackupFilesDir`，应用私有、不进聊天备份、
-         * 不上传、不同步），字段与保留策略见 [AuditRecord] / [AuditLog]。
-         */
-        internal fun auditLog(context: Context): AuditLog = synchronized(auditLock) {
-            auditOrNull ?: AuditLog(
-                FileAuditStorage(File(context.noBackupFilesDir, AuditLog.FILE_NAME)),
-            ).also { auditOrNull = it }
-        }
-
-        /** 审计用的签名前缀；解析失败返回 null，不阻断记录。 */
-        private fun auditSigningPrefix(context: Context, packageName: String): String? =
-            runCatching { signingIdentity(context, packageName)?.signingPrefix }.getOrNull()
-
-        private val approvalRequestsLock = Any()
-
-        @Volatile
-        private var approvalRequestsOrNull: ApprovalRequests? = null
-
-        @Volatile
-        private var approvalNotifierOrNull: PhoneAgentApprovalNotifier? = null
-
-        @Volatile
-        private var privacyNoticeOrNull: PrivacyNoticeStore? = null
-
-        /**
-         * 首次启用隐私确认状态（plan 7.5.14，方案 B）。同样不依赖无障碍服务连接：
-         * 用户可能在服务关闭时就选择 Phone Agent。
-         */
-        internal fun privacyNotice(context: Context): PrivacyNoticeStore =
-            synchronized(approvalRequestsLock) {
-                privacyNoticeOrNull ?: PrivacyNoticeStore(
-                    FilePrivacyNoticeStorage(
-                        File(context.noBackupFilesDir, "phone_agent_privacy_notice.tsv"),
-                    ),
-                ).also { privacyNoticeOrNull = it }
-            }
-
-        /**
-         * 进程级批准请求状态机（plan 7.5.6/7.5.13）。不依赖无障碍服务连接：
-         * 通知栏批准 action 与 Mods 页撤销在服务关闭时也必须可用。
-         */
-        internal fun approvalRequests(context: Context): ApprovalRequests =
-            synchronized(approvalRequestsLock) {
-                approvalRequestsOrNull ?: ApprovalRequests(
-                    nowMillis = { System.currentTimeMillis() },
-                    // 请求离开 pending 时撤下对应的常驻通知，避免堆叠无法关闭的通知。
-                    onLeftPending = { record ->
-                        approvalNotifier(context).cancel(record.id)
-                    },
-                ).also { approvalRequestsOrNull = it }
-            }
-
-        private fun approvalNotifier(context: Context): PhoneAgentApprovalNotifier =
-            synchronized(approvalRequestsLock) {
-                approvalNotifierOrNull ?: PhoneAgentApprovalNotifier(context.applicationContext)
-                    .also { approvalNotifierOrNull = it }
-            }
-
-        /**
-         * 创建一条待处理批准请求。身份由**原生侧**解析并保存（Dart 不是放行点），
-         * 并立刻发通知。同一 `(包名, 签名集合)` 的旧 pending 请求被置为 `superseded`。
-         */
-        internal fun requestApproval(
-            context: Context,
-            packageName: String,
-            toolCallId: String?,
-            conversationId: String?,
-            approvalAssistantId: String?,
-        ): ApprovalRequestRecord {
-            val identity = signingIdentity(context, packageName)
-            val record = approvalRequests(context).create(
-                packageName = packageName,
-                signingSha256Values = identity?.sha256Values.orEmpty(),
-                displayName = identity?.displayName,
-                toolCallId = toolCallId,
-                conversationId = conversationId,
-                assistantId = approvalAssistantId,
-            )
-            approvalNotifier(context).show(record)
-            return record
-        }
-
-        /**
-         * 通知栏 action 与聊天卡片共用的唯一判定入口。返回 null 表示该 id 不存在
-         * （进程重启后系统重放、请求已被清理），**不写白名单**。
-         */
-        internal fun resolveApproval(
-            context: Context,
-            requestId: String,
-            approve: Boolean,
-        ): ApprovalResolution? {
-            val resolution = approvalRequests(context).resolve(requestId, approve) { record ->
-                when {
-                    // 签名从未解析成功的请求不能批准：空集合不能退化成“按当前签名写入”，
-                    // 否则签名绑定不变量被绕过（fail closed）。
-                    record.signingUnavailable ->
-                        ApproveResult(false, ApproveResult.REASON_SIGNING_UNAVAILABLE, null)
-                    else -> considerPreApproved(context, record) ?: approvals(context).approve(
-                        packageName = record.packageName,
-                        now = System.currentTimeMillis(),
-                        sourceAssistantId = record.assistantId,
-                        expectedSha256Values = record.signingSha256Values,
-                    )
-                }
-            }
-            // 任一端处理完就撤下另一端：通知在这里统一取消，聊天卡片由 Dart 侧
-            // 的状态流刷新（同一 resolve 结果）。
-            approvalNotifier(context).cancel(requestId)
-            return resolution
-        }
-
-        /**
-         * 构建配置的预批准条目已经在边界判定里直接放行，因此永远不该产生批准请求。
-         * 若出现（例如旧状态或误调用），这里明确失败而不是写入一条用不到的记录。
-         */
-        private fun considerPreApproved(
-            context: Context,
-            record: ApprovalRequestRecord,
-        ): ApproveResult? = if (record.packageName in preApprovedPackages(context)) {
-            ApproveResult(false, ApproveResult.REASON_PRE_APPROVED, null)
-        } else {
-            null
-        }
-
-        /** 本地清理（切换会话、应用重启、服务断连）：不写白名单、不通知模型。 */
-        internal fun dismissApprovals(context: Context, conversationId: String? = null) {
-            val ids = if (conversationId == null) {
-                approvalRequests(context).dismissAll()
-            } else {
-                approvalRequests(context).dismissForConversation(conversationId)
-            }
-            val notifier = approvalNotifier(context)
-            ids.forEach { notifier.cancel(it) }
-        }
-
-        /**
-         * 进程级批准入口。批准/撤销/查询不依赖无障碍服务是否连接，因此放在
-         * companion：Mods 页在服务关闭时也必须能撤销授权。
-         *
-         * 白名单落在 `noBackupFilesDir`（应用私有、不进聊天备份、不上传），
-         * 每次判定都重新解析当前签名，不做正缓存，因此撤销与签名变化立即生效。
-         */
-        internal fun approvals(context: Context): AppApprovals = synchronized(approvalsLock) {
-            approvalsOrNull ?: AppApprovals(
-                resolver = SigningResolver { packageName -> signingIdentity(context, packageName) },
-                store = WhitelistStore(
-                    FileWhitelistStorage(
-                        File(context.noBackupFilesDir, "phone_agent_whitelist.tsv"),
-                    ),
-                ),
-                preApprovedPackages = preApprovedPackages(context),
-            ).also { approvalsOrNull = it }
-        }
-
-        private fun signingIdentity(context: Context, packageName: String): SigningIdentity? {
-            val manager = context.packageManager
-            val info = try {
-                if (Build.VERSION.SDK_INT >= 28) {
-                    manager.getPackageInfo(packageName, PackageManager.GET_SIGNING_CERTIFICATES)
-                } else {
-                    @Suppress("DEPRECATION")
-                    manager.getPackageInfo(packageName, PackageManager.GET_SIGNATURES)
-                }
-            } catch (error: Exception) {
-                return null
-            }
-            val certificates: List<ByteArray> = try {
-                if (Build.VERSION.SDK_INT >= 28) {
-                    info.signingInfo?.apkContentsSigners?.map { it.toByteArray() }.orEmpty()
-                } else {
-                    @Suppress("DEPRECATION")
-                    info.signatures?.map { it.toByteArray() }.orEmpty()
-                }
-            } catch (error: Exception) {
-                return null
-            }
-            val hashes = SigningIdentity.normalizeSha256(certificates.map(::sha256Hex))
-            if (hashes.isEmpty()) return null
-            val displayName = try {
-                manager.getApplicationInfo(packageName, 0).loadLabel(manager)?.toString()
-            } catch (error: Exception) {
-                null
-            }
-            return SigningIdentity(packageName, hashes, displayName?.takeIf { it.isNotBlank() })
-        }
-
-        private fun sha256Hex(value: ByteArray): String =
-            MessageDigest.getInstance("SHA-256").digest(value)
-                .joinToString("") { byte -> (byte.toInt() and 0xff).toString(16).padStart(2, '0') }
-
-        /** 构建配置的预批准条目：测试包恒预批准，debuggable 构建额外预批准跨 UID 夹具包。 */
-        internal fun preApprovedPackages(context: Context): Set<String> {
-            val debuggable = try {
-                context.applicationInfo.flags and
-                    android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0
-            } catch (error: Exception) {
-                false
-            }
-            return buildPreApprovedPackages(debuggable)
-        }
 
         fun status(context: Context): Map<String, Any> {
             val manager = context.getSystemService(AccessibilityManager::class.java)
@@ -328,10 +107,7 @@ class PhoneAgentService : AccessibilityService() {
     private lateinit var treeBudget: ActionBudget
     private lateinit var overlay: PhoneAgentOverlay
 
-    /**
-     * 应用边界策略（硬基线 + 窗口类型 + 构建期 deny 清单 + 用户白名单）。
-     * 输入侧与观察侧共用同一实例与同一份白名单存储。
-     */
+    /** 应用边界策略（硬基线 + 窗口类型）。 */
     private lateinit var policy: PackagePolicy
 
     /**
@@ -343,10 +119,7 @@ class PhoneAgentService : AccessibilityService() {
 
     override fun onCreate() {
         super.onCreate()
-        policy = PackagePolicy(
-            approvals = approvals(this),
-            preApprovedPackages = preApprovedPackages(this),
-        )
+        policy = PackagePolicy()
         registry = ObservationRegistry(
             now = { SystemClock.elapsedRealtime() },
             rootProvider = { rootInActiveWindow?.let(::AndroidPhoneNode) },
@@ -449,22 +222,12 @@ class PhoneAgentService : AccessibilityService() {
         val epoch = generation.get()
         val enqueuedAt = SystemClock.elapsedRealtime()
         val finished = AtomicBoolean(false)
-        // 审计上下文按调用创建：动作名已收敛为固定 token，身份字段缺失记为 null。
-        // `packageName` 由真正取到前台窗口的那一步写入，写不到就是 null。
-        val audit = AuditAction.forCall(method, args)?.let { action ->
-            val (assistantId, conversationId) = AuditIdentity.from(args)
-            AuditContext(action).also {
-                it.assistantId = assistantId
-                it.conversationId = conversationId
-            }
-        }
         lateinit var reply: (Any?, PhoneAgentError?) -> Unit
         reply = { value, error ->
             val deliver = {
                 if (finished.compareAndSet(false, true)) {
                     requests.remove(reply)
                     if (epoch == generation.get() && !destroyed) {
-                        recordAudit(audit, error?.code)
                         complete(value, error)
                     } else {
                         complete(null, interrupted())
@@ -493,7 +256,7 @@ class PhoneAgentService : AccessibilityService() {
                     if (epoch != generation.get() || destroyed) {
                         reply(null, interrupted())
                     } else {
-                        dispatchOnWorker(method, args, audit, reply)
+                        dispatchOnWorker(method, args, reply)
                     }
                 }
             }
@@ -502,45 +265,9 @@ class PhoneAgentService : AccessibilityService() {
         }
     }
 
-    /**
-     * 写入一条审计元数据。**永不阻断主路径**：失败只在 [AuditLog] 内计数，
-     * 不影响工具结果、白名单或边界判定。记录内容是固定七字段，见 [AuditRecord]。
-     *
-     * `reply` 的收口常常在主线程执行（超时、提前返回都会走那里），而审计包含
-     * 惰性初始化（`noBackupFilesDir` 首次会创建目录）、`PackageManager` 签名解析
-     * 与一次文件写入。因此 `auditLog(this)` 与实际写入都在 [Runnable] 内部完成，
-     * 优先投递到 worker 线程；worker 已关闭时退化为就地执行。时间戳在结果时刻
-     * 捕获，不随后入队漂移。
-     */
-    private fun recordAudit(context: AuditContext?, resultCode: String?) {
-        if (context == null) return
-        val code = resultCode ?: AUDIT_OK
-        val now = System.currentTimeMillis()
-        val write = Runnable {
-            auditLog(this).recordSafely(
-                context = context,
-                resultCode = code,
-                now = now,
-                signingPrefix = { packageName ->
-                    packageName?.let { auditSigningPrefix(this, it) }
-                },
-            )
-        }
-        if (Looper.myLooper() == Looper.getMainLooper() && !worker.isShutdown) {
-            try {
-                worker.execute(write)
-                return
-            } catch (error: RejectedExecutionException) {
-                // worker 正关闭：退回就地执行，失败仍只计数。
-            }
-        }
-        write.run()
-    }
-
     private fun dispatchOnWorker(
         method: String,
         args: Map<String, Any?>?,
-        audit: AuditContext?,
         reply: (Any?, PhoneAgentError?) -> Unit,
     ) {
         try {
@@ -558,11 +285,11 @@ class PhoneAgentService : AccessibilityService() {
             ensureUnlocked()
             when (method) {
                 "readTree" -> {
-                    val result = readTree(args, audit)
+                    val result = readTree(args)
                     reply(result, null)
                 }
-                "screenshot" -> captureScreenshot(reply, audit)
-                "input" -> input(args, reply, audit)
+                "screenshot" -> captureScreenshot(reply)
+                "input" -> input(args, reply)
                 "clearScreenshot" -> {
                     registry.clearScreenshot()
                     reply(linkedMapOf("cleared" to true), null)
@@ -589,17 +316,13 @@ class PhoneAgentService : AccessibilityService() {
         }
     }
 
-    private fun readTree(args: Map<String, Any?>?, audit: AuditContext?): Map<String, Any?> {
+    private fun readTree(args: Map<String, Any?>?): Map<String, Any?> {
         val offset = PhoneAgentArgs.int(args, "offset", 0, 0, 1_000_000)
         val maxNodes = PhoneAgentArgs.int(args, "max_nodes", 120, 1, 200)
         val interactiveOnly = PhoneAgentArgs.bool(args, "interactive_only", false)
         val root = rootInActiveWindow ?: throw noAccessibleWindowError()
         val current = windowState(root)
-        audit?.packageName = current.packageName
         if (offset == 0) {
-            // 观察门控只在这一处判定：分页请求复用同一观测，registry.page 仍会比较
-            // 完整 WindowState。未批准时这里直接抛出 permission_required，因此不会
-            // 扣减 treeBudget、不会 beginTree、也不会产生节点句柄。
             try {
                 policy.requireObservable(current.packageName, current.windowType)
             } catch (error: PhoneAgentError) {
@@ -638,7 +361,7 @@ class PhoneAgentService : AccessibilityService() {
         return PhoneAgentResult.treePage(registry.page(0, maxNodes, current))
     }
 
-    private fun captureScreenshot(reply: (Any?, PhoneAgentError?) -> Unit, audit: AuditContext?) {
+    private fun captureScreenshot(reply: (Any?, PhoneAgentError?) -> Unit) {
         if (pendingScreenshot != null || screenshots.isBusy()) {
             reply(
                 null,
@@ -655,10 +378,6 @@ class PhoneAgentService : AccessibilityService() {
         } finally {
             root.recycle()
         }
-        audit?.packageName = current.packageName
-        // 顺序固定：前台窗口 → 硬基线/窗口类型 → 构建期 deny 清单 → 用户白名单
-        // → 全窗口密码遮挡遍历 → 截图。门控不读节点内容、不读密码 bounds，
-        // 未批准或前台被拒时直接失败，遮挡遍历的范围与规则不受影响。
         policy.requireObservable(current.packageName, current.windowType)
         val passwordBounds = collectPasswordBounds(current)
         pendingScreenshot = reply
@@ -693,9 +412,50 @@ class PhoneAgentService : AccessibilityService() {
     private fun input(
         args: Map<String, Any?>?,
         reply: (Any?, PhoneAgentError?) -> Unit,
-        audit: AuditContext?,
     ) {
         val action = PhoneAgentArgs.string(args, "action")
+        if (action == "list_apps") {
+            reply(listLaunchableApps(), null)
+            return
+        }
+        if (action == "wait") {
+            val delayMs = PhoneAgentArgs.optionalLong(args, "duration_ms", 100, 5000) ?: 1_000L
+            val deadline = SystemClock.elapsedRealtime() + delayMs
+            while (true) {
+                ensureActive()
+                val remaining = deadline - SystemClock.elapsedRealtime()
+                if (remaining <= 0) break
+                try {
+                    Thread.sleep(minOf(50L, remaining))
+                } catch (error: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    throw interrupted()
+                }
+            }
+            reply(PhoneAgentResult.waitSuccess(delayMs), null)
+            return
+        }
+        if (action == "open_app") {
+            val targetPackage = PhoneAgentArgs.string(args, "package_name").trim()
+            if (targetPackage == packageName) {
+                throw PhoneAgentError(
+                    "system_window_denied",
+                    "Cannot launch the host app itself ($targetPackage).",
+                )
+            }
+            policy.requireLaunchAllowed(targetPackage)
+            val intent = packageManager.getLaunchIntentForPackage(targetPackage)
+                ?: throw PhoneAgentError(
+                    "app_not_found",
+                    "No launchable app found for $targetPackage. Call list_apps to find an installed package name.",
+                )
+            registry.invalidateAll()
+            if (this::overlay.isInitialized) overlay.clear()
+            ensureActive()
+            startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            reply(PhoneAgentResult.openAppSuccess(targetPackage), null)
+            return
+        }
         val request = when (action) {
             "tap", "long_press" -> {
                 val nodeId = PhoneAgentArgs.optionalString(args, "node_id")
@@ -737,11 +497,10 @@ class PhoneAgentService : AccessibilityService() {
             )
             else -> throw PhoneAgentError(
                 "invalid_argument",
-                "Unknown input action: $action. Use tap, long_press, set_text, scroll, swipe, back, home or recents.",
+                "Unknown input action: $action. Use tap, long_press, set_text, scroll, swipe, back, home, recents, list_apps, open_app or wait.",
             )
         }
         val current = currentWindow() ?: throw noAccessibleWindowError()
-        audit?.packageName = current.packageName
         executor.execute(request, current) { outcome ->
             when (outcome) {
                 is InputOutcome.Success -> reply(
@@ -751,6 +510,31 @@ class PhoneAgentService : AccessibilityService() {
                 is InputOutcome.Failure -> reply(null, outcome.error)
             }
         }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun listLaunchableApps(): Map<String, Any?> {
+        val query = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+        val apps = packageManager.queryIntentActivities(query, 0)
+            .asSequence()
+            .filter { info ->
+                val pkg = info.activityInfo?.packageName
+                !pkg.isNullOrBlank() && pkg != packageName && !policy.isHardBaseline(pkg)
+            }
+            .distinctBy { it.activityInfo.packageName }
+            .map { info ->
+                val label = runCatching { info.loadLabel(packageManager)?.toString() }
+                    .getOrNull()
+                    ?.takeIf { it.isNotBlank() }
+                    ?: info.activityInfo.packageName
+                linkedMapOf(
+                    "name" to label,
+                    "package_name" to info.activityInfo.packageName,
+                )
+            }
+            .sortedBy { it["name"]?.lowercase().orEmpty() }
+            .toList()
+        return PhoneAgentResult.appsList(apps)
     }
 
     private fun currentWindow(): WindowState? {

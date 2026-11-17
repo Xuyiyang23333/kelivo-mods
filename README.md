@@ -1,6 +1,6 @@
 # Kelivo 私有 Mod 工作区
 
-本仓库用于在上游 Kelivo 源码之外维护编译前 Mod。通用 Mod Loader 已完成验收；当前正在实现并验收 `phone_agent` Mod。
+本仓库用于在上游 Kelivo 源码之外维护编译前 Mod。通用 Mod Loader 已完成验收；`phone_agent` Mod 已实现精简实用方案，并经用户真机确认功能正常。
 
 - 上游源码：`V:/coding/kelivo`
 - 当前固定基线：`73afa4ec77cfc9af2efea2487fee8bba1362639d`

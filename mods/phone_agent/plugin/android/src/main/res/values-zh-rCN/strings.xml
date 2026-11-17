@@ -2,10 +2,4 @@
 <resources>
     <string name="kelivo_phone_agent_service_label">Kelivo 手机 Agent</string>
     <string name="kelivo_phone_agent_service_description">允许你已开启的助手读取当前屏幕，并为手机 Agent 任务执行点击、输入、滑动和导航。屏幕内容会发送给当前对话配置的模型服务商。此服务与 Kelivo 手机控制相互独立，可随时在无障碍设置中关闭。</string>
-    <string name="kelivo_phone_agent_approval_channel">应用批准请求</string>
-    <string name="kelivo_phone_agent_approval_channel_description">在助手读取或控制某个应用前请求你批准。只显示应用名称与签名证书前缀，不显示屏幕内容。</string>
-    <string name="kelivo_phone_agent_approval_title">允许助手控制这个应用？</string>
-    <string name="kelivo_phone_agent_approval_body">%1$s\n批准后助手可以读取该应用的屏幕，并发送点击、文字和手势。批准长期有效，直到你在 Kelivo 中撤销。</string>
-    <string name="kelivo_phone_agent_approval_allow">允许</string>
-    <string name="kelivo_phone_agent_approval_deny">拒绝</string>
 </resources>

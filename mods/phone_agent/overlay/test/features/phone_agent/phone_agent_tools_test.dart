@@ -94,7 +94,7 @@ void main() {
       expect(jsonEncode(definitions).contains('snapshot_id'), isFalse);
     });
 
-    test('非视觉模型没有截图工具和坐标输入', () {
+    test('非视觉模型没有截图工具但保留坐标输入', () {
       final definitions = PhoneAgentTools.buildDefinitions(
         supportsImageInput: false,
       );
@@ -104,16 +104,25 @@ void main() {
       ]);
       final parameters = parametersOf(definitions, PhoneAgentToolNames.input);
       final properties = parameters['properties'] as Map<String, dynamic>;
-      expect(properties.containsKey('x'), isFalse);
-      expect(properties.containsKey('y'), isFalse);
-      expect(properties.containsKey('end_x'), isFalse);
-      expect(properties.containsKey('end_y'), isFalse);
+      expect(properties.containsKey('x'), isTrue);
+      expect(properties.containsKey('y'), isTrue);
+      expect(properties.containsKey('end_x'), isTrue);
+      expect(properties.containsKey('end_y'), isTrue);
       final actions = (properties['action'] as Map)['enum'] as List;
-      expect(actions, isNot(contains('swipe')));
+      expect(actions, contains('swipe'));
       expect(
         actions,
-        containsAll(<String>['tap', 'long_press', 'set_text', 'scroll']),
+        containsAll(<String>[
+          'tap',
+          'long_press',
+          'set_text',
+          'scroll',
+          'wait',
+          'list_apps',
+          'open_app',
+        ]),
       );
+      expect(properties.containsKey('package_name'), isTrue);
       expect(jsonEncode(definitions).contains('snapshot_id'), isFalse);
     });
 
@@ -302,7 +311,7 @@ void main() {
       expect(result['message'], contains('direction'));
     });
 
-    test('非视觉模型不能使用坐标点击', () async {
+    test('非视觉模型也可以使用坐标点击', () async {
       final result = decodeToolResult(
         await PhoneAgentTools.handleCall(
           name: PhoneAgentToolNames.input,
@@ -312,11 +321,11 @@ void main() {
         ),
       );
 
-      expect(result['error'], 'image_input_unsupported');
-      expect(client.inputCalls, isEmpty);
+      expect(result['ok'], isTrue);
+      expect(client.inputCalls, hasLength(1));
     });
 
-    test('非视觉模型不能滑动', () async {
+    test('非视觉模型也可以滑动', () async {
       final result = decodeToolResult(
         await PhoneAgentTools.handleCall(
           name: PhoneAgentToolNames.input,
@@ -332,7 +341,8 @@ void main() {
         ),
       );
 
-      expect(result['error'], 'image_input_unsupported');
+      expect(result['ok'], isTrue);
+      expect(client.inputCalls, hasLength(1));
     });
 
     test('坐标越界时拒绝', () async {
@@ -384,7 +394,7 @@ void main() {
       final result = decodeToolResult(
         await PhoneAgentTools.handleCall(
           name: PhoneAgentToolNames.input,
-          args: <String, dynamic>{'action': 'open_app'},
+          args: <String, dynamic>{'action': 'unknown_action'},
           service: service,
           supportsImageInput: true,
         ),
@@ -409,6 +419,49 @@ void main() {
       );
 
       expect(result['error'], 'invalid_arguments');
+    });
+
+    test('wait 动作支持 100..5000ms 并拒绝越界时长', () async {
+      final defaultWait = decodeToolResult(
+        await PhoneAgentTools.handleCall(
+          name: PhoneAgentToolNames.input,
+          args: <String, dynamic>{'action': 'wait'},
+          service: service,
+          supportsImageInput: false,
+        ),
+      );
+      expect(defaultWait['ok'], isTrue);
+
+      final boundedWait = decodeToolResult(
+        await PhoneAgentTools.handleCall(
+          name: PhoneAgentToolNames.input,
+          args: <String, dynamic>{'action': 'wait', 'duration_ms': 3000},
+          service: service,
+          supportsImageInput: false,
+        ),
+      );
+      expect(boundedWait['ok'], isTrue);
+      expect(client.inputCalls, hasLength(2));
+
+      final tooShort = decodeToolResult(
+        await PhoneAgentTools.handleCall(
+          name: PhoneAgentToolNames.input,
+          args: <String, dynamic>{'action': 'wait', 'duration_ms': 50},
+          service: service,
+          supportsImageInput: false,
+        ),
+      );
+      expect(tooShort['error'], 'invalid_arguments');
+
+      final tooLong = decodeToolResult(
+        await PhoneAgentTools.handleCall(
+          name: PhoneAgentToolNames.input,
+          args: <String, dynamic>{'action': 'wait', 'duration_ms': 6000},
+          service: service,
+          supportsImageInput: false,
+        ),
+      );
+      expect(tooLong['error'], 'invalid_arguments');
     });
 
     test('坐标 long_press 低于 500ms 时拒绝', () async {
@@ -478,6 +531,57 @@ void main() {
       );
 
       expect(client.inputCalls.single['duration_ms'], 300);
+    });
+  });
+
+  group('应用列举与启动', () {
+    test('list_apps 直接转发，即使非视觉模型也可用', () async {
+      final result = decodeToolResult(
+        await PhoneAgentTools.handleCall(
+          name: PhoneAgentToolNames.input,
+          args: <String, dynamic>{'action': 'list_apps'},
+          service: service,
+          supportsImageInput: false,
+        ),
+      );
+
+      expect(result['ok'], isTrue);
+      expect(client.inputCalls.single, <String, dynamic>{
+        'action': 'list_apps',
+      });
+    });
+
+    test('open_app 需要 package_name', () async {
+      final rejected = decodeToolResult(
+        await PhoneAgentTools.handleCall(
+          name: PhoneAgentToolNames.input,
+          args: <String, dynamic>{'action': 'open_app'},
+          service: service,
+          supportsImageInput: true,
+        ),
+      );
+
+      expect(rejected['type'], 'tool_error');
+      expect(rejected['error'], 'invalid_arguments');
+      expect(client.inputCalls, isEmpty);
+
+      final launched = decodeToolResult(
+        await PhoneAgentTools.handleCall(
+          name: PhoneAgentToolNames.input,
+          args: <String, dynamic>{
+            'action': 'open_app',
+            'package_name': 'com.example.notes',
+          },
+          service: service,
+          supportsImageInput: false,
+        ),
+      );
+
+      expect(launched['ok'], isTrue);
+      expect(client.inputCalls.single, <String, dynamic>{
+        'action': 'open_app',
+        'package_name': 'com.example.notes',
+      });
     });
   });
 

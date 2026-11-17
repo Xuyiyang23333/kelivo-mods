@@ -134,7 +134,12 @@ internal object OverlayVisuals {
      * 避免用旧密码 bounds 和旧包名发送新窗口的截图。
      */
     fun windowChanged(original: WindowState, latest: WindowState?): Boolean =
-        latest != original
+        latest == null ||
+            latest.windowId != original.windowId ||
+            latest.packageName != original.packageName ||
+            latest.width != original.width ||
+            latest.height != original.height ||
+            latest.rotation != original.rotation
 }
 
 /**

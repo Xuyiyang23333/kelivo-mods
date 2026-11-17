@@ -418,7 +418,7 @@ void main() {
   });
 
   group('视觉能力重读', () {
-    test('同一会话切换到非视觉模型后拒绝坐标输入', () async {
+    test('同一会话切换到非视觉模型后仍拒绝截图但允许坐标输入', () async {
       runOnAndroid();
       final settings = await createTestSettings();
       final wrapped = mod.wrapHandler(
@@ -430,18 +430,17 @@ void main() {
         <Map<String, dynamic>>[],
         definitionContextFor(settings, supportsImageInput: true),
       );
-      await wrapped(PhoneAgentToolNames.input, <String, dynamic>{
-        'action': 'tap',
-        'x': 0.5,
-        'y': 0.5,
-      });
-      expect(client.inputCalls, hasLength(1));
+      await wrapped(PhoneAgentToolNames.screenshot, <String, dynamic>{});
+      expect(client.screenshotCalls, 1);
 
       mod.decorateDefinitions(
         <Map<String, dynamic>>[],
         definitionContextFor(settings, supportsImageInput: false),
       );
-      final result = decodeToolResult(
+      final blockedScreenshot = decodeToolResult(
+        await wrapped(PhoneAgentToolNames.screenshot, <String, dynamic>{}),
+      );
+      final coordTap = decodeToolResult(
         await wrapped(PhoneAgentToolNames.input, <String, dynamic>{
           'action': 'tap',
           'x': 0.5,
@@ -449,7 +448,9 @@ void main() {
         }),
       );
 
-      expect(result['error'], 'image_input_unsupported');
+      expect(blockedScreenshot['error'], 'image_input_unsupported');
+      expect(client.screenshotCalls, 1);
+      expect(coordTap['ok'], isTrue);
       expect(client.inputCalls, hasLength(1));
     });
 
@@ -489,20 +490,12 @@ void main() {
         ),
       );
 
-      await visual(PhoneAgentToolNames.input, <String, dynamic>{
-        'action': 'tap',
-        'x': 0.2,
-        'y': 0.2,
-      });
+      await visual(PhoneAgentToolNames.screenshot, <String, dynamic>{});
       final rejected = decodeToolResult(
-        await textOnly(PhoneAgentToolNames.input, <String, dynamic>{
-          'action': 'tap',
-          'x': 0.2,
-          'y': 0.2,
-        }),
+        await textOnly(PhoneAgentToolNames.screenshot, <String, dynamic>{}),
       );
 
-      expect(client.inputCalls, hasLength(1));
+      expect(client.screenshotCalls, 1);
       expect(rejected['error'], 'image_input_unsupported');
     });
   });

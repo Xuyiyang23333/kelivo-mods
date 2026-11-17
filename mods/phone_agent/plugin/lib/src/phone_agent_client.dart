@@ -26,14 +26,8 @@ class PhoneAgentClient {
     await _invoke('openAccessibilitySettings');
   }
 
-  Future<PhoneAgentScreenshot> screenshot({
-    String? assistantId,
-    String? conversationId,
-  }) async {
-    final map = await _invokeMap(
-      'screenshot',
-      auditArguments(assistantId, conversationId),
-    );
+  Future<PhoneAgentScreenshot> screenshot() async {
+    final map = await _invokeMap('screenshot');
     return PhoneAgentScreenshot.fromMap(map);
   }
 
@@ -43,15 +37,10 @@ class PhoneAgentClient {
   }
 
   /// 读取当前窗口节点。`offset == 0` 创建新观测并重新编号。
-  ///
-  /// [assistantId] / [conversationId] 只用于原生侧审计元数据；调用方拿不到就传 null，
-  /// 原生侧如实记为缺失，不伪造。
   Future<Map<String, dynamic>> readTree({
     int offset = 0,
     int maxNodes = 120,
     bool interactiveOnly = false,
-    String? assistantId,
-    String? conversationId,
   }) async {
     if (offset < 0) {
       throw const PhoneAgentException(
@@ -69,15 +58,10 @@ class PhoneAgentClient {
       'offset': offset,
       'max_nodes': maxNodes,
       'interactive_only': interactiveOnly,
-      ...auditArguments(assistantId, conversationId),
     });
   }
 
-  Future<Map<String, dynamic>> input(
-    Map<String, dynamic> arguments, {
-    String? assistantId,
-    String? conversationId,
-  }) async {
+  Future<Map<String, dynamic>> input(Map<String, dynamic> arguments) async {
     if (arguments.containsKey('snapshot_id')) {
       throw const PhoneAgentException(
         'invalid_argument',
@@ -92,150 +76,7 @@ class PhoneAgentClient {
         'action is required.',
       );
     }
-    // 审计身份只能来自宿主调用侧：模型参数里的同名键在这里剔除，否则宿主取不到
-    // 身份时模型自带的 assistant_id / conversation_id 会被原生侧写成审计事实。
-    final payload = Map<String, dynamic>.from(arguments)
-      ..remove(assistantIdKey)
-      ..remove(conversationIdKey);
-    return _invokeMap('input', <String, dynamic>{
-      ...payload,
-      ...auditArguments(assistantId, conversationId),
-    });
-  }
-
-  /// 已获用户批准的应用列表（不含构建配置的预批准条目）。
-  Future<List<PhoneAgentApprovedApp>> approvedApps() async {
-    final map = await _invokeMap('approvedApps');
-    final apps = map['apps'];
-    if (apps is! List) {
-      throw const PhoneAgentException(
-        'invalid_response',
-        'approvedApps returned an unexpected payload.',
-      );
-    }
-    return apps
-        .whereType<Map>()
-        .map(
-          (entry) =>
-              PhoneAgentApprovedApp.fromMap(Map<String, dynamic>.from(entry)),
-        )
-        .toList(growable: false);
-  }
-
-  /// 写入批准记录。原生侧在写入前重新解析当前签名，解析失败或与
-  /// [expectedSigningSha256] 不一致都不会写入。
-  Future<PhoneAgentApprovedApp> approveApp(
-    String packageName, {
-    String? sourceAssistantId,
-    List<String>? expectedSigningSha256,
-  }) async {
-    if (packageName.trim().isEmpty) {
-      throw const PhoneAgentException(
-        'invalid_argument',
-        'packageName is required.',
-      );
-    }
-    final map = await _invokeMap('approveApp', <String, dynamic>{
-      'package_name': packageName,
-      if (sourceAssistantId != null) 'source_assistant_id': sourceAssistantId,
-      if (expectedSigningSha256 != null)
-        'expected_signing_sha256': expectedSigningSha256,
-    });
-    return PhoneAgentApprovedApp.fromMap(map);
-  }
-
-  /// 撤销批准记录，立即生效。
-  Future<void> revokeApp(String packageName) async {
-    if (packageName.trim().isEmpty) {
-      throw const PhoneAgentException(
-        'invalid_argument',
-        'packageName is required.',
-      );
-    }
-    await _invoke('revokeApp', <String, dynamic>{'package_name': packageName});
-  }
-
-  /// 创建一条待用户处理的批准请求。身份由原生侧解析并保存，[packageName] 只是目标。
-  ///
-  /// [approvalAssistantId] 是**创建请求时的助手快照**，作为“首次批准来源”写入白名单
-  /// 记录，供 Mods 页分组展示。它与审计用的实时助手 id（[auditArguments]）语义不同、
-  /// 键名也不同（`approval_assistant_id`），两者不会互相覆盖。
-  Future<PhoneAgentApprovalRequest> requestApproval(
-    String packageName, {
-    String? toolCallId,
-    String? conversationId,
-    String? approvalAssistantId,
-  }) async {
-    if (packageName.trim().isEmpty) {
-      throw const PhoneAgentException(
-        'invalid_argument',
-        'packageName is required.',
-      );
-    }
-    final map = await _invokeMap('requestApproval', <String, dynamic>{
-      'package_name': packageName,
-      if (toolCallId != null) 'tool_call_id': toolCallId,
-      if (conversationId != null) 'conversation_id': conversationId,
-      if (approvalAssistantId != null)
-        'approval_assistant_id': approvalAssistantId,
-    });
-    return PhoneAgentApprovalRequest.fromMap(map);
-  }
-
-  /// 当前仍待处理的请求。已处理的历史不返回；TTL 到期的请求在这里被置为过期。
-  Future<List<PhoneAgentApprovalRequest>> approvalRequests() async {
-    final map = await _invokeMap('approvalRequests');
-    final requests = map['requests'];
-    if (requests is! List) {
-      throw const PhoneAgentException(
-        'invalid_response',
-        'approvalRequests returned an unexpected payload.',
-      );
-    }
-    return requests
-        .whereType<Map>()
-        .map(
-          (entry) =>
-              PhoneAgentApprovalRequest.fromMap(Map<String, dynamic>.from(entry)),
-        )
-        .toList(growable: false);
-  }
-
-  /// 处理一条批准请求。幂等：请求已是终态时返回既有状态，不写白名单。
-  /// 请求已不存在时抛出 `approval_not_found`。
-  Future<PhoneAgentApprovalRequest> resolveApproval({
-    required String requestId,
-    required bool approve,
-  }) async {
-    if (requestId.trim().isEmpty) {
-      throw const PhoneAgentException(
-        'invalid_argument',
-        'requestId is required.',
-      );
-    }
-    final map = await _invokeMap('resolveApproval', <String, dynamic>{
-      'request_id': requestId,
-      'approve': approve,
-    });
-    return PhoneAgentApprovalRequest.fromMap(map);
-  }
-
-  /// 清理待处理请求（切换会话或应用重启）。不写白名单、不通知模型。
-  Future<void> dismissApprovals({String? conversationId}) async {
-    await _invoke('dismissApprovals', <String, dynamic>{
-      if (conversationId != null) 'conversation_id': conversationId,
-    });
-  }
-
-  /// 首次启用隐私确认是否已读（方案 B）。
-  Future<bool> privacyNoticeAcknowledged() async {
-    final map = await _invokeMap('privacyNotice');
-    return map['acknowledged'] == true;
-  }
-
-  /// 记录用户已读首次启用隐私确认。只是告知记录，不改变任何判定。
-  Future<void> acknowledgePrivacyNotice() async {
-    await _invoke('acknowledgePrivacyNotice');
+    return _invokeMap('input', Map<String, dynamic>.from(arguments));
   }
 
   Future<Map<String, dynamic>> _invokeMap(
@@ -271,33 +112,10 @@ class PhoneAgentClient {
         'The phone agent plugin is not available on this platform.',
       );
     } on PlatformException catch (error) {
-      final rawDetails = error.details;
       throw PhoneAgentException(
         error.code,
         error.message ?? 'The phone agent failed without a message.',
-        details: rawDetails is Map
-            ? Map<String, dynamic>.from(rawDetails)
-            : null,
       );
     }
-  }
-
-  /// 审计身份参数的键名。宿主侧是唯一合法来源：`input()` 会先从模型参数里剔除
-  /// 这两个键，再叠加宿主值。
-  static const String assistantIdKey = 'assistant_id';
-  static const String conversationIdKey = 'conversation_id';
-
-  /// 审计身份参数。两项都只在非空时发送；原生侧缺失即如实记为未知，
-  /// 由原生侧自行截断与清洗，这里不做内容识别。
-  static Map<String, dynamic> auditArguments(
-    String? assistantId,
-    String? conversationId,
-  ) {
-    return <String, dynamic>{
-      if (assistantId != null && assistantId.trim().isNotEmpty)
-        assistantIdKey: assistantId,
-      if (conversationId != null && conversationId.trim().isNotEmpty)
-        conversationIdKey: conversationId,
-    };
   }
 }

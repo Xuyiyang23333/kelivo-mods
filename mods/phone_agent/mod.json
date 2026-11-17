@@ -16,8 +16,6 @@
     "android/app/build.gradle.kts",
     "android/app/src/main/AndroidManifest.xml",
     "lib/desktop/desktop_settings_page.dart",
-    "lib/features/chat/widgets/chat_message_widget.dart",
-    "lib/features/home/pages/home_page.dart",
     "lib/features/home/services/local_tool_toggle.dart",
     "lib/features/settings/pages/settings_page.dart",
     "lib/l10n",
@@ -29,11 +27,8 @@
     "patches/application-id.patch",
     "patches/local-tool-mutual-exclusion.patch",
     "patches/settings-entry.patch",
-    "patches/chat-approval-card.patch",
     "patches/l10n-source.patch",
-    "patches/l10n-source-m34.patch",
-    "patches/l10n-generated.patch",
-    "patches/l10n-generated-m34.patch"
+    "patches/l10n-generated.patch"
   ],
   "copy": [
     {
@@ -63,10 +58,6 @@
     {
       "from": "overlay/integration_test/phone_agent_exception_test.dart",
       "to": "integration_test/phone_agent_exception_test.dart"
-    },
-    {
-      "from": "overlay/integration_test/phone_agent_approval_chain_test.dart",
-      "to": "integration_test/phone_agent_approval_chain_test.dart"
     },
     {
       "from": "plugin",

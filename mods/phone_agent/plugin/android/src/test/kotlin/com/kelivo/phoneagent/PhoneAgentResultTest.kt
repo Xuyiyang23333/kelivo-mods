@@ -121,4 +121,24 @@ class PhoneAgentResultTest {
         assertEquals("Action accepted.", result["message"])
         assertFalse(result.containsKey("snapshot_id"))
     }
+
+    @Test
+    fun `apps list and open app payloads omit snapshot id`() {
+        val apps = PhoneAgentResult.appsList(
+            listOf(mapOf("name" to "Notes", "package_name" to "com.example.notes")),
+        )
+        assertEquals(1, (apps["apps"] as List<*>).size)
+
+        val launched = PhoneAgentResult.openAppSuccess("com.example.notes")
+        assertEquals(true, launched["success"])
+        assertEquals("open_app", launched["action"])
+        assertEquals("com.example.notes", launched["package_name"])
+        assertFalse(launched.containsKey("snapshot_id"))
+
+        val waited = PhoneAgentResult.waitSuccess(1200)
+        assertEquals(true, waited["success"])
+        assertEquals("wait", waited["action"])
+        assertEquals(1200L, waited["duration_ms"])
+        assertFalse(waited.containsKey("snapshot_id"))
+    }
 }

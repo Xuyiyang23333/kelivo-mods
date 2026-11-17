@@ -148,16 +148,24 @@ class ObservationRegistryTest {
     }
 
     @Test
-    fun `selection change invalidates a handle`() {
+    fun `selection change keeps a handle reusable`() {
         val (root, observation) = observation()
         registry.beginTree(observation)
         (root.children[0] as FakeNode).isSelected = true
 
-        val error = assertThrows(PhoneAgentError::class.java) {
-            registry.handle("n1", window)
-        }
+        val resolved = registry.handle("n1", window)
 
-        assertEquals("stale_handle", error.code)
+        assertEquals(root.children[0], resolved.node)
+    }
+
+    @Test
+    fun `editable text change keeps a handle reusable`() {
+        val (_, editable) = editableObservation()
+        editable.text = "typed"
+
+        val resolved = registry.handle("n1", window)
+
+        assertEquals(editable, resolved.node)
     }
 
     @Test
@@ -508,24 +516,19 @@ class ObservationRegistryTest {
     }
 
     @Test
-    fun `window type change invalidates handles and pages`() {
-        val (_, observation) = observation()
+    fun `window type lag keeps handles pages and screenshots valid`() {
+        val (root, observation) = observation()
         registry.beginTree(observation)
 
-        val page = assertThrows(PhoneAgentError::class.java) {
-            registry.page(0, 1, window.copy(windowType = WindowType.SYSTEM))
-        }
-        assertEquals("stale_observation", page.code)
+        val page = registry.page(0, 1, window.copy(windowType = WindowType.SYSTEM))
+        assertEquals(1, page.records.size)
 
-        registry.beginTree(observation("again").second)
-        val handle = assertThrows(PhoneAgentError::class.java) {
-            registry.handle("n0", window.copy(windowType = WindowType.INPUT_METHOD))
-        }
-        assertEquals("stale_handle", handle.code)
+        val resolved = registry.handle("n0", window.copy(windowType = WindowType.INPUT_METHOD))
+        assertEquals(root, resolved.node)
     }
 
     @Test
-    fun `window type change invalidates the screenshot`() {
+    fun `window type lag keeps the screenshot valid`() {
         registry.recordScreenshot(
             ScreenshotObservation(
                 800,
@@ -540,11 +543,10 @@ class ObservationRegistryTest {
             ),
         )
 
-        val error = assertThrows(PhoneAgentError::class.java) {
-            registry.requireScreenshot(window.copy(windowType = WindowType.SYSTEM))
-        }
+        val screenshot = registry.requireScreenshot(window.copy(windowType = WindowType.SYSTEM))
 
-        assertEquals("stale_observation", error.code)
+        assertEquals(100, screenshot.screenWidth)
+        assertEquals(100, screenshot.screenHeight)
     }
 
     @Test

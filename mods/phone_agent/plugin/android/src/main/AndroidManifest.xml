@@ -1,12 +1,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!--
-        M33：一次声明 QUERY_ALL_PACKAGES，用它解析任意前台包当前签名证书的 SHA-256。
-        不加 <queries> 时无障碍服务没有任何包可见性豁免（M29 实测 API35 无声明 88 个
-        可见包、声明后 244；服务读得到 Chrome 窗口却解析不到签名 NameNotFound）。
-        声明在插件自己的 manifest，不改上游宿主 manifest。包可见性只用于签名解析与
-        批准记录，本构建不公开分发；一旦上架 Play 需按 high-risk 权限提交声明。
-    -->
-    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
 
     <application>
         <service
@@ -21,16 +19,5 @@
                 android:name="android.accessibilityservice"
                 android:resource="@xml/kelivo_phone_agent_service" />
         </service>
-
-        <!--
-            M34：通知栏批准 action 的接收端。上游 NotificationService 只有“点击打开会话”
-            （onDidReceiveNotificationResponse），AndroidNotificationAction 在交付代码里
-            零命中，所以批准 action + BroadcastReceiver 是新增基础设施。
-            `exported="false"`：只有本应用自己的 PendingIntent 能触发；幂等与终态校验在
-            ApprovalRequests 内完成，不依赖 intent 来源。
-        -->
-        <receiver
-            android:name="com.kelivo.phoneagent.PhoneAgentApprovalReceiver"
-            android:exported="false" />
     </application>
 </manifest>

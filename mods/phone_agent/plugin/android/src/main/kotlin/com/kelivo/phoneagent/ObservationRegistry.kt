@@ -182,8 +182,7 @@ internal class ObservationRegistry(
             observation.packageName != current.packageName ||
             observation.screenWidth != current.width ||
             observation.screenHeight != current.height ||
-            observation.rotation != current.rotation ||
-            observation.windowType != current.windowType
+            observation.rotation != current.rotation
         ) {
             screenshot = null
             throw PhoneAgentError(
@@ -232,8 +231,7 @@ internal class ObservationRegistry(
             observation.packageName == current.packageName &&
             observation.screenWidth == current.width &&
             observation.screenHeight == current.height &&
-            observation.rotation == current.rotation &&
-            observation.windowType == current.windowType
+            observation.rotation == current.rotation
 
     private fun isExpired(createdAt: Long): Boolean = now() - createdAt > ttlMillis
 

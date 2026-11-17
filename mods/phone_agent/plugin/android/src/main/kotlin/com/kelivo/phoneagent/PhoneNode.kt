@@ -225,15 +225,13 @@ internal fun PhoneNode.fingerprintFields(): List<Pair<String, String>> {
     add("packageName", packageName)
     add("className", className)
     add("viewId", viewId)
-    if (!isPassword) {
+    if (!isPassword && !isEditable) {
         add("text", text)
         add("contentDescription", contentDescription)
         add("hintText", hintText)
         add("stateDescription", stateDescription)
     }
     add("isCheckable", isCheckable)
-    add("isChecked", isChecked)
-    add("isSelected", isSelected)
     add("isEnabled", isEnabled)
     add("isPassword", isPassword)
     add("isEditable", isEditable)
