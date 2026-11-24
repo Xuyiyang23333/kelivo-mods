@@ -1,9 +1,17 @@
 .dart_tool/
 .build/
+.tower/
 build/
 *.log
 .idea/
 *.iml
+
+# Secrets and signing keys (never commit)
+.env
+.env.*
+*.jks
+*.keystore
+key.properties
 
 # Phone Agent host test scripts write run logs and UI dumps here
 mods/phone_agent/host/_runs/

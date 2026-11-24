@@ -96,11 +96,11 @@ class ModLoaderConfig {
       upstream['path'],
       r'$.upstream.path',
     );
-    final upstreamPathError = absolutePathError(upstreamPathRaw);
-    if (upstreamPathError != null) {
-      reader.error(r'$.upstream.path', 'invalidPath', upstreamPathError);
-    }
-    final upstreamPath = stripTrailingSlashes(upstreamPathRaw);
+    final upstreamPath = _resolveUpstreamPath(
+      upstreamPathRaw,
+      source: source,
+      reader: reader,
+    );
     final upstreamCommit = _readCommit(
       reader,
       upstream['commit'],
@@ -756,6 +756,40 @@ List<String> _readPathList(
     result.add(item);
   }
   return List<String>.unmodifiable(result);
+}
+
+String _resolveUpstreamPath(
+  String raw, {
+  required String source,
+  required _Reader reader,
+}) {
+  if (raw.isEmpty) {
+    reader.error(r'$.upstream.path', 'invalidPath', '路径不能为空');
+  }
+  if (raw.contains('\\')) {
+    reader.error(r'$.upstream.path', 'invalidPath', '路径必须使用 / 分隔符');
+  }
+  if (isAbsolutePath(raw)) {
+    final error = absolutePathError(raw);
+    if (error != null) {
+      reader.error(r'$.upstream.path', 'invalidPath', error);
+    }
+    return stripTrailingSlashes(raw);
+  }
+  final baseDir = toPosixPath(File(source).absolute.parent.path);
+  final resolved = stripTrailingSlashes(
+    toPosixPath(
+      Uri.directory(
+        baseDir,
+        windows: Platform.isWindows,
+      ).resolve(raw).toFilePath(windows: Platform.isWindows),
+    ),
+  );
+  final resolvedError = absolutePathError(resolved);
+  if (resolvedError != null) {
+    reader.error(r'$.upstream.path', 'invalidPath', resolvedError);
+  }
+  return resolved;
 }
 
 Registration _readRegistration(_Reader reader, Object? value, String path) {

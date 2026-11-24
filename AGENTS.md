@@ -2,7 +2,7 @@
 
 ## 仓库用途
 
-本仓库是 Kelivo 的私有、编译前源码 Mod 工作区，不提交到上游（`V:/coding/kelivo`）。
+本仓库是 Kelivo 的编译前源码 Mod 工作区，不直接提交到上游（默认位于同级目录 `../kelivo`）。
 
 - 第一阶段：通用 Mod Loader（`tool/`、`patches/`、`overlay/`），见 [Mod Loader 实施计划](docs/mod-loader-plan.md)。
 - 第二阶段：`phone_agent` Mod（`mods/phone_agent/`），提供独立的 Android 无障碍手机控制能力。
@@ -13,7 +13,7 @@
 - `patches/`、`overlay/`：Loader 通用上游接缝补丁与核心接口，不引入具体业务 Mod 依赖。
 - `mods/phone_agent/`：`phone_agent` Mod 的配置、补丁、overlay 与独立 `kelivo_phone_agent` 插件。
 - `.build/`：Loader 生成的合成 worktree 与产物，不提交、不手工修改源码。
-- `V:/coding/kelivo`：上游仓，只作固定 commit 的源码来源；禁止在上游仓直接开发、提交或推送私有功能。
+- `../kelivo`（见 `mods.json` 的 `upstream.path`）：上游仓，只作固定 commit 的源码来源；禁止在上游仓直接开发、提交或推送 Mod 功能。
 - 禁止使用 `git reset --hard`、`git clean -fd` 绕过冲突或漂移；禁止读取或提交 `.env`、签名密钥或 `lib/secrets/`。
 
 ## Loader 约定

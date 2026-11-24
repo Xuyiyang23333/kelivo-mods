@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "upstream": {
-    "path": "V:/coding/kelivo",
+    "path": "../kelivo",
     "commit": "73afa4ec77cfc9af2efea2487fee8bba1362639d"
   },
   "mods": [

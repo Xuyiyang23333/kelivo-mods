@@ -1,5 +1,5 @@
 name: kelivo_mod_loader
-description: Kelivo 的私有编译前源码 Mod Loader。
+description: Pre-build source Mod Loader and Phone Agent mod for Kelivo.
 publish_to: none
 
 environment:

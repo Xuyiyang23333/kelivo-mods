@@ -9,10 +9,9 @@ answers its single `PHONE_AGENT_WAITING_FOR_SERVICE` marker.
 Environment: same as `driver.py`, plus
   TEST_FILE        suite to run, default integration_test/phone_agent_test.dart
   USE_SETTINGS_PUT `1` to enable the service with `settings put secure`
-                   **only** on a device where AGENTS.md documents that exception
-                   (currently the physical MIUI `1960cd68`). It is never the
-                   default and never used on the emulator, where enabling must go
-                   through the system UI.
+                   only on physical devices that permit it (e.g. MIUI). It is
+                   never the default and never used on the emulator, where
+                   enabling must go through the system UI.
 
 The caller must save and restore `enabled_accessibility_services`,
 `accessibility_enabled` and `stay_on_while_plugged_in` to that device's real

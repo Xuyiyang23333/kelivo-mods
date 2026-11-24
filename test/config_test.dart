@@ -13,7 +13,7 @@ const String _hashA =
     'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const String _hashB =
     'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
-const String _upstreamPath = 'V:/coding/kelivo';
+const String _upstreamPath = 'C:/coding/kelivo';
 
 String _json(Object? value) =>
     const JsonEncoder.withIndent('  ').convert(value);
@@ -386,12 +386,15 @@ void main() {
       );
     });
 
-    test('rejects unsafe upstream paths and floating commits', () {
-      _expectModsError(
-        _modsJson(upstreamPath: 'coding/kelivo'),
-        code: 'invalidPath',
-        path: r'$.upstream.path',
+    test('resolves relative upstream paths from config parent', () {
+      final config = ModLoaderConfig.parse(
+        _json(_modsJson(upstreamPath: '../kelivo')),
+        source: 'C:/workspace/kelivo-mods/mods.json',
       );
+      expect(config.upstreamPath, 'C:/workspace/kelivo');
+    });
+
+    test('rejects unsafe upstream paths and floating commits', () {
       _expectModsError(
         _modsJson(upstreamPath: r'C:\coding\kelivo'),
         code: 'invalidPath',
