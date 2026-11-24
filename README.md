@@ -1,6 +1,6 @@
 # Kelivo Mod Loader & Phone Agent
 
-[Kelivo](<UPSTREAM_KELIVO_REPO_URL>) 的编译前源码 Mod Loader 与 `phone_agent` Mod 仓库。
+[Kelivo](https://github.com/Chevey339/kelivo) 的编译前源码 Mod Loader 与 `phone_agent` Mod 仓库。
 
 在不直接修改或污染上游 Kelivo 仓库的前提下，通过独立的 `overlay/`、`patches/` 与插件目录，将定制功能合成为可构建的独立 Git worktree。
 
@@ -35,10 +35,10 @@
 将上游 Kelivo 与本仓库放在同一父目录下（默认 `mods.json` 读取 `../kelivo`）：
 
 ```bash
-git clone <UPSTREAM_KELIVO_REPO_URL> kelivo
+git clone https://github.com/Chevey339/kelivo.git kelivo
 git -C kelivo checkout 73afa4ec77cfc9af2efea2487fee8bba1362639d
 
-git clone <THIS_REPO_URL> kelivo-mods
+git clone https://github.com/Xuyiyang23333/kelivo-mods.git kelivo-mods
 cd kelivo-mods
 ```
 
