@@ -92,6 +92,10 @@ class PhoneAgentScreenshotResult {
         'height': capture.screenHeight,
       },
       if (capture.packageName != null) 'package_name': capture.packageName,
+      if (capture.recentTaps.isNotEmpty)
+        'recent_taps': <Map<String, dynamic>>[
+          for (final tap in capture.recentTaps) tap.toJson(),
+        ],
       'coordinate_space':
           'normalized [0,1] relative to this image, origin at the top-left',
       'untrusted_content': true,

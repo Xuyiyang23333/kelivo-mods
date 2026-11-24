@@ -120,6 +120,44 @@ void main() {
     expect(shot.screenWidth, 1080);
     expect(shot.screenHeight, 2400);
     expect(shot.packageName, 'com.psyche.kelivo');
+    expect(shot.recentTaps, isEmpty);
+  });
+
+  test('screenshot parses recentTaps when returned', () async {
+    final bytes = Uint8List.fromList(<int>[1, 2, 3, 4]);
+    mock(
+      (call) async => <String, dynamic>{
+        'bytes': bytes,
+        'imageWidth': 800,
+        'imageHeight': 600,
+        'screenWidth': 1080,
+        'screenHeight': 2400,
+        'packageName': 'com.example.app',
+        'recentTaps': <Map<String, dynamic>>[
+          <String, dynamic>{'index': 1, 'action': 'tap', 'x': 0.25, 'y': 0.5},
+          <String, dynamic>{
+            'index': 2,
+            'action': 'long_press',
+            'x': 0.75,
+            'y': 0.6,
+          },
+        ],
+      },
+    );
+
+    final shot = await PhoneAgentClient().screenshot();
+
+    expect(shot.recentTaps, hasLength(2));
+    expect(shot.recentTaps[0].index, 1);
+    expect(shot.recentTaps[0].action, 'tap');
+    expect(shot.recentTaps[0].x, 0.25);
+    expect(shot.recentTaps[0].y, 0.5);
+    expect(shot.recentTaps[1].toJson(), <String, dynamic>{
+      'index': 2,
+      'action': 'long_press',
+      'x': 0.75,
+      'y': 0.6,
+    });
   });
 
   test('screenshot rejects empty bytes', () async {

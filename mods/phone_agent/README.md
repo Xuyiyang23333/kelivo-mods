@@ -11,18 +11,19 @@
 
 通过 [phone_agent_tools.dart](overlay/lib/features/phone_agent/phone_agent_tools.dart) 暴露三个工具：
 
-- `phone_agent_screenshot`（视觉模型可用，API 30+）：整屏截图，长边缩放到不超过 1600，自动涂黑密码节点区域。
+- `phone_agent_screenshot`（视觉模型可用，API 30+）：整屏截图，长边缩放到不超过 1600，自动涂黑密码节点区域；若距上次截图期间在同一窗口执行过坐标 `tap` / `long_press`，会自动在发给模型的截图副本上绘制红白空心准星（多次时带序号）并在结果中返回 `recent_taps` 供纠偏，消费一次即清空。
 - `phone_agent_tree`：有界无障碍节点树（支持分页 `offset` 与 `interactive_only`），自动过滤密码节点及其子树。
 - `phone_agent_input`：
   - 节点动作：`tap`、`long_press`、`set_text`、`scroll`
   - 坐标手势（所有模型可用，归一化 `[0, 1]`，无需前置截图、不因动作消费清空）：`tap`、`long_press`、`swipe`
   - 系统与辅助动作：`back`、`home`、`recents`、`wait`（`duration_ms` 100..5000，默认 1000）
   - 应用控制：`list_apps`（枚举可启动第三方应用，排除自身宿主包）、`open_app`（通过 `package_name` 直接启动应用）
+  - 批量动作：`batch`（顺序执行 `actions` 列表，默认步间间隔 `interval_ms` 200ms、显式 `wait` 前后不叠加间隔，每步独立计入单次生成与分钟级预算，遇错即停并回报已完成进度，支持随时取消）
 
 ## 目录与补丁
 
 - `patches/pubspec.patch`：在上游 `pubspec.yaml` 中加入 `kelivo_phone_agent` path 依赖。
-- `patches/application-id.patch`：将私有测试构建包名设为 `com.psyche.kelivo.phoneagent`、应用名设为 `Kelivo Agent`。
+- `patches/application-id.patch`：将构建包名设为 `com.psyche.kelivo.phoneagent`、应用名设为 `Kelivo Agent`（便于与官方版并存测试；如不需要可从 `mod.json` 中移除该补丁）。
 - `patches/local-tool-mutual-exclusion.patch`：保证助手的 `phone_control` 与 `phone_agent` 互斥。
 - `patches/settings-entry.patch`：在设置页增加 Mods 入口。
 - `patches/l10n-source.patch` / `patches/l10n-generated.patch`：Mods 页文案与多语言生成文件。
@@ -38,8 +39,9 @@
 
 ## 合成与使用
 
+在仓库根目录执行：
+
 ```bash
-cd V:/coding/kelivo-private
 dart tool/mod_loader.dart plan
 dart tool/mod_loader.dart apply
 dart tool/mod_loader.dart verify

@@ -1,5 +1,7 @@
 package com.kelivo.phoneagent
 
+import java.util.ArrayDeque
+
 /**
  * 当前前台窗口的稳定标识，用于失效判断。
  *
@@ -39,6 +41,25 @@ internal data class TreePage(
     val screenHeight: Int,
 )
 
+internal data class MarkedTap(
+    val index: Int,
+    val action: String,
+    val x: Double,
+    val y: Double,
+)
+
+private data class RecentTapRecord(
+    val action: String,
+    val x: Double,
+    val y: Double,
+    val windowId: Int,
+    val packageName: String?,
+    val screenWidth: Int,
+    val screenHeight: Int,
+    val rotation: Int,
+    val createdAt: Long,
+)
+
 internal class SavedHandle(
     val id: String,
     val node: PhoneNode,
@@ -62,6 +83,7 @@ internal class ObservationRegistry(
 ) {
     private var tree: TreeObservation? = null
     private var screenshot: ScreenshotObservation? = null
+    private val recentTaps = ArrayDeque<RecentTapRecord>()
 
     @Synchronized
     fun beginTree(observation: TreeObservation) {
@@ -194,6 +216,60 @@ internal class ObservationRegistry(
     }
 
     @Synchronized
+    fun recordCoordinateTap(
+        action: String,
+        x: Double,
+        y: Double,
+        window: WindowState,
+    ) {
+        val currentTime = now()
+        pruneRecentTapsLocked(currentTime)
+        val first = recentTaps.peekFirst()
+        if (first != null && !sameTapWindow(first, window)) {
+            recentTaps.clear()
+        }
+        while (recentTaps.size >= MAX_RECENT_TAPS) {
+            recentTaps.removeFirst()
+        }
+        recentTaps.addLast(
+            RecentTapRecord(
+                action = action,
+                x = x,
+                y = y,
+                windowId = window.windowId,
+                packageName = window.packageName,
+                screenWidth = window.width,
+                screenHeight = window.height,
+                rotation = window.rotation,
+                createdAt = currentTime,
+            ),
+        )
+    }
+
+    @Synchronized
+    fun peekRecentTaps(current: WindowState): List<MarkedTap> {
+        pruneRecentTapsLocked(now())
+        val first = recentTaps.peekFirst() ?: return emptyList()
+        if (!sameTapWindow(first, current)) {
+            recentTaps.clear()
+            return emptyList()
+        }
+        return recentTaps.mapIndexed { idx, record ->
+            MarkedTap(
+                index = idx + 1,
+                action = record.action,
+                x = record.x,
+                y = record.y,
+            )
+        }
+    }
+
+    @Synchronized
+    fun clearRecentTaps() {
+        recentTaps.clear()
+    }
+
+    @Synchronized
     fun clearScreenshot() {
         screenshot = null
     }
@@ -207,6 +283,7 @@ internal class ObservationRegistry(
     fun invalidateAll() {
         clearTreeLocked()
         screenshot = null
+        recentTaps.clear()
     }
 
     private fun requireTreeValid(observation: TreeObservation, current: WindowState) {
@@ -240,6 +317,21 @@ internal class ObservationRegistry(
         "The target node changed ($detail). Call phone_agent_tree with offset 0.",
     )
 
+    private fun sameTapWindow(record: RecentTapRecord, current: WindowState): Boolean =
+        record.windowId == current.windowId &&
+            record.packageName == current.packageName &&
+            record.screenWidth == current.width &&
+            record.screenHeight == current.height &&
+            record.rotation == current.rotation
+
+    private fun pruneRecentTapsLocked(currentTime: Long) {
+        while (recentTaps.isNotEmpty() &&
+            currentTime - recentTaps.first().createdAt > RECENT_TAP_TTL_MILLIS
+        ) {
+            recentTaps.removeFirst()
+        }
+    }
+
     private fun clearTreeLocked() {
         val observation = tree ?: return
         for (index in 0 until observation.handleCount) {
@@ -250,5 +342,7 @@ internal class ObservationRegistry(
 
     companion object {
         const val DEFAULT_TTL_MILLIS = 120_000L
+        const val RECENT_TAP_TTL_MILLIS = 30_000L
+        const val MAX_RECENT_TAPS = 12
     }
 }

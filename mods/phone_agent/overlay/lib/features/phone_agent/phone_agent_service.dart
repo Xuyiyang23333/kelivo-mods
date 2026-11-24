@@ -18,6 +18,7 @@ class PhoneAgentCapture {
     required this.screenWidth,
     required this.screenHeight,
     this.packageName,
+    this.recentTaps = const <PhoneAgentTapMarker>[],
   });
 
   final Uint8List bytes;
@@ -26,6 +27,7 @@ class PhoneAgentCapture {
   final int screenWidth;
   final int screenHeight;
   final String? packageName;
+  final List<PhoneAgentTapMarker> recentTaps;
 }
 
 /// Native service availability normalized for the adapter.
@@ -118,6 +120,7 @@ class PluginPhoneAgentClient implements PhoneAgentClient {
       screenWidth: capture.screenWidth,
       screenHeight: capture.screenHeight,
       packageName: capture.packageName,
+      recentTaps: capture.recentTaps,
     );
   }
 

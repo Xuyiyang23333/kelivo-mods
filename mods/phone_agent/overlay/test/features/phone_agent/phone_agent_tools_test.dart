@@ -1,9 +1,12 @@
+import 'dart:async';
 import 'dart:convert';
 
+import 'package:Kelivo/core/services/api/tool_call_cancellation.dart';
 import 'package:Kelivo/features/phone_agent/phone_agent_service.dart';
 import 'package:Kelivo/features/phone_agent/phone_agent_tools.dart';
 import 'package:Kelivo/utils/mcp_structured_image.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:kelivo_phone_agent/kelivo_phone_agent.dart';
 
 import 'phone_agent_test_support.dart';
 
@@ -120,9 +123,24 @@ void main() {
           'wait',
           'list_apps',
           'open_app',
+          'batch',
         ]),
       );
       expect(properties.containsKey('package_name'), isTrue);
+      expect(properties.containsKey('actions'), isTrue);
+      expect(properties.containsKey('interval_ms'), isTrue);
+      final batchItems = (properties['actions'] as Map)['items'] as Map;
+      expect(batchItems['additionalProperties'], isFalse);
+      final batchItemActions =
+          ((batchItems['properties'] as Map)['action'] as Map)['enum'] as List;
+      expect(batchItemActions, isNot(contains('batch')));
+      expect(batchItemActions, isNot(contains('list_apps')));
+      expect(
+        batchItemActions,
+        containsAll(<String>['tap', 'swipe', 'open_app']),
+      );
+      expect((properties['interval_ms'] as Map)['minimum'], 0);
+      expect((properties['interval_ms'] as Map)['maximum'], 2000);
       expect(jsonEncode(definitions).contains('snapshot_id'), isFalse);
     });
 
@@ -531,6 +549,235 @@ void main() {
       );
 
       expect(client.inputCalls.single['duration_ms'], 300);
+    });
+  });
+
+  group('批量输入', () {
+    test('顺序执行节点与坐标混合动作并返回精简结果', () async {
+      final result = decodeToolResult(
+        await PhoneAgentTools.handleCall(
+          name: PhoneAgentToolNames.input,
+          args: <String, dynamic>{
+            'action': 'batch',
+            'interval_ms': 0,
+            'actions': <Map<String, dynamic>>[
+              <String, dynamic>{'action': 'tap', 'node_id': 'n1'},
+              <String, dynamic>{'action': 'tap', 'node_id': 'n2'},
+              <String, dynamic>{'action': 'tap', 'x': 0.5, 'y': 0.8},
+            ],
+          },
+          service: service,
+          supportsImageInput: true,
+        ),
+      );
+
+      expect(result['ok'], isTrue);
+      expect(result['tool'], PhoneAgentToolNames.input);
+      final body = result['result'] as Map<String, dynamic>;
+      expect(body['action'], 'batch');
+      expect(body['completed'], 3);
+      expect(body['total'], 3);
+      expect((body['results'] as List), hasLength(3));
+      expect(client.inputCalls, <Map<String, dynamic>>[
+        <String, dynamic>{'action': 'tap', 'node_id': 'n1'},
+        <String, dynamic>{'action': 'tap', 'node_id': 'n2'},
+        <String, dynamic>{'action': 'tap', 'x': 0.5, 'y': 0.8},
+      ]);
+    });
+
+    test('执行前整批校验，后一步非法时不执行前一步', () async {
+      final result = decodeToolResult(
+        await PhoneAgentTools.handleCall(
+          name: PhoneAgentToolNames.input,
+          args: <String, dynamic>{
+            'action': 'batch',
+            'interval_ms': 0,
+            'actions': <Map<String, dynamic>>[
+              <String, dynamic>{'action': 'tap', 'node_id': 'n1'},
+              <String, dynamic>{'action': 'tap', 'x': 1.5, 'y': 0.5},
+            ],
+          },
+          service: service,
+          supportsImageInput: true,
+        ),
+      );
+
+      expect(result['error'], 'invalid_arguments');
+      expect(result['message'], contains('actions[1]'));
+      expect(client.inputCalls, isEmpty);
+    });
+
+    test('空 actions、嵌套 batch、list_apps 或越界 interval_ms 均拒绝', () async {
+      final empty = decodeToolResult(
+        await PhoneAgentTools.handleCall(
+          name: PhoneAgentToolNames.input,
+          args: <String, dynamic>{
+            'action': 'batch',
+            'actions': <Map<String, dynamic>>[],
+          },
+          service: service,
+          supportsImageInput: true,
+        ),
+      );
+      expect(empty['error'], 'invalid_arguments');
+
+      final nested = decodeToolResult(
+        await PhoneAgentTools.handleCall(
+          name: PhoneAgentToolNames.input,
+          args: <String, dynamic>{
+            'action': 'batch',
+            'actions': <Map<String, dynamic>>[
+              <String, dynamic>{
+                'action': 'batch',
+                'actions': <Map<String, dynamic>>[
+                  <String, dynamic>{'action': 'back'},
+                ],
+              },
+            ],
+          },
+          service: service,
+          supportsImageInput: true,
+        ),
+      );
+      expect(nested['error'], 'invalid_arguments');
+      expect(nested['message'], contains('batch'));
+
+      final listApps = decodeToolResult(
+        await PhoneAgentTools.handleCall(
+          name: PhoneAgentToolNames.input,
+          args: <String, dynamic>{
+            'action': 'batch',
+            'actions': <Map<String, dynamic>>[
+              <String, dynamic>{'action': 'list_apps'},
+            ],
+          },
+          service: service,
+          supportsImageInput: true,
+        ),
+      );
+      expect(listApps['error'], 'invalid_arguments');
+      expect(listApps['message'], contains('list_apps'));
+
+      final badInterval = decodeToolResult(
+        await PhoneAgentTools.handleCall(
+          name: PhoneAgentToolNames.input,
+          args: <String, dynamic>{
+            'action': 'batch',
+            'interval_ms': 3000,
+            'actions': <Map<String, dynamic>>[
+              <String, dynamic>{'action': 'back'},
+            ],
+          },
+          service: service,
+          supportsImageInput: true,
+        ),
+      );
+      expect(badInterval['error'], 'invalid_arguments');
+      expect(client.inputCalls, isEmpty);
+    });
+
+    test('任一步失败时立即短路并报告已完成步数', () async {
+      var step = 0;
+      client.onInput = (arguments) async {
+        step++;
+        if (step == 2) {
+          throw PhoneAgentException('stale_handle', 'The target node changed.');
+        }
+        return <String, dynamic>{'success': true, 'step': step};
+      };
+
+      final result = decodeToolResult(
+        await PhoneAgentTools.handleCall(
+          name: PhoneAgentToolNames.input,
+          args: <String, dynamic>{
+            'action': 'batch',
+            'interval_ms': 0,
+            'actions': <Map<String, dynamic>>[
+              <String, dynamic>{'action': 'tap', 'node_id': 'n1'},
+              <String, dynamic>{'action': 'tap', 'node_id': 'n2'},
+              <String, dynamic>{'action': 'tap', 'node_id': 'n3'},
+            ],
+          },
+          service: service,
+          supportsImageInput: true,
+        ),
+      );
+
+      expect(result['type'], 'tool_error');
+      expect(result['ok'], isFalse);
+      expect(result['action'], 'batch');
+      expect(result['error'], 'stale_handle');
+      expect(result['completed'], 1);
+      expect(result['total'], 3);
+      expect(result['failed_index'], 1);
+      expect(result['failed_action'], 'tap');
+      expect((result['results'] as List), hasLength(1));
+      expect(client.inputCalls, hasLength(2));
+    });
+
+    test('显式 wait 前后不叠加 interval_ms', () async {
+      final watch = Stopwatch()..start();
+      final result = decodeToolResult(
+        await PhoneAgentTools.handleCall(
+          name: PhoneAgentToolNames.input,
+          args: <String, dynamic>{
+            'action': 'batch',
+            'interval_ms': 1000,
+            'actions': <Map<String, dynamic>>[
+              <String, dynamic>{'action': 'tap', 'node_id': 'n1'},
+              <String, dynamic>{'action': 'wait', 'duration_ms': 100},
+              <String, dynamic>{'action': 'tap', 'node_id': 'n2'},
+            ],
+          },
+          service: service,
+          supportsImageInput: true,
+        ),
+      );
+      watch.stop();
+
+      expect(result['ok'], isTrue);
+      expect(client.inputCalls, hasLength(3));
+      expect(watch.elapsedMilliseconds, lessThan(500));
+    });
+
+    test('步间等待期间触发取消时立刻中止后续动作', () async {
+      var cancelled = false;
+      final cancelCompleter = Completer<void>();
+      final token = ToolCallCancellation(
+        isCancelled: () => cancelled,
+        cancelled: cancelCompleter.future,
+      );
+      client.onInput = (arguments) async {
+        Timer(const Duration(milliseconds: 20), () {
+          cancelled = true;
+          if (!cancelCompleter.isCompleted) cancelCompleter.complete();
+        });
+        return <String, dynamic>{'success': true};
+      };
+
+      final watch = Stopwatch()..start();
+      await expectLater(
+        token.run(
+          () => PhoneAgentTools.handleCall(
+            name: PhoneAgentToolNames.input,
+            args: <String, dynamic>{
+              'action': 'batch',
+              'interval_ms': 2000,
+              'actions': <Map<String, dynamic>>[
+                <String, dynamic>{'action': 'tap', 'node_id': 'n1'},
+                <String, dynamic>{'action': 'tap', 'node_id': 'n2'},
+              ],
+            },
+            service: service,
+            supportsImageInput: true,
+          ),
+        ),
+        throwsA(isA<StateError>()),
+      );
+      watch.stop();
+
+      expect(client.inputCalls, hasLength(1));
+      expect(watch.elapsedMilliseconds, lessThan(1000));
     });
   });
 

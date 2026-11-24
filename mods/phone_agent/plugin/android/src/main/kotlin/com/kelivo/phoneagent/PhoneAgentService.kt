@@ -380,8 +380,9 @@ class PhoneAgentService : AccessibilityService() {
         }
         policy.requireObservable(current.packageName, current.windowType)
         val passwordBounds = collectPasswordBounds(current)
+        val recentTaps = registry.peekRecentTaps(current)
         pendingScreenshot = reply
-        screenshots.capture(current, passwordBounds) { outcome ->
+        screenshots.capture(current, passwordBounds, recentTaps) { outcome ->
             handler.post {
                 pendingScreenshot = null
                 when (outcome) {
@@ -400,6 +401,7 @@ class PhoneAgentService : AccessibilityService() {
                                 createdAt = SystemClock.elapsedRealtime(),
                             ),
                         )
+                        registry.clearRecentTaps()
                         reply(PhoneAgentResult.screenshot(shot), null)
                         overlay.captured(visualGuard())
                     }
@@ -503,10 +505,23 @@ class PhoneAgentService : AccessibilityService() {
         val current = currentWindow() ?: throw noAccessibleWindowError()
         executor.execute(request, current) { outcome ->
             when (outcome) {
-                is InputOutcome.Success -> reply(
-                    PhoneAgentResult.inputSuccess(outcome.action, outcome.message),
-                    null,
-                )
+                is InputOutcome.Success -> {
+                    if (request is InputRequest.GestureRequest &&
+                        (request.action == GestureAction.TAP ||
+                            request.action == GestureAction.LONG_PRESS)
+                    ) {
+                        registry.recordCoordinateTap(
+                            action = request.action.wireName,
+                            x = request.x,
+                            y = request.y,
+                            window = current,
+                        )
+                    }
+                    reply(
+                        PhoneAgentResult.inputSuccess(outcome.action, outcome.message),
+                        null,
+                    )
+                }
                 is InputOutcome.Failure -> reply(null, outcome.error)
             }
         }

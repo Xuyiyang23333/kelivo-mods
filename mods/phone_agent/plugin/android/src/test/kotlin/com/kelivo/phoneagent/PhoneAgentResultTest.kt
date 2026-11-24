@@ -110,6 +110,34 @@ class PhoneAgentResultTest {
         assertEquals(2400, result["screenHeight"])
         assertEquals("com.psyche.kelivo", result["packageName"])
         assertTrue((result["bytes"] as ByteArray).isNotEmpty())
+        assertFalse(result.containsKey("recentTaps"))
+    }
+
+    @Test
+    fun `screenshot result serializes recent taps when present`() {
+        val result = PhoneAgentResult.screenshot(
+            CapturedScreenshot(
+                bytes = byteArrayOf(1, 2, 3),
+                imageWidth = 800,
+                imageHeight = 600,
+                screenWidth = 1080,
+                screenHeight = 2400,
+                windowId = 7,
+                packageName = KELIVO_PACKAGE,
+                rotation = 0,
+                windowType = WindowType.APPLICATION,
+                recentTaps = listOf(
+                    MarkedTap(1, "tap", 0.25, 0.5),
+                    MarkedTap(2, "long_press", 0.75, 0.6),
+                ),
+            ),
+        )
+
+        @Suppress("UNCHECKED_CAST")
+        val taps = result["recentTaps"] as List<Map<String, Any?>>
+        assertEquals(2, taps.size)
+        assertEquals(mapOf("index" to 1, "action" to "tap", "x" to 0.25, "y" to 0.5), taps[0])
+        assertEquals(mapOf("index" to 2, "action" to "long_press", "x" to 0.75, "y" to 0.6), taps[1])
     }
 
     @Test

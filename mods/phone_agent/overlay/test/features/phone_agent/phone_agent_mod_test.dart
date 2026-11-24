@@ -579,6 +579,73 @@ void main() {
       expect(result['ok'], isTrue);
       expect(client.inputCalls, hasLength(1));
     });
+
+    test('batch 每个子动作计入 60 次生成预算并在超限时短路回报进度', () async {
+      runOnAndroid();
+      final wrapped = mod.wrapHandler(
+        originalHandler,
+        executionContextFor(originalHandler: originalHandler),
+      );
+
+      for (var index = 0; index < 58; index++) {
+        await wrapped(PhoneAgentToolNames.input, <String, dynamic>{
+          'action': 'back',
+        });
+      }
+      final result = decodeToolResult(
+        await wrapped(PhoneAgentToolNames.input, <String, dynamic>{
+          'action': 'batch',
+          'interval_ms': 0,
+          'actions': <Map<String, dynamic>>[
+            <String, dynamic>{'action': 'tap', 'node_id': 'n1'},
+            <String, dynamic>{'action': 'tap', 'node_id': 'n2'},
+            <String, dynamic>{'action': 'tap', 'node_id': 'n3'},
+            <String, dynamic>{'action': 'tap', 'node_id': 'n4'},
+          ],
+        }),
+      );
+
+      expect(result['type'], 'tool_error');
+      expect(result['error'], 'budget_exceeded');
+      expect(result['action'], 'batch');
+      expect(result['completed'], 2);
+      expect(result['total'], 4);
+      expect(result['failed_index'], 2);
+      expect(client.inputCalls, hasLength(60));
+    });
+
+    test('batch 执行途中关闭 phone_agent 时在下一步中止', () async {
+      runOnAndroid();
+      var currentAssistant = enabledAssistant;
+      client.onInput = (arguments) async {
+        currentAssistant = disabledAssistant;
+        return <String, dynamic>{'success': true};
+      };
+      final wrapped = mod.wrapHandler(
+        originalHandler,
+        executionContextFor(
+          originalHandler: originalHandler,
+          readCurrentAssistant: () => currentAssistant,
+        ),
+      );
+
+      final result = decodeToolResult(
+        await wrapped(PhoneAgentToolNames.input, <String, dynamic>{
+          'action': 'batch',
+          'interval_ms': 0,
+          'actions': <Map<String, dynamic>>[
+            <String, dynamic>{'action': 'tap', 'node_id': 'n1'},
+            <String, dynamic>{'action': 'tap', 'node_id': 'n2'},
+          ],
+        }),
+      );
+
+      expect(result['type'], 'tool_error');
+      expect(result['error'], 'phone_agent_disabled');
+      expect(result['completed'], 1);
+      expect(result['failed_index'], 1);
+      expect(client.inputCalls, hasLength(1));
+    });
   });
 
   group('异常处理', () {

@@ -11,6 +11,7 @@ import 'package:Kelivo/utils/sandbox_path_resolver.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
+import 'package:kelivo_phone_agent/kelivo_phone_agent.dart';
 // ignore: depend_on_referenced_packages
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 
@@ -50,6 +51,7 @@ void main() {
     int screenWidth = 1080,
     int screenHeight = 2160,
     String? packageName = 'com.psyche.kelivo',
+    List<PhoneAgentTapMarker> recentTaps = const <PhoneAgentTapMarker>[],
   }) {
     return PhoneAgentCapture(
       bytes: bytes,
@@ -58,6 +60,7 @@ void main() {
       screenWidth: screenWidth,
       screenHeight: screenHeight,
       packageName: packageName,
+      recentTaps: recentTaps,
     );
   }
 
@@ -92,9 +95,36 @@ void main() {
     expect(payload['image'], <String, dynamic>{'width': 40, 'height': 80});
     expect(payload['screen'], <String, dynamic>{'width': 1080, 'height': 2160});
     expect(payload['package_name'], 'com.psyche.kelivo');
+    expect(payload.containsKey('recent_taps'), isFalse);
     expect(payload['coordinate_space'], contains('[0,1]'));
     expect(payload['untrusted_content'], isTrue);
     expect(client.clearScreenshotCalls, 0);
+  });
+
+  test('存在近期坐标点击时在截图结果中透传 recent_taps', () async {
+    final result = await PhoneAgentScreenshotResult.build(
+      captureFor(
+        pngBytes(),
+        recentTaps: const <PhoneAgentTapMarker>[
+          PhoneAgentTapMarker(index: 1, action: 'tap', x: 0.42, y: 0.35),
+          PhoneAgentTapMarker(index: 2, action: 'long_press', x: 0.42, y: 0.55),
+        ],
+      ),
+      toolName: 'phone_agent_screenshot',
+      service: service,
+    );
+
+    final payload =
+        jsonDecode(result.content.split('\n').first) as Map<String, dynamic>;
+    expect(payload['recent_taps'], <Map<String, dynamic>>[
+      <String, dynamic>{'index': 1, 'action': 'tap', 'x': 0.42, 'y': 0.35},
+      <String, dynamic>{
+        'index': 2,
+        'action': 'long_press',
+        'x': 0.42,
+        'y': 0.55,
+      },
+    ]);
   });
 
   test('空截图字节返回结构化错误并清理原生观测', () async {

@@ -6,6 +6,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Rect
+import android.graphics.Typeface
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -29,6 +30,7 @@ internal data class CapturedScreenshot(
     val packageName: String?,
     val rotation: Int,
     val windowType: WindowType,
+    val recentTaps: List<MarkedTap> = emptyList(),
 )
 
 internal sealed class ScreenshotOutcome {
@@ -97,6 +99,105 @@ internal object ScreenshotMasker {
     }
 }
 
+/** 在发给模型的截图副本上标注最近坐标点击落点（空心准星，不遮挡中心像素）。 */
+internal object ScreenshotTapMarker {
+    fun toImagePoint(
+        x: Double,
+        y: Double,
+        imageWidth: Int,
+        imageHeight: Int,
+    ): Pair<Float, Float> {
+        val px = (x * imageWidth).toFloat().coerceIn(0f, maxOf(0, imageWidth - 1).toFloat())
+        val py = (y * imageHeight).toFloat().coerceIn(0f, maxOf(0, imageHeight - 1).toFloat())
+        return px to py
+    }
+
+    fun filterOutsideMasks(
+        taps: List<MarkedTap>,
+        imageWidth: Int,
+        imageHeight: Int,
+        maskRects: List<Bounds>,
+    ): List<MarkedTap> {
+        if (taps.isEmpty()) return emptyList()
+        val surviving = if (maskRects.isEmpty()) {
+            taps
+        } else {
+            taps.filter { tap ->
+                val (px, py) = toImagePoint(tap.x, tap.y, imageWidth, imageHeight)
+                maskRects.none { rect ->
+                    px >= rect.left && px <= rect.right && py >= rect.top && py <= rect.bottom
+                }
+            }
+        }
+        return surviving.mapIndexed { idx, tap -> tap.copy(index = idx + 1) }
+    }
+
+    fun draw(
+        canvas: Canvas,
+        taps: List<MarkedTap>,
+        imageWidth: Int,
+        imageHeight: Int,
+    ) {
+        if (taps.isEmpty() || imageWidth <= 0 || imageHeight <= 0) return
+        val unit = (minOf(imageWidth, imageHeight) / 720f).coerceIn(0.6f, 2.0f)
+        val radius = 14f * unit
+        val tickInner = radius + 2f * unit
+        val tickOuter = radius + 10f * unit
+
+        val haloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            style = Paint.Style.STROKE
+            strokeWidth = 5f * unit
+            strokeCap = Paint.Cap.ROUND
+        }
+        val corePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.rgb(229, 57, 53)
+            style = Paint.Style.STROKE
+            strokeWidth = 2.6f * unit
+            strokeCap = Paint.Cap.ROUND
+        }
+        val badgeFill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.rgb(229, 57, 53)
+            style = Paint.Style.FILL
+        }
+        val badgeStroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            style = Paint.Style.STROKE
+            strokeWidth = 2f * unit
+        }
+        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            textSize = 13f * unit
+            textAlign = Paint.Align.CENTER
+            typeface = Typeface.DEFAULT_BOLD
+        }
+        val badgeRadius = 10f * unit
+        val showNumbers = taps.size > 1
+
+        for (tap in taps) {
+            val (cx, cy) = toImagePoint(tap.x, tap.y, imageWidth, imageHeight)
+            for (paint in arrayOf(haloPaint, corePaint)) {
+                canvas.drawCircle(cx, cy, radius, paint)
+                canvas.drawLine(cx - tickOuter, cy, cx - tickInner, cy, paint)
+                canvas.drawLine(cx + tickInner, cy, cx + tickOuter, cy, paint)
+                canvas.drawLine(cx, cy - tickOuter, cx, cy - tickInner, paint)
+                canvas.drawLine(cx, cy + tickInner, cx, cy + tickOuter, paint)
+            }
+            if (showNumbers) {
+                val offset = radius + badgeRadius * 0.7f
+                val bx = (if (cx + offset + badgeRadius <= imageWidth) cx + offset else cx - offset)
+                    .coerceIn(badgeRadius, maxOf(badgeRadius, imageWidth - badgeRadius))
+                val by = (if (cy - offset - badgeRadius >= 0f) cy - offset else cy + offset)
+                    .coerceIn(badgeRadius, maxOf(badgeRadius, imageHeight - badgeRadius))
+                canvas.drawCircle(bx, by, badgeRadius, badgeFill)
+                canvas.drawCircle(bx, by, badgeRadius, badgeStroke)
+                val baseline = by - (textPaint.descent() + textPaint.ascent()) / 2f
+                canvas.drawText(tap.index.toString(), bx, baseline, textPaint)
+            }
+        }
+    }
+}
+
 /**
  * API 30+ 截图：缩放到长边不超过 1600，按密码节点 bounds 涂黑。
  * 截图字节不写日志；secure window 只由 Android 错误码判定。
@@ -126,6 +227,7 @@ internal class ScreenshotCapture(
     fun capture(
         current: WindowState,
         passwordBounds: List<Bounds>,
+        recentTaps: List<MarkedTap> = emptyList(),
         complete: (ScreenshotOutcome) -> Unit,
     ) {
         if (Build.VERSION.SDK_INT < 30) {
@@ -240,7 +342,7 @@ internal class ScreenshotCapture(
                                         ),
                                     )
                                 } else {
-                                    finish(process(result, current, passwordBounds))
+                                    finish(process(result, current, passwordBounds, recentTaps))
                                 }
                             }
 
@@ -282,6 +384,7 @@ internal class ScreenshotCapture(
         result: AccessibilityService.ScreenshotResult,
         current: WindowState,
         passwordBounds: List<Bounds>,
+        recentTaps: List<MarkedTap>,
     ): ScreenshotOutcome {
         val buffer = result.hardwareBuffer
         try {
@@ -306,7 +409,7 @@ internal class ScreenshotCapture(
                 )
             }
             try {
-                return encode(software, current, passwordBounds)
+                return encode(software, current, passwordBounds, recentTaps)
             } finally {
                 software.recycle()
             }
@@ -328,6 +431,7 @@ internal class ScreenshotCapture(
         software: Bitmap,
         current: WindowState,
         passwordBounds: List<Bounds>,
+        recentTaps: List<MarkedTap>,
     ): ScreenshotOutcome {
         val bitmapWidth = software.width
         val bitmapHeight = software.height
@@ -355,16 +459,33 @@ internal class ScreenshotCapture(
         val scale = minOf(1.0, maxLongEdge.toDouble() / longEdge)
         val imageWidth = maxOf(1, (bitmapWidth * scale).roundToInt())
         val imageHeight = maxOf(1, (bitmapHeight * scale).roundToInt())
-        val needsMask = passwordBounds.isNotEmpty()
+        val scaleX = imageWidth.toDouble() / current.width
+        val scaleY = imageHeight.toDouble() / current.height
+        val scaledMasks = passwordBounds.map { bounds ->
+            ScreenshotMasker.scaledBounds(
+                bounds,
+                scaleX,
+                scaleY,
+                imageWidth,
+                imageHeight,
+            )
+        }
+        val visibleTaps = ScreenshotTapMarker.filterOutsideMasks(
+            taps = recentTaps,
+            imageWidth = imageWidth,
+            imageHeight = imageHeight,
+            maskRects = scaledMasks,
+        )
+        val needsCanvas = scaledMasks.isNotEmpty() || visibleTaps.isNotEmpty()
         var owned: Bitmap? = null
         val scaled: Bitmap
         if (imageWidth == bitmapWidth && imageHeight == bitmapHeight) {
-            if (needsMask && !software.isMutable) {
+            if (needsCanvas && !software.isMutable) {
                 val mutable = software.copy(Bitmap.Config.ARGB_8888, true)
                     ?: return ScreenshotOutcome.Failure(
                         PhoneAgentError(
                             "screenshot_failed",
-                            "Could not prepare the screenshot for password masking.",
+                            "Could not prepare the screenshot for annotation.",
                         ),
                     )
                 owned = mutable
@@ -372,7 +493,7 @@ internal class ScreenshotCapture(
             } else {
                 scaled = software
             }
-        } else if (needsMask) {
+        } else if (needsCanvas) {
             val target = Bitmap.createBitmap(imageWidth, imageHeight, Bitmap.Config.ARGB_8888)
             try {
                 Canvas(target).drawBitmap(
@@ -393,29 +514,25 @@ internal class ScreenshotCapture(
             scaled = target
         }
         try {
-            if (needsMask) {
-                val scaleX = imageWidth.toDouble() / current.width
-                val scaleY = imageHeight.toDouble() / current.height
+            if (needsCanvas) {
                 val canvas = Canvas(scaled)
-                val paint = Paint().apply {
-                    color = Color.BLACK
-                    style = Paint.Style.FILL
+                if (visibleTaps.isNotEmpty()) {
+                    ScreenshotTapMarker.draw(canvas, visibleTaps, imageWidth, imageHeight)
                 }
-                for (bounds in passwordBounds) {
-                    val rect = ScreenshotMasker.scaledBounds(
-                        bounds,
-                        scaleX,
-                        scaleY,
-                        imageWidth,
-                        imageHeight,
-                    )
-                    canvas.drawRect(
-                        rect.left.toFloat(),
-                        rect.top.toFloat(),
-                        rect.right.toFloat(),
-                        rect.bottom.toFloat(),
-                        paint,
-                    )
+                if (scaledMasks.isNotEmpty()) {
+                    val paint = Paint().apply {
+                        color = Color.BLACK
+                        style = Paint.Style.FILL
+                    }
+                    for (rect in scaledMasks) {
+                        canvas.drawRect(
+                            rect.left.toFloat(),
+                            rect.top.toFloat(),
+                            rect.right.toFloat(),
+                            rect.bottom.toFloat(),
+                            paint,
+                        )
+                    }
                 }
             }
             val bytes = ByteArrayOutputStream().use { output ->
@@ -440,6 +557,7 @@ internal class ScreenshotCapture(
                     packageName = current.packageName,
                     rotation = current.rotation,
                     windowType = current.windowType,
+                    recentTaps = visibleTaps,
                 ),
             )
         } finally {

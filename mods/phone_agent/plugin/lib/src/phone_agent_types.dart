@@ -37,6 +37,45 @@ class PhoneAgentStatus {
       'connected: $connected, androidSdkInt: $androidSdkInt)';
 }
 
+/// 截图中标注的最近一次坐标点击落点（归一化 `[0, 1]` 坐标）。
+class PhoneAgentTapMarker {
+  const PhoneAgentTapMarker({
+    required this.index,
+    required this.action,
+    required this.x,
+    required this.y,
+  });
+
+  factory PhoneAgentTapMarker.fromMap(Map<Object?, Object?> map) {
+    final index = _positiveInt(map['index'], 'recentTaps.index');
+    final action = map['action'];
+    if (action is! String || action.isEmpty) {
+      throw const PhoneAgentException(
+        'invalid_response',
+        'The phone agent response contained an invalid recentTaps.action.',
+      );
+    }
+    return PhoneAgentTapMarker(
+      index: index,
+      action: action,
+      x: _normalizedDouble(map['x'], 'recentTaps.x'),
+      y: _normalizedDouble(map['y'], 'recentTaps.y'),
+    );
+  }
+
+  final int index;
+  final String action;
+  final double x;
+  final double y;
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'index': index,
+    'action': action,
+    'x': x,
+    'y': y,
+  };
+}
+
 /// 一次截图结果。坐标以 [screenWidth] × [screenHeight] 为基准。
 class PhoneAgentScreenshot {
   const PhoneAgentScreenshot({
@@ -46,6 +85,7 @@ class PhoneAgentScreenshot {
     required this.screenWidth,
     required this.screenHeight,
     this.packageName,
+    this.recentTaps = const <PhoneAgentTapMarker>[],
   });
 
   factory PhoneAgentScreenshot.fromMap(Map<String, dynamic> map) {
@@ -61,6 +101,15 @@ class PhoneAgentScreenshot {
         'The screenshot result did not contain image bytes.',
       );
     }
+    final rawRecentTaps = map['recentTaps'];
+    final recentTaps = <PhoneAgentTapMarker>[];
+    if (rawRecentTaps is List) {
+      for (final item in rawRecentTaps) {
+        if (item is Map) {
+          recentTaps.add(PhoneAgentTapMarker.fromMap(item));
+        }
+      }
+    }
     return PhoneAgentScreenshot(
       bytes: bytes,
       imageWidth: _positiveInt(map['imageWidth'], 'imageWidth'),
@@ -70,6 +119,7 @@ class PhoneAgentScreenshot {
       packageName: map['packageName'] is String
           ? map['packageName'] as String
           : null,
+      recentTaps: List<PhoneAgentTapMarker>.unmodifiable(recentTaps),
     );
   }
 
@@ -86,11 +136,15 @@ class PhoneAgentScreenshot {
   /// 截图时的前台包名。
   final String? packageName;
 
+  /// 本次截图上已标注的同窗口近期坐标点击落点。
+  final List<PhoneAgentTapMarker> recentTaps;
+
   @override
   String toString() =>
       'PhoneAgentScreenshot(${bytes.length} bytes, '
       'image: ${imageWidth}x$imageHeight, '
-      'screen: ${screenWidth}x$screenHeight, package: $packageName)';
+      'screen: ${screenWidth}x$screenHeight, package: $packageName, '
+      'recentTaps: ${recentTaps.length})';
 }
 
 /// 原生结构化错误。错误码为稳定的 snake_case 字符串。
@@ -106,6 +160,17 @@ class PhoneAgentException implements Exception {
 
 int _positiveInt(Object? value, String name) {
   if (value is int && value > 0) return value;
+  throw PhoneAgentException(
+    'invalid_response',
+    'The phone agent response contained an invalid $name.',
+  );
+}
+
+double _normalizedDouble(Object? value, String name) {
+  if (value is num && value.isFinite) {
+    final normalized = value.toDouble();
+    if (normalized >= 0.0 && normalized <= 1.0) return normalized;
+  }
   throw PhoneAgentException(
     'invalid_response',
     'The phone agent response contained an invalid $name.',

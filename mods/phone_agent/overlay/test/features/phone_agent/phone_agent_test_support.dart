@@ -143,6 +143,8 @@ class RecordingPhoneAgentClient implements PhoneAgentClient {
   Object? clearScreenshotError;
   Object? treeError;
   Object? inputError;
+  Future<Map<String, dynamic>> Function(Map<String, dynamic> arguments)?
+  onInput;
   Object? statusError;
   Object? openSettingsError;
 
@@ -206,6 +208,10 @@ class RecordingPhoneAgentClient implements PhoneAgentClient {
   @override
   Future<Map<String, dynamic>> input(Map<String, dynamic> arguments) async {
     inputCalls.add(Map<String, dynamic>.from(arguments));
+    final handler = onInput;
+    if (handler != null) {
+      return await handler(arguments);
+    }
     final error = inputError;
     if (error != null) throw error;
     return inputResult;

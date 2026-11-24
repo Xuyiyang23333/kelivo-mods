@@ -123,7 +123,16 @@ class PhoneAgentMod extends ToolMod {
                 'Mods settings before retrying.',
           );
         }
-        if (name == PhoneAgentToolNames.input) {
+        void beforeInputAction() {
+          if (!_allowsPhoneAgent(context.readCurrentAssistant())) {
+            throw const PhoneAgentToolFailure(
+              'phone_agent_disabled',
+              'The current assistant no longer enables Phone Agent.',
+              instruction:
+                  'Ask the user to select Phone Agent for this assistant in the '
+                  'Mods settings before retrying.',
+            );
+          }
           inputCalls++;
           if (inputCalls > _maxInputCallsPerGeneration) {
             throw PhoneAgentToolFailure(
@@ -136,6 +145,7 @@ class PhoneAgentMod extends ToolMod {
             );
           }
         }
+
         return await PhoneAgentTools.handleCall(
           name: name,
           args: args,
@@ -143,6 +153,9 @@ class PhoneAgentMod extends ToolMod {
           supportsImageInput:
               _imageSupportByConversation[context.conversationId ?? ''] ??
               false,
+          beforeInputAction: name == PhoneAgentToolNames.input
+              ? beforeInputAction
+              : null,
         );
       } on PhoneAgentToolFailure catch (failure) {
         return failure.toToolResult(tool: name);

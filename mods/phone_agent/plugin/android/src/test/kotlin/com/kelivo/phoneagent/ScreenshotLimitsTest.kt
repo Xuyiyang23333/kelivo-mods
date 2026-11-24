@@ -178,4 +178,36 @@ class ScreenshotLimitsTest {
         assertEquals(1, broken.recycleCount)
         assertEquals(1, healthy.recycleCount)
     }
+
+    @Test
+    fun `maps tap coordinates to image pixels within bounds`() {
+        assertEquals(0f to 0f, ScreenshotTapMarker.toImagePoint(0.0, 0.0, 720, 1600))
+        assertEquals(360f to 800f, ScreenshotTapMarker.toImagePoint(0.5, 0.5, 720, 1600))
+        assertEquals(719f to 1599f, ScreenshotTapMarker.toImagePoint(1.0, 1.0, 720, 1600))
+    }
+
+    @Test
+    fun `filters out tap markers that land inside password mask regions`() {
+        val taps = listOf(
+            MarkedTap(1, "tap", 0.2, 0.2),
+            MarkedTap(2, "tap", 0.5, 0.5),
+            MarkedTap(3, "long_press", 0.8, 0.8),
+        )
+        val masks = listOf(Bounds(40, 40, 60, 60))
+
+        val visible = ScreenshotTapMarker.filterOutsideMasks(
+            taps = taps,
+            imageWidth = 100,
+            imageHeight = 100,
+            maskRects = masks,
+        )
+
+        assertEquals(
+            listOf(
+                MarkedTap(1, "tap", 0.2, 0.2),
+                MarkedTap(2, "long_press", 0.8, 0.8),
+            ),
+            visible,
+        )
+    }
 }

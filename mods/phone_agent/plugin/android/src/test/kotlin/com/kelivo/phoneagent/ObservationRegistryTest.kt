@@ -630,4 +630,55 @@ class ObservationRegistryTest {
 
         assertEquals("stale_handle", error.code)
     }
+
+    @Test
+    fun `accumulates recent coordinate taps for the same window and clears on consume`() {
+        registry.recordCoordinateTap("tap", 0.25, 0.4, window)
+        registry.recordCoordinateTap("long_press", 0.5, 0.75, window)
+
+        val taps = registry.peekRecentTaps(window)
+        assertEquals(
+            listOf(
+                MarkedTap(1, "tap", 0.25, 0.4),
+                MarkedTap(2, "long_press", 0.5, 0.75),
+            ),
+            taps,
+        )
+        // Peek does not clear until explicitly consumed after a successful screenshot.
+        assertEquals(2, registry.peekRecentTaps(window).size)
+
+        registry.clearRecentTaps()
+        assertTrue(registry.peekRecentTaps(window).isEmpty())
+    }
+
+    @Test
+    fun `drops recent coordinate taps when window changes, expires, or invalidates`() {
+        registry.recordCoordinateTap("tap", 0.2, 0.3, window)
+        assertTrue(
+            registry.peekRecentTaps(window.copy(packageName = "com.other.app")).isEmpty(),
+        )
+        assertTrue(registry.peekRecentTaps(window).isEmpty())
+
+        registry.recordCoordinateTap("tap", 0.2, 0.3, window)
+        now += ObservationRegistry.RECENT_TAP_TTL_MILLIS + 1
+        assertTrue(registry.peekRecentTaps(window).isEmpty())
+
+        registry.recordCoordinateTap("tap", 0.2, 0.3, window)
+        registry.invalidateAll()
+        assertTrue(registry.peekRecentTaps(window).isEmpty())
+    }
+
+    @Test
+    fun `caps recent coordinate taps to the latest window entries`() {
+        for (index in 1..(ObservationRegistry.MAX_RECENT_TAPS + 3)) {
+            registry.recordCoordinateTap("tap", index / 100.0, 0.5, window)
+        }
+
+        val taps = registry.peekRecentTaps(window)
+        assertEquals(ObservationRegistry.MAX_RECENT_TAPS, taps.size)
+        assertEquals(1, taps.first().index)
+        assertEquals(0.04, taps.first().x, 1e-6)
+        assertEquals(ObservationRegistry.MAX_RECENT_TAPS, taps.last().index)
+        assertEquals(0.15, taps.last().x, 1e-6)
+    }
 }

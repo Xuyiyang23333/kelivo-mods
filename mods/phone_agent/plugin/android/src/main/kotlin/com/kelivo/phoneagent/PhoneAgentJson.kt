@@ -199,8 +199,8 @@ internal object PhoneAgentResult {
             "message" to "Waited ${durationMs}ms.",
         )
 
-    fun screenshot(screenshot: CapturedScreenshot): Map<String, Any?> =
-        linkedMapOf(
+    fun screenshot(screenshot: CapturedScreenshot): Map<String, Any?> {
+        val result = linkedMapOf<String, Any?>(
             "bytes" to screenshot.bytes,
             "imageWidth" to screenshot.imageWidth,
             "imageHeight" to screenshot.imageHeight,
@@ -208,4 +208,16 @@ internal object PhoneAgentResult {
             "screenHeight" to screenshot.screenHeight,
             "packageName" to screenshot.packageName,
         )
+        if (screenshot.recentTaps.isNotEmpty()) {
+            result["recentTaps"] = screenshot.recentTaps.map { tap ->
+                linkedMapOf(
+                    "index" to tap.index,
+                    "action" to tap.action,
+                    "x" to tap.x,
+                    "y" to tap.y,
+                )
+            }
+        }
+        return result
+    }
 }
